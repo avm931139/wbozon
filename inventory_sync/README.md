@@ -1,0 +1,84 @@
+# Периодическая синхронизация остатков
+
+Пакет `inventory_sync` независимо загружает текущие остатки WB FBS, WB FBO и Ozon и создаёт ежедневные исторические срезы.
+
+Остатки исключены из общих циклов `WBPeriodicSync` и `OzonPeriodicSync`. Для регулярного обновления `python -m inventory_sync` должен работать как отдельный постоянно запущенный процесс или сервис.
+
+## Расписание
+
+- текущие остатки обновляются с интервалом `INVENTORY_SYNC_INTERVAL_SECONDS` (по умолчанию каждый час);
+- ежедневный срез выполняется в `INVENTORY_SNAPSHOT_TIME` (по умолчанию `01:00`);
+- расчёт времени всегда выполняется в `INVENTORY_TIMEZONE` (по умолчанию `Europe/Moscow`) независимо от времени сервера;
+- после запуска позже 01:00 отсутствующий срез за текущую московскую дату создаётся сразу;
+- уникальные ограничения и журнал запусков защищают от повторного среза за один день.
+
+`INVENTORY_SYNC_RUN_ON_START=true` запускает обычное обновление сразу при старте. Эта настройка не отключает догоняющий ежедневный срез: если после 01:00 среза за текущую московскую дату нет, он выполняется независимо от `INVENTORY_SYNC_RUN_ON_START`.
+
+При ошибке API срез не создаётся частично. Ошибка записывается в `inventory_sync_runs`, а планировщик повторяет попытку на следующем часовом интервале.
+
+## Настройки
+
+| Переменная | Назначение | По умолчанию |
+|---|---|---|
+| `INVENTORY_SYNC_INTERVAL_SECONDS` | интервал обновления текущих остатков | `3600` |
+| `INVENTORY_SNAPSHOT_TIME` | московское время ежедневного среза в формате `HH:MM` | `01:00` |
+| `INVENTORY_TIMEZONE` | временная зона расписания и даты среза | `Europe/Moscow` |
+| `INVENTORY_SYNC_RUN_ON_START` | немедленное обычное обновление после запуска | `true` |
+
+## Запуск
+
+```powershell
+python -m alembic upgrade head
+python -m inventory_sync
+```
+
+Разовое обновление текущих остатков:
+
+```powershell
+python -m inventory_sync --once
+```
+
+Ручной срез за текущую московскую дату:
+
+```powershell
+python -m inventory_sync --snapshot
+```
+
+`--snapshot` сначала заново загружает все три источника, поэтому это не копирование потенциально устаревших текущих таблиц. Если завершённый срез за текущую московскую дату уже существует, команда возвращает `skipped` без запросов к API.
+
+## Источники и текущие таблицы
+
+| Источник | API | Текущая таблица | Логический ключ |
+|---|---|---|---|
+| WB FBS | Marketplace API `/api/v3/stocks/{warehouse_id}` | `wb_fbs_stocks` | `sku + warehouse_id` |
+| WB FBO | Seller Analytics `/api/analytics/v1/stocks-report/wb-warehouses` | `wb_fbo_stocks` | `size_id + warehouse_id` |
+| Ozon | Seller API `/v4/product/info/stocks` | `ozon_stocks` | `product_id + stock_type` |
+
+WB FBS требует предварительно загруженные `wb_product_sizes` и `wb_fbs_warehouses`. Если каталог размеров или склады отсутствуют, запуск завершается ошибкой, не изменяя текущие остатки и историю.
+
+Все три ответа сначала полностью загружаются из API. После успешной загрузки текущие таблицы и, при ежедневном запуске, исторические таблицы записываются одной транзакцией. Исчезнувшие позиции не удаляются: их количественные поля обнуляются, а в `raw_data` добавляется `zeroed_by_inventory_sync=true`.
+
+## Исторические срезы
+
+| Таблица | Уникальность строки за день | Количественные поля |
+|---|---|---|
+| `wb_fbs_stock_snapshots` | `snapshot_date + sku + warehouse_id` | `quantity` |
+| `wb_fbo_stock_snapshots` | `snapshot_date + size_id + warehouse_id` | `quantity`, `in_way_to_client`, `in_way_from_client` |
+| `ozon_stock_snapshots` | `snapshot_date + product_id + stock_type` | `present`, `reserved` |
+
+`snapshot_date` — календарная дата в `INVENTORY_TIMEZONE`. `captured_at` — единый timezone-aware момент фактического получения среза; PostgreSQL хранит его как `TIMESTAMP WITH TIME ZONE`. Догоняющий срез поэтому может иметь, например, `snapshot_date=2026-08-17` и фактический `captured_at` позже 01:00.
+
+В срез попадают и активные, и обнулённые ранее известные комбинации. Это позволяет отличать нулевой остаток от отсутствующей связи товара со складом.
+
+## Журнал и защита от параллельного запуска
+
+`inventory_sync_runs` хранит:
+
+- тип запуска `periodic` или `daily_snapshot`;
+- плановое и фактическое время;
+- дату ежедневного среза;
+- статус `running`, `completed` или `failed`;
+- количество принятых строк WB FBS, WB FBO и Ozon;
+- текст ошибки.
+
+Перед обращением к API процесс получает PostgreSQL advisory lock. Второй экземпляр не начинает параллельную загрузку и получает `InventorySyncAlreadyRunning`. Блокировка не заменяет запуск процесса под supervisor/systemd/Docker с политикой перезапуска.

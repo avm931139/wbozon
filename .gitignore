@@ -5,3 +5,8 @@ __pycache__/
 .pytest_cache/
 .vscode/
 .idea/
+logs/
+~$*
+tree.txt
+tests/dialog gpt/
+tmp_generate_readmes.py

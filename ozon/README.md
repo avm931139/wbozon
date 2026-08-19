@@ -1,0 +1,87 @@
+# Интеграция Ozon Seller API
+
+Корневой пакет `ozon` — рабочий интеграционный слой Ozon Seller API и Ozon Performance API.
+
+## Возможности
+
+- загрузка списка и детальной информации о товарах;
+- API и сервис загрузки текущих остатков FBO/FBS; периодический запуск остатков вынесен в `inventory_sync`;
+- загрузка отправлений FBS и FBO за настраиваемый период;
+- загрузка поставок, обращений покупателей, дневных продаж и финансовых операций;
+- загрузка кампаний и статистики рекламы через отдельный Ozon Performance API;
+- построение дневного среза и месячного отчёта по сохранённым данным;
+- идемпотентное сохранение в PostgreSQL;
+- отдельный периодический запуск с изоляцией ошибок между разделами.
+
+Исходные ответы сохраняются в `raw_data`, чтобы изменение контракта Ozon не приводило к потере полей.
+
+## Структура
+
+- `client.py` — HTTP, авторизация, повторы и ошибки;
+- `endpoints.py` — пути Seller API;
+- `products.py`, `stocks.py`, `orders.py`, `supplies.py`, `communications.py`, `analytics.py`, `finances.py` — доменные API-модули Seller API;
+- `performance/` — OAuth-клиент, API и сервис рекламы;
+- `services/` — синхронизация и нормализация;
+- `repositories/` — поиск строк для idempotent upsert;
+- `scheduler.py` — периодический цикл;
+- `__main__.py` — команда `python -m ozon`.
+
+## Настройка
+
+Добавьте в `.env`:
+
+```dotenv
+OZON_CLIENT_ID=идентификатор_продавца
+OZON_API_KEY=api_ключ
+OZON_BASE_URL=https://api-seller.ozon.ru
+OZON_TIMEOUT_SECONDS=30
+OZON_SYNC_INTERVAL_SECONDS=21600
+OZON_SYNC_RUN_ON_START=true
+OZON_ORDER_LOOKBACK_DAYS=30
+OZON_HISTORY_FROM=2026-01-01
+OZON_SYNC_OVERLAP_DAYS=3
+OZON_PERFORMANCE_CLIENT_ID=идентификатор_Performance_API
+OZON_PERFORMANCE_CLIENT_SECRET=секрет_Performance_API
+OZON_PERFORMANCE_BASE_URL=https://api-performance.ozon.ru
+```
+
+Затем примените миграцию:
+
+```powershell
+python -m alembic upgrade head
+```
+
+## Запуск
+
+Один цикл:
+
+```powershell
+python -m ozon --once
+```
+
+Цикл выполняет разделы в порядке: товары, отправления, поставки, обращения, дневные продажи, финансы и реклама. Ошибка одного раздела фиксируется в результате и не останавливает следующие разделы. Текущие остатки и их ежедневные срезы загружает отдельная команда `python -m inventory_sync`.
+
+Если `OZON_PERFORMANCE_CLIENT_ID` и `OZON_PERFORMANCE_CLIENT_SECRET` не заданы, плановый цикл пропускает рекламу без ошибки. Команда `--sync-ads` по-прежнему требует оба реквизита.
+
+Метод списка поставок Ozon не поддерживает фильтр по дате создания. Модуль получает идентификаторы поставок и применяет `OZON_HISTORY_FROM` после загрузки их детальной информации.
+
+Ежедневный отчёт строится из сохранённого дневного среза, а месячный — как сумма этих дневных строк:
+
+```powershell
+python -m ozon --report-day 2026-08-08
+python -m ozon --report-month 2026-08
+```
+
+Только синхронизация рекламы Ozon Performance:
+
+```powershell
+python -m ozon --sync-ads
+```
+
+Постоянное расписание:
+
+```powershell
+python -m ozon
+```
+
+Ozon запускается отдельно от корневого `main.py` и пока не используется как источник Telegram-отчётов.
