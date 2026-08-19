@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -9,7 +10,14 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import func
 
-from app.config import INVENTORY_SYNC_INTERVAL_SECONDS, INVENTORY_TIMEZONE, WB_TG_MORNING_TIME
+from app.config import (
+    INVENTORY_SYNC_INTERVAL_SECONDS,
+    INVENTORY_TIMEZONE,
+    WB_TG_BOT_TOKEN,
+    WB_TG_CHAT_ID,
+    WB_TG_MORNING_TIME,
+    WB_TG_REQUEST_TIMEOUT_SECONDS,
+)
 from app.db import SessionLocal
 from app.models import (
     InventorySyncRun,
@@ -19,6 +27,8 @@ from app.models import (
     WBFBSStockSnapshot,
     WBTelegramDelivery,
 )
+from telegram_bot.client import TelegramClient
+from telegram_bot.dispatcher import TelegramReportDispatcher
 
 
 @dataclass(frozen=True)
@@ -26,6 +36,18 @@ class Check:
     ok: bool
     name: str
     detail: str
+
+
+def _failure_signature(checks: list[Check]) -> str:
+    names = "\n".join(sorted(check.name for check in checks if not check.ok))
+    return hashlib.sha256(names.encode("utf-8")).hexdigest()[:16]
+
+
+def _error_message(checks: list[Check], now: datetime) -> str:
+    failures = [check for check in checks if not check.ok]
+    lines = [f"⚠️ Ошибки WB/Ozon — {now:%d.%m.%Y %H:%M} МСК"]
+    lines.extend(f"• {check.name}: {check.detail}" for check in failures)
+    return "\n".join(lines)
 
 
 def _systemctl_active(unit: str) -> tuple[bool, str]:
@@ -110,6 +132,41 @@ def collect_checks(
     return checks
 
 
+def notify_telegram(checks: list[Check], now: datetime | None = None) -> str:
+    timezone = ZoneInfo(INVENTORY_TIMEZONE)
+    current = now or datetime.now(timezone)
+    current = current.replace(tzinfo=timezone) if current.tzinfo is None else current.astimezone(timezone)
+    failures = [check for check in checks if not check.ok]
+    signature = _failure_signature(checks)
+    with SessionLocal() as session:
+        latest = session.query(WBTelegramDelivery).filter(
+            WBTelegramDelivery.report_type.in_(("health_error", "health_recovery")),
+            WBTelegramDelivery.status == "sent",
+        ).order_by(WBTelegramDelivery.sent_at.desc()).first()
+
+    if failures:
+        if latest and latest.report_type == "health_error" and f":{signature}:" in latest.report_key:
+            return "unchanged error; Telegram alert already sent"
+        report_type = "health_error"
+        report_key = f"health_error:{signature}:{current:%Y%m%d%H%M%S}"
+        content = _error_message(checks, current)
+    else:
+        if latest is None or latest.report_type != "health_error":
+            return "healthy; no Telegram notification needed"
+        report_type = "health_recovery"
+        report_key = f"health_recovery:{current:%Y%m%d%H%M%S}"
+        content = f"✅ WB/Ozon: работа восстановлена — {current:%d.%m.%Y %H:%M} МСК"
+
+    client = TelegramClient(
+        WB_TG_BOT_TOKEN or "",
+        WB_TG_CHAT_ID or "",
+        timeout=WB_TG_REQUEST_TIMEOUT_SECONDS,
+    )
+    dispatcher = TelegramReportDispatcher(client, reports=None)
+    result = dispatcher.send_text_content(report_type, report_key, lambda: content)
+    return f"Telegram {report_type}: {result['status']}"
+
+
 def main() -> None:
     try:
         checks = collect_checks()
@@ -119,6 +176,11 @@ def main() -> None:
     for check in checks:
         print(f"{'OK' if check.ok else 'ERROR'} {check.name}: {check.detail}")
     failed = sum(not check.ok for check in checks)
+    try:
+        print(f"NOTIFY: {notify_telegram(checks)}")
+    except Exception as exc:
+        failed += 1
+        print(f"ERROR Telegram health notification: {type(exc).__name__}: {exc}")
     print(f"SUMMARY: {len(checks) - failed} OK, {failed} ERROR")
     raise SystemExit(1 if failed else 0)
 

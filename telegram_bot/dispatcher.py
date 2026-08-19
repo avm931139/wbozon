@@ -14,13 +14,15 @@ from telegram_bot.reports import TelegramReportService
 
 
 class TelegramReportDispatcher:
-    def __init__(self, client: TelegramClient, reports: TelegramReportService, *, session_factory: Callable[..., Any] = SessionLocal) -> None:
+    def __init__(self, client: TelegramClient, reports: TelegramReportService | None, *, session_factory: Callable[..., Any] = SessionLocal) -> None:
         self.client = client
         self.reports = reports
         self.session_factory = session_factory
 
     def send(self, report_type: str, report_key: str, *, now: datetime | None = None, force: bool = False) -> dict[str, Any]:
         with sync_context(cycle_id=None, task=f"telegram_{report_type}"):
+            if self.reports is None:
+                raise RuntimeError("TelegramReportService is required for scheduled reports")
             row_id = self._reserve(report_type, report_key, force)
             if row_id is None:
                 return {"status": "skipped", "report_key": report_key}
