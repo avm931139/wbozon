@@ -40,7 +40,7 @@ class OzonTaskRunner:
             try:
                 self._create_run(run_id, task, started_at)
                 result = self.service.run_task(task)
-                normalized = self._json_value(result)
+                normalized = self._result_summary(result)
                 status = "skipped" if isinstance(result, dict) and result.get("skipped") else "completed"
                 self._finish_run(run_id, status, result=normalized)
                 return {"task": task, "status": status, "result": normalized}
@@ -74,7 +74,9 @@ class OzonTaskRunner:
             session.commit()
 
     @staticmethod
-    def _json_value(value: Any) -> Any:
+    def _result_summary(value: Any) -> Any:
+        if isinstance(value, list):
+            return {"count": len(value)}
         return json.loads(json.dumps(value, ensure_ascii=False, default=str))
 
     @staticmethod

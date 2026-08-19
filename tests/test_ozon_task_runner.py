@@ -30,12 +30,12 @@ def session_factory():
 
 def test_task_runner_records_completed_result(session_factory):
     result = OzonTaskRunner(Service(), session_factory=session_factory).run("products")
-    assert result == {"task": "products", "status": "completed", "result": [1, 2, 3]}
+    assert result == {"task": "products", "status": "completed", "result": {"count": 3}}
     with session_factory() as session:
         row = session.query(OzonSyncRun).one()
         assert row.task == "products"
         assert row.status == "completed"
-        assert row.result == [1, 2, 3]
+        assert row.result == {"count": 3}
         assert row.finished_at is not None
 
 
