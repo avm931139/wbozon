@@ -12,7 +12,7 @@
 - [`app/models.py`](../app/models.py) — модели каталога, остатков, заказов, финансов, рекламы, обращений, журналов и доставок Telegram;
 - [`wb/`](../wb) — API-клиенты, сервисы, репозитории и периодическая синхронизация WB;
 - [`ozon/`](../ozon) — каталог, остатки, отправления, поставки, обращения, продажи и финансы Ozon Seller API, а также реклама Ozon Performance API;
-- [`inventory_sync/`](../inventory_sync) — отдельное расписание текущих остатков WB/Ozon и ежедневных срезов на 01:00 по Москве;
+- [`inventory_sync/`](../inventory_sync) — отдельное расписание текущих остатков WB/Ozon, детализации Ozon по складам и ежедневных срезов на 01:00 по Москве;
 - [`telegram_bot/`](../telegram_bot) — формирование, планирование и отправка отчётов;
 - [`alembic/`](../alembic) — миграции PostgreSQL;
 - [`tests/`](../tests) — модульные тесты;
@@ -27,6 +27,7 @@ WB API → API-модули wb → сервисы → репозитории/SQL
                                                                   ↓
                                                 telegram_bot → Telegram API
 Ozon API → API-модули ozon → сервисы → репозитории/SQLAlchemy ┘
+Ozon warehouse APIs → inventory_sync → текущие строки и дневные срезы по физическим складам
 ```
 
 Telegram-модуль не запрашивает данные WB напрямую. Он строит отчёты только по уже синхронизированной базе.
@@ -57,6 +58,21 @@ python -m alembic upgrade head
 ```
 
 Alembic является основным способом создания и обновления схемы. `python -m app.main` вызывает `Base.metadata.create_all()` и подходит только для простого локального создания отсутствующих таблиц, но не заменяет миграции.
+
+### Обновление на VPS
+
+Перед запуском нового кода всегда применяйте миграции, затем выполните контрольное обновление остатков и перезапустите постоянный сервис:
+
+```bash
+cd ~/wbozon
+git pull --ff-only origin master
+./.venv/bin/python -m alembic upgrade head
+./.venv/bin/python -m inventory_sync --once
+sudo systemctl restart wbozon-inventory.service
+sudo systemctl status wbozon-inventory.service --no-pager
+```
+
+Если `git status --short` показывает локальные изменения, сначала разберите их; принудительный сброс рабочей копии в процедуру обновления не входит.
 
 ## Запуск
 
@@ -102,7 +118,18 @@ python -m inventory_sync --snapshot      # ручной срез за моско
 
 Ozon отдельным процессом последовательно синхронизирует товары, отправления FBS/FBO, поставки, обращения, дневные продажи, финансы и рекламу. Для рекламы используются отдельные учётные данные Ozon Performance API. Ошибка одного раздела не останавливает остальные задачи цикла. Ozon пока не включён в корневой `main.py` и не является источником Telegram-отчётов.
 
-Остатки WB FBS, WB FBO и Ozon загружаются третьим постоянно работающим процессом `inventory_sync`. Текущие таблицы обновляются каждый час, исчезнувшие позиции обнуляются. В 01:00 `Europe/Moscow` создаются идемпотентные срезы в `wb_fbs_stock_snapshots`, `wb_fbo_stock_snapshots` и `ozon_stock_snapshots`; после простоя отсутствующий срез догоняется при запуске. Ответы всех трёх API сначала полностью загружаются в память, затем текущие значения и срез фиксируются одной транзакцией. Неуспешные и успешные попытки записываются в `inventory_sync_runs`.
+Остатки WB FBS, WB FBO и Ozon загружаются третьим постоянно работающим процессом `inventory_sync`. Текущие таблицы обновляются каждый час, исчезнувшие позиции обнуляются. В 01:00 `Europe/Moscow` создаются идемпотентные срезы в `wb_fbs_stock_snapshots`, `wb_fbo_stock_snapshots`, `ozon_stock_snapshots` и `ozon_warehouse_stock_snapshots`; после простоя отсутствующий срез догоняется при запуске. Обязательные ответы API сначала полностью загружаются в память и проверяются, затем текущие значения и срез фиксируются одной транзакцией. Неуспешные и успешные попытки записываются в `inventory_sync_runs`.
+
+Ozon хранится в двух представлениях:
+
+- `ozon_stocks` и `ozon_stock_snapshots` — совместимый агрегат по `product_id + stock_type`;
+- `ozon_warehouses` — справочник физических складов Ozon;
+- `ozon_warehouse_stocks` — текущие FBO/FBS-остатки по `product_id + warehouse_id + stock_type`;
+- `ozon_warehouse_stock_snapshots` — ежедневная складская история.
+
+Основные складские источники Ozon: `/v1/product/info/stocks-by-warehouse/fbo` и `/v2/product/info/stocks-by-warehouse/fbs`. `/v1/analytics/stocks` используется для названий складов и кластеров. С 17 августа 2026 года Ozon отдаёт аналитические остатки в реальном времени, поэтому `01:00 Europe/Moscow` — внутреннее бизнес-время фиксации, а не время публикации данных API.
+
+Полная схема загрузки и правила сверки описаны в [`ozon/WAREHOUSE_STOCK_ARCHITECTURE.md`](../ozon/WAREHOUSE_STOCK_ARCHITECTURE.md).
 
 ## Telegram-отчёты
 

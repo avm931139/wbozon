@@ -4,6 +4,7 @@
 - [Контекст для AI-ассистентов](project_context_for_chatgpt.md)
 - [Интеграция Wildberries](../wb/README.md)
 - [Интеграция Ozon](../ozon/README.md)
+- [Архитектура складских остатков Ozon](../ozon/WAREHOUSE_STOCK_ARCHITECTURE.md)
 - [Периодическая синхронизация остатков WB и Ozon](../inventory_sync/README.md)
 - [Telegram-отчёты](../telegram_bot/README.md)
 - [Унаследованный каркас legacy_core](../legacy_core/README.md)

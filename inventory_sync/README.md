@@ -46,7 +46,7 @@ python -m inventory_sync --once
 python -m inventory_sync --snapshot
 ```
 
-`--snapshot` сначала заново загружает все три источника, поэтому это не копирование потенциально устаревших текущих таблиц. Если завершённый срез за текущую московскую дату уже существует, команда возвращает `skipped` без запросов к API.
+`--snapshot` сначала заново выполняет все обязательные этапы загрузки, поэтому это не копирование потенциально устаревших текущих таблиц. Если завершённый срез за текущую московскую дату уже существует, команда возвращает `skipped` без запросов к API.
 
 ## Источники и текущие таблицы
 
@@ -62,7 +62,46 @@ python -m inventory_sync --snapshot
 
 WB FBS требует предварительно загруженные `wb_product_sizes` и `wb_fbs_warehouses`. Если каталог размеров или склады отсутствуют, запуск завершается ошибкой, не изменяя текущие остатки и историю.
 
-Все три ответа сначала полностью загружаются из API. После успешной загрузки текущие таблицы и, при ежедневном запуске, исторические таблицы записываются одной транзакцией. Исчезнувшие позиции не удаляются: их количественные поля обнуляются, а в `raw_data` добавляется `zeroed_by_inventory_sync=true`.
+Все обязательные ответы сначала полностью загружаются из API. После успешной загрузки текущие таблицы и, при ежедневном запуске, исторические таблицы записываются одной транзакцией. Исчезнувшие позиции не удаляются: их количественные поля обнуляются, а в `raw_data` добавляется `zeroed_by_inventory_sync=true`.
+
+Успешный `--once` возвращает четыре счётчика: `wb_fbs`, `wb_fbo`, `ozon` для агрегатных строк и `ozon_warehouse` для строк по складам.
+
+## Проверка Ozon в PostgreSQL
+
+Текущие суммы и число складов:
+
+```sql
+SELECT
+    s.stock_type,
+    COUNT(*) AS rows,
+    COUNT(DISTINCT s.warehouse_id) AS warehouses,
+    SUM(s.present) AS present,
+    SUM(s.reserved) AS reserved
+FROM ozon_warehouse_stocks AS s
+GROUP BY s.stock_type
+ORDER BY s.stock_type;
+```
+
+Остатки с названием склада:
+
+```sql
+SELECT
+    s.product_id,
+    s.offer_id,
+    s.sku,
+    s.stock_type,
+    w.ozon_warehouse_id,
+    w.name AS warehouse_name,
+    w.cluster_name,
+    s.present,
+    s.reserved,
+    s.fetched_at
+FROM ozon_warehouse_stocks AS s
+JOIN ozon_warehouses AS w ON w.id = s.warehouse_id
+ORDER BY s.offer_id, s.stock_type, w.name;
+```
+
+Дневной складской срез проверяется тем же соединением с таблицей `ozon_warehouse_stock_snapshots` и фильтром по `snapshot_date`.
 
 ## Исторические срезы
 
