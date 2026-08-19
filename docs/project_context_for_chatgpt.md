@@ -9,7 +9,7 @@
 - `app/` — конфигурация, подключение к БД и ORM-модели;
 - `wb/` — основной интеграционный слой Wildberries;
 - `ozon/` — интеграционный слой Ozon Seller/Performance API для каталога, логистики, обращений, продаж, финансов и рекламы;
-- `inventory_sync/` — отдельный процесс текущих остатков WB/Ozon, складской детализации Ozon и ежедневных срезов в 01:00 `Europe/Moscow`;
+- `inventory_sync/` — отдельный процесс текущих остатков WB/Ozon, складской детализации Ozon и ежедневных срезов в 00:00 `Europe/Moscow`;
 - `telegram_bot/` — корневой пакет Telegram-отчётов;
 - `main.py` — совместный запуск синхронизации WB и Telegram-отчётов; Ozon запускается отдельно через `python -m ozon`;
 - `alembic/` — единственный основной механизм эволюции схемы;
@@ -26,7 +26,7 @@ WB/Ozon stock APIs → inventory_sync → current stocks + aggregate and warehou
 Telegram API ← telegram_bot ← PostgreSQL
 ```
 
-Ozon warehouse inventory uses `/v1/product/info/stocks-by-warehouse/fbo` and `/v2/product/info/stocks-by-warehouse/fbs`. Current rows are stored in `ozon_warehouse_stocks`, warehouse metadata in `ozon_warehouses`, and daily rows in `ozon_warehouse_stock_snapshots`. The legacy-compatible aggregate remains in `ozon_stocks` and `ozon_stock_snapshots`. Since 2026-08-17 Ozon stock analytics are realtime; `01:00 Europe/Moscow` is the application's business cutoff.
+Ozon warehouse inventory uses `/v1/product/info/stocks-by-warehouse/fbo` and `/v2/product/info/stocks-by-warehouse/fbs`. Current rows are stored in `ozon_warehouse_stocks`, warehouse metadata in `ozon_warehouses`, and daily rows in `ozon_warehouse_stock_snapshots`. The legacy-compatible aggregate remains in `ozon_stocks` and `ozon_stock_snapshots`. Since 2026-08-17 Ozon stock analytics are realtime; `00:00 Europe/Moscow` is the application's business cutoff.
 
 ## Ключевые ограничения
 

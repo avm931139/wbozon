@@ -38,7 +38,8 @@ class TelegramClient:
         self.chat_id = str(chat_id)
         self.timeout = timeout
         self.session = session or requests.Session()
-        self.url = f"https://api.telegram.org/bot{token}/sendMessage"
+        self.base_url = f"https://api.telegram.org/bot{token}"
+        self.url = f"{self.base_url}/sendMessage"
 
     def send_text(self, text: str) -> list[int]:
         message_ids: list[int] = []
@@ -57,3 +58,31 @@ class TelegramClient:
                 raise TelegramError(f"Telegram API rejected message: {payload.get('description', 'unknown error')}")
             message_ids.append(int(payload["result"]["message_id"]))
         return message_ids
+
+    def send_document(
+        self,
+        filename: str,
+        content: bytes,
+        *,
+        caption: str | None = None,
+        content_type: str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ) -> int:
+        if not filename or not content:
+            raise ValueError("filename and content must not be empty")
+        data = {"chat_id": self.chat_id}
+        if caption:
+            data["caption"] = caption
+        try:
+            response = self.session.post(
+                f"{self.base_url}/sendDocument",
+                data=data,
+                files={"document": (filename, content, content_type)},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            raise TelegramError(f"Telegram transport error: {exc}") from exc
+        if not payload.get("ok"):
+            raise TelegramError(f"Telegram API rejected document: {payload.get('description', 'unknown error')}")
+        return int(payload["result"]["message_id"])

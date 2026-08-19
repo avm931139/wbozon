@@ -63,10 +63,11 @@ OZON_ORDER_LOOKBACK_DAYS = int(os.getenv("OZON_ORDER_LOOKBACK_DAYS", "30"))
 OZON_HISTORY_FROM = os.getenv("OZON_HISTORY_FROM", "2026-01-01")
 OZON_SYNC_OVERLAP_DAYS = int(os.getenv("OZON_SYNC_OVERLAP_DAYS", "3"))
 
-# Ozon inventory is realtime; 01:00 Moscow is our daily business cutoff.
+# Ozon inventory is realtime; 00:00 Moscow is our daily business cutoff.
 # Server timezone does not affect the snapshot schedule.
 INVENTORY_SYNC_INTERVAL_SECONDS = int(os.getenv("INVENTORY_SYNC_INTERVAL_SECONDS", "3600"))
-INVENTORY_SNAPSHOT_TIME = os.getenv("INVENTORY_SNAPSHOT_TIME", "01:00")
+INVENTORY_SNAPSHOT_TIME = os.getenv("INVENTORY_SNAPSHOT_TIME", "00:00")
+INVENTORY_SNAPSHOT_RETRY_SECONDS = int(os.getenv("INVENTORY_SNAPSHOT_RETRY_SECONDS", "300"))
 INVENTORY_TIMEZONE = os.getenv("INVENTORY_TIMEZONE", "Europe/Moscow")
 INVENTORY_SYNC_RUN_ON_START = _env_bool("INVENTORY_SYNC_RUN_ON_START", True)
 

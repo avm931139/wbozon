@@ -1,9 +1,14 @@
-from datetime import datetime
+from datetime import date, datetime
+from io import BytesIO
+
+from openpyxl import load_workbook
 from zoneinfo import ZoneInfo
 
 from telegram_bot.client import TelegramClient, split_text
+from telegram_bot.__main__ import send_stock_files
 from telegram_bot.reports import TelegramReportService
 from telegram_bot.scheduler import TelegramReportScheduler
+from telegram_bot.stock_reports import StockSnapshotNotFound, build_workbook
 
 
 class FakeResponse:
@@ -35,6 +40,53 @@ def test_split_text_and_client_send_every_chunk():
     assert client.send_text("a" * 4000) == [1, 2]
     assert all(call[1]["json"]["chat_id"] == "-1001" for call in session.calls)
     assert all("secret" not in str(call[1]) for call in session.calls)
+
+
+def test_client_sends_document_as_multipart_without_disk_file():
+    session = FakeHTTPSession(); client = TelegramClient("secret", "-1001", session=session)
+    assert client.send_document("stocks.xlsx", b"xlsx", caption="Stocks") == 1
+    url, kwargs = session.calls[0]
+    assert url.endswith("/sendDocument")
+    assert kwargs["data"] == {"chat_id": "-1001", "caption": "Stocks"}
+    assert kwargs["files"]["document"][0:2] == ("stocks.xlsx", b"xlsx")
+
+
+def test_build_workbook_returns_in_memory_xlsx():
+    payload = build_workbook([("Остатки", ("Дата", "SKU", "Количество"), [(date(2026, 8, 19), "sku-1", 7)])])
+    workbook = load_workbook(BytesIO(payload), read_only=True)
+    sheet = workbook["Остатки"]
+    assert list(sheet.values) == [("Дата", "SKU", "Количество"), (datetime(2026, 8, 19), "sku-1", 7)]
+    workbook.close()
+
+
+class FakeStockDispatcher:
+    def __init__(self): self.documents = []; self.warnings = []
+    def send_document(self, report_type, report_key, factory, **kwargs):
+        document = factory(); self.documents.append((report_type, report_key, document)); return {"status": "sent"}
+    def send_text_content(self, report_type, report_key, factory, **kwargs):
+        text = factory(); self.warnings.append((report_type, report_key, text)); return {"status": "sent"}
+
+
+class PartiallyMissingStockReports:
+    def wb(self, snapshot_date):
+        raise StockSnapshotNotFound("missing WB")
+    def ozon(self, snapshot_date):
+        return "ozon.xlsx", b"xlsx", "Ozon"
+
+
+def test_stock_files_warn_when_daily_snapshot_is_missing_but_send_available_file():
+    dispatcher = FakeStockDispatcher()
+    results = send_stock_files(
+        dispatcher,
+        date(2026, 8, 20),
+        reports=PartiallyMissingStockReports(),
+    )
+    assert len(results) == 2
+    assert len(dispatcher.documents) == 1
+    assert dispatcher.documents[0][0] == "stock_excel_ozon"
+    assert dispatcher.warnings[0][1] == "stock_warning:2026-08-20"
+    assert "Wildberries" in dispatcher.warnings[0][2]
+    assert "20.08.2026" in dispatcher.warnings[0][2]
 
 
 def test_sales_block_keeps_event_definitions_separate():

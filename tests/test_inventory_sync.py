@@ -244,7 +244,7 @@ def test_scheduler_uses_moscow_time_even_when_server_clock_is_utc():
     assert service.calls[0][2].tzinfo == ZoneInfo("Europe/Moscow")
 
 
-def test_scheduler_creates_catch_up_snapshot_after_one_am():
+def test_scheduler_creates_catch_up_snapshot_after_midnight():
     service = RecordingInventoryService()
     scheduler = InventoryScheduler(service, settings=InventorySyncSettings(run_on_start=False))
 
@@ -253,7 +253,41 @@ def test_scheduler_creates_catch_up_snapshot_after_one_am():
     assert [call[0] for call in service.calls] == ["snapshot"]
 
 
+def test_scheduler_retries_failed_snapshot_on_next_interval():
+    class FlakySnapshotService(RecordingInventoryService):
+        def snapshot(self, snapshot_date, *, scheduled_for):
+            self.calls.append(("snapshot", snapshot_date, scheduled_for))
+            if len(self.calls) == 1:
+                raise RuntimeError("temporary API failure")
+            self.existing = True
+            return {"ok": True}
+
+    service = FlakySnapshotService()
+    scheduler = InventoryScheduler(
+        service,
+        settings=InventorySyncSettings(
+            interval_seconds=3600,
+            snapshot_time=time(0, 0),
+            timezone_name="Europe/Moscow",
+            run_on_start=False,
+        ),
+    )
+    with pytest.raises(RuntimeError, match="temporary API failure"):
+        scheduler.run_pending(datetime(2026, 8, 20, 0, 0, tzinfo=ZoneInfo("Europe/Moscow")))
+
+    scheduler.run_pending(datetime(2026, 8, 20, 1, 0, tzinfo=ZoneInfo("Europe/Moscow")))
+
+    assert [call[0] for call in service.calls] == ["snapshot", "snapshot"]
+    assert service.existing is True
+
+
 @pytest.mark.parametrize("interval", [0, -1])
 def test_inventory_scheduler_rejects_invalid_interval(interval):
     with pytest.raises(ValueError):
         InventorySyncSettings(interval_seconds=interval)
+
+
+@pytest.mark.parametrize("retry_seconds", [0, -1])
+def test_inventory_scheduler_rejects_invalid_snapshot_retry(retry_seconds):
+    with pytest.raises(ValueError):
+        InventorySyncSettings(snapshot_retry_seconds=retry_seconds)

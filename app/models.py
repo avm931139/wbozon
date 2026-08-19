@@ -260,7 +260,7 @@ class WBFBSStockSnapshot(Base):
     __tablename__ = "wb_fbs_stock_snapshots"
     __table_args__ = (
         UniqueConstraint("snapshot_date", "sku", "warehouse_id", name="uq_wb_fbs_stock_snapshot"),
-        {"comment": "Ежедневные срезы FBS-остатков Wildberries на 01:00 по Москве."},
+        {"comment": "Ежедневные срезы FBS-остатков Wildberries на 00:00 по Москве."},
     )
 
     id = Column(Integer, primary_key=True)
@@ -277,7 +277,7 @@ class WBFboStockSnapshot(Base):
     __tablename__ = "wb_fbo_stock_snapshots"
     __table_args__ = (
         UniqueConstraint("snapshot_date", "size_id", "warehouse_id", name="uq_wb_fbo_stock_snapshot"),
-        {"comment": "Ежедневные срезы FBO-остатков Wildberries на 01:00 по Москве."},
+        {"comment": "Ежедневные срезы FBO-остатков Wildberries на 00:00 по Москве."},
     )
 
     id = Column(Integer, primary_key=True)
@@ -995,7 +995,7 @@ class OzonStockSnapshot(Base):
     __tablename__ = "ozon_stock_snapshots"
     __table_args__ = (
         UniqueConstraint("snapshot_date", "product_id", "stock_type", name="uq_ozon_stock_snapshot"),
-        {"comment": "Ежедневные срезы остатков Ozon на 01:00 по Москве."},
+        {"comment": "Ежедневные срезы остатков Ozon на 00:00 по Москве."},
     )
 
     id = Column(Integer, primary_key=True)
@@ -1071,7 +1071,7 @@ class OzonWarehouseStockSnapshot(Base):
             "stock_type",
             name="uq_ozon_warehouse_stock_snapshot",
         ),
-        {"comment": "Ежедневные срезы складских остатков Ozon на 01:00 по Москве."},
+        {"comment": "Ежедневные срезы складских остатков Ozon на 00:00 по Москве."},
     )
 
     id = Column(Integer, primary_key=True)

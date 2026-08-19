@@ -8,6 +8,7 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from app.config import (
+    INVENTORY_SNAPSHOT_RETRY_SECONDS,
     INVENTORY_SNAPSHOT_TIME,
     INVENTORY_SYNC_INTERVAL_SECONDS,
     INVENTORY_SYNC_RUN_ON_START,
@@ -31,12 +32,15 @@ def _parse_time(value: str) -> time:
 class InventorySyncSettings:
     interval_seconds: int = INVENTORY_SYNC_INTERVAL_SECONDS
     snapshot_time: time = _parse_time(INVENTORY_SNAPSHOT_TIME)
+    snapshot_retry_seconds: int = INVENTORY_SNAPSHOT_RETRY_SECONDS
     timezone_name: str = INVENTORY_TIMEZONE
     run_on_start: bool = INVENTORY_SYNC_RUN_ON_START
 
     def __post_init__(self) -> None:
         if self.interval_seconds < 1:
             raise ValueError("INVENTORY_SYNC_INTERVAL_SECONDS must be positive")
+        if self.snapshot_retry_seconds < 1:
+            raise ValueError("INVENTORY_SNAPSHOT_RETRY_SECONDS must be positive")
         ZoneInfo(self.timezone_name)
 
 
@@ -77,9 +81,14 @@ class InventoryScheduler:
             try:
                 self.run_pending()
             except Exception:
-                logger.exception("Inventory synchronization failed; it will be retried on the next interval")
+                logger.exception("Inventory synchronization failed; it will be retried after the configured delay")
                 current = self._now().astimezone(self.timezone)
-                self._next_refresh = current + timedelta(seconds=self.settings.interval_seconds)
+                retry_seconds = (
+                    self.settings.snapshot_retry_seconds
+                    if self._due_snapshot_date(current) is not None
+                    else self.settings.interval_seconds
+                )
+                self._next_refresh = current + timedelta(seconds=retry_seconds)
             current = self._now().astimezone(self.timezone)
             next_snapshot = self._next_snapshot_at(current)
             candidates = [next_snapshot]
