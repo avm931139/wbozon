@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize Ozon reviews and questions every 10 minutes
+
+[Timer]
+OnCalendar=*-*-* *:05/10:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=30
+Unit=wbozon-ozon@communications.service
+
+[Install]
+WantedBy=timers.target

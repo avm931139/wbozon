@@ -114,6 +114,54 @@ python -m inventory_sync --snapshot      # ручной срез за моско
 python -m healthcheck                    # сервисы, свежесть данных, срезы и Telegram
 ```
 
+### Независимые задания Ozon
+
+В production Ozon разделён на задания `products`, `orders`, `supplies`,
+`communications`, `daily_sales`, `finances`, `ads`. Каждый запуск записывается в
+`ozon_sync_runs`, а повторный параллельный запуск того же задания блокируется
+PostgreSQL advisory lock. Остатки остаются в отдельном `inventory_sync`.
+
+```bash
+.venv/bin/python -m ozon --task orders
+```
+
+Установка systemd units после `git pull`:
+
+```bash
+.venv/bin/python -m alembic upgrade head
+sudo cp deploy/systemd/wbozon-ozon@.service /etc/systemd/system/
+sudo cp deploy/systemd/wbozon-ozon-*.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now \
+  wbozon-ozon-products.timer \
+  wbozon-ozon-orders.timer \
+  wbozon-ozon-supplies.timer \
+  wbozon-ozon-communications.timer \
+  wbozon-ozon-daily-sales.timer \
+  wbozon-ozon-finances.timer
+```
+
+Рекламный timer включается отдельно только при заполненных
+`OZON_PERFORMANCE_CLIENT_ID` и `OZON_PERFORMANCE_CLIENT_SECRET`:
+
+```bash
+sudo systemctl enable --now wbozon-ozon-ads.timer
+```
+
+Перед включением проверок healthcheck выполните каждое обязательное задание хотя
+бы один раз, затем добавьте в `.env`:
+
+```dotenv
+OZON_TIMEZONE=Europe/Moscow
+OZON_REQUIRED_TASKS=products,orders,supplies,communications,daily_sales,finances
+```
+
+```bash
+systemctl list-timers 'wbozon-ozon-*' --all
+sudo systemctl start wbozon-ozon@orders.service
+sudo journalctl -u wbozon-ozon@orders.service -n 100 --no-pager
+```
+
 Если Telegram-настройки отсутствуют, `main.py` продолжает синхронизацию и пишет предупреждение в журнал. Повторная отправка уже доставленного ручного отчёта выполняется с флагом `--force`.
 
 ## Синхронизируемые разделы

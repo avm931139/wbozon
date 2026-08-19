@@ -1,11 +1,12 @@
 from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Callable
 from app.db import SessionLocal
 from app.models import OzonAdCampaign, OzonAdDailyStat
 from app.config import OZON_HISTORY_FROM, OZON_SYNC_OVERLAP_DAYS
 from ozon.performance.api import OzonPerformanceAPI
+from ozon.business_time import ozon_today
 
 def _money(value: Any) -> Decimal:
     try:
@@ -17,7 +18,14 @@ def _date(value: Any) -> date | None:
     except ValueError: return None
 
 class OzonPerformanceService:
-    def __init__(self, api: OzonPerformanceAPI | None = None) -> None: self.api = api or OzonPerformanceAPI()
+    def __init__(
+        self,
+        api: OzonPerformanceAPI | None = None,
+        *,
+        today: Callable[[], date] = ozon_today,
+    ) -> None:
+        self.api = api or OzonPerformanceAPI()
+        self.today = today
     def sync_campaigns(self) -> list[dict[str, Any]]:
         items = self.api.campaigns(); now = datetime.now(timezone.utc)
         with SessionLocal() as session:
@@ -34,7 +42,7 @@ class OzonPerformanceService:
             latest = session.query(OzonAdDailyStat.stat_date).order_by(OzonAdDailyStat.stat_date.desc()).first()
         history_from = date.fromisoformat(OZON_HISTORY_FROM)
         start = max(history_from, latest[0] - timedelta(days=OZON_SYNC_OVERLAP_DAYS)) if latest else history_from
-        end = date.today() - timedelta(days=1)
+        end = self.today() - timedelta(days=1)
         if start > end: return 0
         rows: list[dict[str, Any]] = []; cursor = start
         while cursor <= end:

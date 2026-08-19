@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize completed Ozon daily sales
+
+[Timer]
+OnCalendar=*-*-* 06:20:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=120
+Unit=wbozon-ozon@daily_sales.service
+
+[Install]
+WantedBy=timers.target

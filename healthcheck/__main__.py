@@ -13,6 +13,14 @@ from sqlalchemy import func
 from app.config import (
     INVENTORY_SYNC_INTERVAL_SECONDS,
     INVENTORY_TIMEZONE,
+    OZON_ADS_MAX_AGE_SECONDS,
+    OZON_COMMUNICATIONS_MAX_AGE_SECONDS,
+    OZON_DAILY_SALES_MAX_AGE_SECONDS,
+    OZON_FINANCES_MAX_AGE_SECONDS,
+    OZON_ORDERS_MAX_AGE_SECONDS,
+    OZON_PRODUCTS_MAX_AGE_SECONDS,
+    OZON_REQUIRED_TASKS,
+    OZON_SUPPLIES_MAX_AGE_SECONDS,
     WB_TG_BOT_TOKEN,
     WB_TG_CHAT_ID,
     WB_TG_MORNING_TIME,
@@ -21,6 +29,7 @@ from app.config import (
 from app.db import SessionLocal
 from app.models import (
     InventorySyncRun,
+    OzonSyncRun,
     OzonStockSnapshot,
     OzonWarehouseStockSnapshot,
     WBFboStockSnapshot,
@@ -36,6 +45,39 @@ class Check:
     ok: bool
     name: str
     detail: str
+
+
+OZON_TASK_MAX_AGES = {
+    "products": OZON_PRODUCTS_MAX_AGE_SECONDS,
+    "orders": OZON_ORDERS_MAX_AGE_SECONDS,
+    "supplies": OZON_SUPPLIES_MAX_AGE_SECONDS,
+    "communications": OZON_COMMUNICATIONS_MAX_AGE_SECONDS,
+    "daily_sales": OZON_DAILY_SALES_MAX_AGE_SECONDS,
+    "finances": OZON_FINANCES_MAX_AGE_SECONDS,
+    "ads": OZON_ADS_MAX_AGE_SECONDS,
+}
+
+
+def _ozon_task_checks(session, current: datetime) -> list[Check]:
+    checks: list[Check] = []
+    for task in OZON_REQUIRED_TASKS:
+        latest = session.query(OzonSyncRun).filter_by(task=task).order_by(
+            OzonSyncRun.started_at.desc()
+        ).first()
+        if latest is None:
+            checks.append(Check(False, f"Ozon {task} sync", "no runs recorded"))
+            continue
+        timestamp = latest.finished_at or latest.started_at
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
+        age = current - timestamp.astimezone(current.tzinfo)
+        max_age = timedelta(seconds=OZON_TASK_MAX_AGES.get(task, 86400))
+        ok = latest.status in {"completed", "running"} and age <= max_age
+        detail = f"{latest.status}, age {age}, started {latest.started_at}"
+        if latest.error:
+            detail += f", error={latest.error[:300]}"
+        checks.append(Check(ok, f"Ozon {task} sync", detail))
+    return checks
 
 
 def _failure_signature(checks: list[Check]) -> str:
@@ -104,6 +146,8 @@ def collect_checks(
             age = current - finished_at.astimezone(timezone)
             max_age = timedelta(seconds=INVENTORY_SYNC_INTERVAL_SECONDS * 2 + 900)
             checks.append(Check(age <= max_age, "inventory freshness", f"last success {age} ago"))
+
+        checks.extend(_ozon_task_checks(session, current))
 
         snapshot_models = (
             ("WB FBS snapshot", WBFBSStockSnapshot),

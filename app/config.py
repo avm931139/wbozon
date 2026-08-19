@@ -62,6 +62,19 @@ OZON_SYNC_RUN_ON_START = _env_bool("OZON_SYNC_RUN_ON_START", True)
 OZON_ORDER_LOOKBACK_DAYS = int(os.getenv("OZON_ORDER_LOOKBACK_DAYS", "30"))
 OZON_HISTORY_FROM = os.getenv("OZON_HISTORY_FROM", "2026-01-01")
 OZON_SYNC_OVERLAP_DAYS = int(os.getenv("OZON_SYNC_OVERLAP_DAYS", "3"))
+OZON_TIMEZONE = os.getenv("OZON_TIMEZONE", "Europe/Moscow")
+OZON_REQUIRED_TASKS = tuple(
+    value.strip()
+    for value in os.getenv("OZON_REQUIRED_TASKS", "").split(",")
+    if value.strip()
+)
+OZON_PRODUCTS_MAX_AGE_SECONDS = int(os.getenv("OZON_PRODUCTS_MAX_AGE_SECONDS", "28800"))
+OZON_ORDERS_MAX_AGE_SECONDS = int(os.getenv("OZON_ORDERS_MAX_AGE_SECONDS", "1800"))
+OZON_SUPPLIES_MAX_AGE_SECONDS = int(os.getenv("OZON_SUPPLIES_MAX_AGE_SECONDS", "7200"))
+OZON_COMMUNICATIONS_MAX_AGE_SECONDS = int(os.getenv("OZON_COMMUNICATIONS_MAX_AGE_SECONDS", "1800"))
+OZON_DAILY_SALES_MAX_AGE_SECONDS = int(os.getenv("OZON_DAILY_SALES_MAX_AGE_SECONDS", "129600"))
+OZON_FINANCES_MAX_AGE_SECONDS = int(os.getenv("OZON_FINANCES_MAX_AGE_SECONDS", "14400"))
+OZON_ADS_MAX_AGE_SECONDS = int(os.getenv("OZON_ADS_MAX_AGE_SECONDS", "7200"))
 
 # Ozon inventory is realtime; 00:00 Moscow is our daily business cutoff.
 # Server timezone does not affect the snapshot schedule.

@@ -6,6 +6,16 @@ from ozon.services.overview_service import OzonOverviewService
 
 
 class OzonSyncService:
+    TASK_NAMES = (
+        "products",
+        "orders",
+        "supplies",
+        "communications",
+        "daily_sales",
+        "finances",
+        "ads",
+    )
+
     def __init__(self) -> None:
         self.product_service = OzonProductService()
         self.stock_service = OzonStockService()
@@ -38,3 +48,23 @@ class OzonSyncService:
             return {"skipped": True, "reason": "Performance API credentials are not configured"}
         from ozon.performance.service import OzonPerformanceService
         return OzonPerformanceService().sync_all()
+
+    @classmethod
+    def task_names(cls) -> tuple[str, ...]:
+        return cls.TASK_NAMES
+
+    def run_task(self, task: str):
+        callbacks = {
+            "products": self.sync_products,
+            "orders": self.sync_orders,
+            "supplies": self.sync_supplies,
+            "communications": self.sync_communications,
+            "daily_sales": self.sync_daily_sales,
+            "finances": self.sync_finances,
+            "ads": self.sync_ads,
+        }
+        try:
+            callback = callbacks[task]
+        except KeyError as exc:
+            raise ValueError(f"unknown Ozon task: {task}") from exc
+        return callback()

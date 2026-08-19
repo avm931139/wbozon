@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize Ozon product catalog every 6 hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:05:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=60
+Unit=wbozon-ozon@products.service
+
+[Install]
+WantedBy=timers.target

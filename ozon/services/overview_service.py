@@ -4,7 +4,7 @@ import hashlib
 import json
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import func
 
@@ -15,6 +15,7 @@ from ozon.analytics import OzonAnalyticsAPI
 from ozon.communications import OzonCommunicationsAPI
 from ozon.finances import OzonFinancesAPI
 from ozon.supplies import OzonSuppliesAPI
+from ozon.business_time import ozon_today
 
 
 def _dt(value: Any) -> datetime | None:
@@ -72,8 +73,14 @@ def _finance_operation_id(item: dict[str, Any]) -> str:
 
 
 class OzonOverviewService:
-    def __init__(self, *, history_from: date | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        history_from: date | None = None,
+        today: Callable[[], date] = ozon_today,
+    ) -> None:
         self.history_from = history_from or date.fromisoformat(OZON_HISTORY_FROM)
+        self.today = today
         self.analytics = OzonAnalyticsAPI()
         self.communications = OzonCommunicationsAPI()
         self.finances = OzonFinancesAPI()
@@ -150,7 +157,7 @@ class OzonOverviewService:
 
     def sync_daily_sales(self) -> int:
         start = self._incremental_start(OzonDailySale.sale_date)
-        end = date.today() - timedelta(days=1)
+        end = self.today() - timedelta(days=1)
         if start > end: return 0
         rows = self.analytics.daily_sales(start, end)
         now = datetime.now(timezone.utc)
@@ -174,7 +181,7 @@ class OzonOverviewService:
 
     def sync_finances(self) -> int:
         start = self._incremental_start(OzonFinanceAccrual.accrual_date)
-        end = date.today()
+        end = self.today()
         count = 0; cursor = start
         now = datetime.now(timezone.utc)
         with SessionLocal() as session:
@@ -227,4 +234,4 @@ class OzonOverviewService:
     @classmethod
     def month_report(cls, year: int, month: int) -> dict[str, Any]:
         start = date(year, month, 1); end = (date(year + (month == 12), 1 if month == 12 else month + 1, 1) - timedelta(days=1))
-        return cls.report(start, min(end, date.today() - timedelta(days=1)))
+        return cls.report(start, min(end, ozon_today() - timedelta(days=1)))

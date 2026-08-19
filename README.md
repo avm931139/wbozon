@@ -136,15 +136,24 @@ python -m telegram_bot
 python -m telegram_bot --once operational
 ```
 
-Ozon пока запускается отдельным процессом:
+Ozon поддерживает общий диагностический цикл и независимые production-задания:
 
 ```bash
 python -m ozon --once
-python -m ozon
+python -m ozon --task products
+python -m ozon --task orders
+python -m ozon --task supplies
+python -m ozon --task communications
+python -m ozon --task daily_sales
+python -m ozon --task finances
+python -m ozon --task ads
 python -m ozon --report-day 2026-08-08
 python -m ozon --report-month 2026-08
 python -m ozon --sync-ads
 ```
+
+Каждое задание защищено от параллельного запуска и записывает статус в
+`ozon_sync_runs`. Production-расписания находятся в `deploy/systemd`.
 
 Остатки WB и Ozon запускаются третьим независимым процессом:
 

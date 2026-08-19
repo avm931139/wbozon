@@ -1110,6 +1110,19 @@ class InventorySyncRun(Base):
     error = Column(Text, nullable=True)
 
 
+class OzonSyncRun(Base):
+    __tablename__ = "ozon_sync_runs"
+    __table_args__ = {"comment": "Журнал независимых заданий синхронизации Ozon."}
+
+    id = Column(String, primary_key=True)
+    task = Column(String, nullable=False, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String, nullable=False, index=True)
+    result = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+
+
 class OzonPosting(Base):
     __tablename__ = "ozon_postings"
     __table_args__ = (

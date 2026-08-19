@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize Ozon supplies hourly
+
+[Timer]
+OnCalendar=*-*-* *:17:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=60
+Unit=wbozon-ozon@supplies.service
+
+[Install]
+WantedBy=timers.target

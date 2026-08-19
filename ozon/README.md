@@ -59,6 +59,23 @@ python -m alembic upgrade head
 python -m ozon --once
 ```
 
+Независимое задание с блокировкой от параллельного запуска и записью результата
+в `ozon_sync_runs`:
+
+```powershell
+python -m ozon --task products
+python -m ozon --task orders
+python -m ozon --task supplies
+python -m ozon --task communications
+python -m ozon --task daily_sales
+python -m ozon --task finances
+python -m ozon --task ads
+```
+
+В production рекомендуется запускать отдельные задания через файлы из
+`deploy/systemd`. Старые `--once` и постоянный `python -m ozon` сохранены для
+ручной проверки и обратной совместимости.
+
 Цикл выполняет разделы в порядке: товары, отправления, поставки, обращения, дневные продажи, финансы и реклама. Ошибка одного раздела фиксируется в результате и не останавливает следующие разделы. Текущие остатки и их ежедневные срезы загружает отдельная команда `python -m inventory_sync`.
 
 Если `OZON_PERFORMANCE_CLIENT_ID` и `OZON_PERFORMANCE_CLIENT_SECRET` не заданы, плановый цикл пропускает рекламу без ошибки. Команда `--sync-ads` по-прежнему требует оба реквизита.

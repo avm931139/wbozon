@@ -8,11 +8,11 @@
 
 - `app/` — конфигурация, подключение к БД и ORM-модели;
 - `wb/` — основной интеграционный слой Wildberries;
-- `ozon/` — интеграционный слой Ozon Seller/Performance API для каталога, логистики, обращений, продаж, финансов и рекламы;
+- `ozon/` — интеграционный слой Ozon Seller/Performance API с независимыми jobs для каталога, логистики, обращений, продаж, финансов и рекламы;
 - `inventory_sync/` — отдельный процесс текущих остатков WB/Ozon, складской детализации Ozon и ежедневных срезов в 00:00 `Europe/Moscow`;
 - `telegram_bot/` — корневой пакет Telegram-отчётов;
-- `healthcheck/` — разовая проверка systemd/cron, свежести загрузок, дневных срезов и доставки Telegram с дедуплицированными оповещениями;
-- `main.py` — совместный запуск синхронизации WB и Telegram-отчётов; Ozon запускается отдельно через `python -m ozon`;
+- `healthcheck/` — проверка systemd/cron, свежести inventory и обязательных Ozon jobs, дневных срезов и доставки Telegram с дедуплицированными оповещениями;
+- `main.py` — совместный запуск синхронизации WB и Telegram-отчётов; production-задачи Ozon запускаются через `python -m ozon --task <name>` и systemd timers;
 - `alembic/` — единственный основной механизм эволюции схемы;
 - `tests/` — актуальные тесты новой архитектуры.
 
@@ -22,12 +22,18 @@
 
 ```text
 WB API → wb API class → service → repository/session → app.models → PostgreSQL
-Ozon API → ozon API class → service → repository/session → app.models → PostgreSQL
+Ozon API → ozon task runner → service → repository/session → app.models + ozon_sync_runs → PostgreSQL
 WB/Ozon stock APIs → inventory_sync → current stocks + aggregate and warehouse daily snapshots
 Telegram API ← telegram_bot / healthcheck ← PostgreSQL
 ```
 
 Ozon warehouse inventory uses `/v1/product/info/stocks-by-warehouse/fbo` and `/v2/product/info/stocks-by-warehouse/fbs`. Current rows are stored in `ozon_warehouse_stocks`, warehouse metadata in `ozon_warehouses`, and daily rows in `ozon_warehouse_stock_snapshots`. The legacy-compatible aggregate remains in `ozon_stocks` and `ozon_stock_snapshots`. Since 2026-08-17 Ozon stock analytics are realtime; `00:00 Europe/Moscow` is the application's business cutoff.
+
+Production Ozon jobs: `products`, `orders`, `supplies`, `communications`,
+`daily_sales`, `finances`, `ads`. Они запускаются независимо, используют
+PostgreSQL advisory lock для защиты от пересечения и записывают результат в
+`ozon_sync_runs`. Бизнес-дата Ozon рассчитывается в `OZON_TIMEZONE`, по умолчанию
+`Europe/Moscow`.
 
 ## Ключевые ограничения
 

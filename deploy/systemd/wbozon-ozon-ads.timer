@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize Ozon Performance advertising hourly
+
+[Timer]
+OnCalendar=*-*-* *:45:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=60
+Unit=wbozon-ozon@ads.service
+
+[Install]
+WantedBy=timers.target
