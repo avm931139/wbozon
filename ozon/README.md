@@ -19,7 +19,7 @@
 
 - `client.py` — HTTP, авторизация, повторы и ошибки;
 - `endpoints.py` — пути Seller API;
-- `products.py`, `stocks.py`, `orders.py`, `supplies.py`, `communications.py`, `analytics.py`, `finances.py` — доменные API-модули Seller API;
+- `products.py`, `stocks.py`, `warehouse_stocks.py`, `orders.py`, `supplies.py`, `communications.py`, `analytics.py`, `finances.py` — доменные API-модули Seller API;
 - `performance/` — OAuth-клиент, API и сервис рекламы;
 - `services/` — синхронизация и нормализация;
 - `repositories/` — поиск строк для idempotent upsert;

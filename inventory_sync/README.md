@@ -6,6 +6,8 @@
 
 ## Расписание
 
+С 17 августа 2026 года Ozon возвращает аналитические остатки в реальном времени. Фиксированного времени публикации дневных данных у Ozon больше нет: прежние 07:00 и 16:00 UTC отменены. Поэтому `01:00 Europe/Moscow` — бизнес-время среза проекта, а не задержка ожидания публикации Ozon.
+
 - текущие остатки обновляются с интервалом `INVENTORY_SYNC_INTERVAL_SECONDS` (по умолчанию каждый час);
 - ежедневный срез выполняется в `INVENTORY_SNAPSHOT_TIME` (по умолчанию `01:00`);
 - расчёт времени всегда выполняется в `INVENTORY_TIMEZONE` (по умолчанию `Europe/Moscow`) независимо от времени сервера;
@@ -53,6 +55,10 @@ python -m inventory_sync --snapshot
 | WB FBS | Marketplace API `/api/v3/stocks/{warehouse_id}` | `wb_fbs_stocks` | `sku + warehouse_id` |
 | WB FBO | Seller Analytics `/api/analytics/v1/stocks-report/wb-warehouses` | `wb_fbo_stocks` | `size_id + warehouse_id` |
 | Ozon | Seller API `/v4/product/info/stocks` | `ozon_stocks` | `product_id + stock_type` |
+| Ozon FBO по складам | Seller API `/v1/product/info/stocks-by-warehouse/fbo` | `ozon_warehouse_stocks` | `product_id + warehouse_id + stock_type` |
+| Ozon FBS по складам | Seller API `/v2/product/info/stocks-by-warehouse/fbs` | `ozon_warehouse_stocks` | `product_id + warehouse_id + stock_type` |
+
+`ozon_warehouses` хранит внешний `ozon_warehouse_id`, название и кластер. Названия и кластеры обогащаются через `/v1/analytics/stocks`; временная ошибка этого вспомогательного запроса не блокирует запись количеств. Агрегат `/v4/product/info/stocks` сохраняется параллельно и сверяется с суммой складских строк. Поскольку оба источника realtime и запрашиваются последовательно, кратковременное расхождение фиксируется предупреждением, но не приводит к потере полного складского ответа.
 
 WB FBS требует предварительно загруженные `wb_product_sizes` и `wb_fbs_warehouses`. Если каталог размеров или склады отсутствуют, запуск завершается ошибкой, не изменяя текущие остатки и историю.
 
@@ -65,6 +71,7 @@ WB FBS требует предварительно загруженные `wb_pr
 | `wb_fbs_stock_snapshots` | `snapshot_date + sku + warehouse_id` | `quantity` |
 | `wb_fbo_stock_snapshots` | `snapshot_date + size_id + warehouse_id` | `quantity`, `in_way_to_client`, `in_way_from_client` |
 | `ozon_stock_snapshots` | `snapshot_date + product_id + stock_type` | `present`, `reserved` |
+| `ozon_warehouse_stock_snapshots` | `snapshot_date + product_id + warehouse_id + stock_type` | `present`, `reserved` |
 
 `snapshot_date` — календарная дата в `INVENTORY_TIMEZONE`. `captured_at` — единый timezone-aware момент фактического получения среза; PostgreSQL хранит его как `TIMESTAMP WITH TIME ZONE`. Догоняющий срез поэтому может иметь, например, `snapshot_date=2026-08-17` и фактический `captured_at` позже 01:00.
 
@@ -78,7 +85,7 @@ WB FBS требует предварительно загруженные `wb_pr
 - плановое и фактическое время;
 - дату ежедневного среза;
 - статус `running`, `completed` или `failed`;
-- количество принятых строк WB FBS, WB FBO и Ozon;
+- количество принятых строк WB FBS, WB FBO, агрегата Ozon и Ozon по складам;
 - текст ошибки.
 
 Перед обращением к API процесс получает PostgreSQL advisory lock. Второй экземпляр не начинает параллельную загрузку и получает `InventorySyncAlreadyRunning`. Блокировка не заменяет запуск процесса под supervisor/systemd/Docker с политикой перезапуска.

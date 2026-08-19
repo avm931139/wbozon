@@ -13,6 +13,9 @@ from app.models import (
     InventorySyncRun,
     OzonStock,
     OzonStockSnapshot,
+    OzonWarehouse,
+    OzonWarehouseStock,
+    OzonWarehouseStockSnapshot,
     WBFboStock,
     WBFboStockSnapshot,
     WBFboWarehouse,
@@ -21,7 +24,9 @@ from app.models import (
     WBFBSWarehouse,
     WBProductSize,
 )
+from ozon.exceptions import OzonError
 from ozon.stocks import OzonStocksAPI
+from ozon.warehouse_stocks import OzonWarehouseStocksAPI
 from wb.fbo_stocks import FBOStocksAPI
 from wb.stocks import StocksAPI
 
@@ -43,6 +48,7 @@ class InventorySyncService:
         wb_fbs_api: StocksAPI | None = None,
         wb_fbo_api: FBOStocksAPI | None = None,
         ozon_api: OzonStocksAPI | None = None,
+        ozon_warehouse_api: OzonWarehouseStocksAPI | None = None,
         session_factory: Callable[..., Any] = SessionLocal,
         request_pause_seconds: float = 0.21,
         sleeper: Callable[[float], None] = time.sleep,
@@ -50,6 +56,7 @@ class InventorySyncService:
         self.wb_fbs_api = wb_fbs_api or StocksAPI()
         self.wb_fbo_api = wb_fbo_api or FBOStocksAPI()
         self.ozon_api = ozon_api or OzonStocksAPI()
+        self.ozon_warehouse_api = ozon_warehouse_api or OzonWarehouseStocksAPI()
         self.session_factory = session_factory
         self.request_pause_seconds = request_pause_seconds
         self.sleeper = sleeper
@@ -59,7 +66,7 @@ class InventorySyncService:
 
     def snapshot(self, snapshot_date: date, *, scheduled_for: datetime) -> dict[str, int | bool]:
         if self.snapshot_exists(snapshot_date):
-            return {"skipped": True, "wb_fbs": 0, "wb_fbo": 0, "ozon": 0}
+            return {"skipped": True, "wb_fbs": 0, "wb_fbo": 0, "ozon": 0, "ozon_warehouse": 0}
         return self._run("daily_snapshot", snapshot_date=snapshot_date, scheduled_for=scheduled_for)
 
     def snapshot_exists(self, snapshot_date: date) -> bool:
@@ -88,8 +95,38 @@ class InventorySyncService:
                 wb_fbs = self._fetch_wb_fbs()
                 wb_fbo = self.wb_fbo_api.list()
                 ozon = self.ozon_api.list()
+                ozon_skus = self._ozon_skus(ozon)
+                if ozon and not ozon_skus:
+                    raise RuntimeError("Ozon aggregate stock response contains no SKU")
+                ozon_warehouse: list[dict[str, Any]] = []
+                ozon_warehouse_metadata: list[dict[str, Any]] = []
+                if ozon_skus:
+                    ozon_warehouse.extend(
+                        {**row, "_stock_type": "fbo"}
+                        for row in self.ozon_warehouse_api.list_fbo(skus=ozon_skus)
+                    )
+                    ozon_warehouse.extend(
+                        {**row, "_stock_type": "fbs"}
+                        for row in self.ozon_warehouse_api.list_fbs(skus=ozon_skus)
+                    )
+                    self._validate_ozon_warehouse_items(ozon, ozon_warehouse)
+                    try:
+                        ozon_warehouse_metadata = self.ozon_warehouse_api.list_analytics(skus=ozon_skus)
+                    except OzonError:
+                        logger.warning(
+                            "Ozon warehouse metadata enrichment failed; quantities will still be saved",
+                            exc_info=True,
+                        )
                 captured_at = datetime.now(timezone.utc)
-                counts = self._persist(wb_fbs, wb_fbo, ozon, captured_at, snapshot_date)
+                counts = self._persist(
+                    wb_fbs,
+                    wb_fbo,
+                    ozon,
+                    ozon_warehouse,
+                    ozon_warehouse_metadata,
+                    captured_at,
+                    snapshot_date,
+                )
                 self._finish_run(run_id, "completed", counts=counts)
                 return counts
             except Exception as exc:
@@ -127,6 +164,8 @@ class InventorySyncService:
         wb_fbs_items: list[dict[str, Any]],
         wb_fbo_items: list[dict[str, Any]],
         ozon_items: list[dict[str, Any]],
+        ozon_warehouse_items: list[dict[str, Any]],
+        ozon_warehouse_metadata: list[dict[str, Any]],
         captured_at: datetime,
         snapshot_date: date | None,
     ) -> dict[str, int]:
@@ -134,11 +173,22 @@ class InventorySyncService:
             fbs_count = self._persist_wb_fbs(session, wb_fbs_items)
             fbo_count = self._persist_wb_fbo(session, wb_fbo_items)
             ozon_count = self._persist_ozon(session, ozon_items, captured_at)
+            ozon_warehouse_count = self._persist_ozon_warehouses(
+                session,
+                ozon_warehouse_items,
+                ozon_warehouse_metadata,
+                captured_at,
+            )
             session.flush()
             if snapshot_date is not None:
                 self._create_snapshots(session, snapshot_date, captured_at)
             session.commit()
-        return {"wb_fbs": fbs_count, "wb_fbo": fbo_count, "ozon": ozon_count}
+        return {
+            "wb_fbs": fbs_count,
+            "wb_fbo": fbo_count,
+            "ozon": ozon_count,
+            "ozon_warehouse": ozon_warehouse_count,
+        }
 
     @staticmethod
     def _persist_wb_fbs(session: Any, items: list[dict[str, Any]]) -> int:
@@ -259,6 +309,98 @@ class InventorySyncService:
         return len(retained)
 
     @staticmethod
+    def _persist_ozon_warehouses(
+        session: Any,
+        items: list[dict[str, Any]],
+        metadata_items: list[dict[str, Any]],
+        captured_at: datetime,
+    ) -> int:
+        metadata = {
+            int(item["warehouse_id"]): item
+            for item in metadata_items
+            if item.get("warehouse_id") is not None
+        }
+        warehouses = {
+            int(row.ozon_warehouse_id): row
+            for row in session.query(OzonWarehouse).all()
+        }
+
+        for item in items:
+            external_id = int(item["warehouse_id"])
+            row = warehouses.get(external_id)
+            if row is None:
+                row = OzonWarehouse(
+                    ozon_warehouse_id=external_id,
+                    stock_types=[],
+                    created_at=captured_at,
+                    updated_at=captured_at,
+                )
+                session.add(row)
+                warehouses[external_id] = row
+
+            details = metadata.get(external_id, {})
+            name = item.get("warehouse_name") or details.get("warehouse_name")
+            if name:
+                row.name = str(name)
+            for field in ("cluster_id", "macrolocal_cluster_id"):
+                value = details.get(field)
+                if value is not None:
+                    setattr(row, field, int(value))
+            if details.get("cluster_name"):
+                row.cluster_name = str(details["cluster_name"])
+            stock_type = str(item["_stock_type"])
+            row.stock_types = sorted(set(row.stock_types or []) | {stock_type})
+            row.raw_data = details or {
+                "warehouse_id": external_id,
+                "warehouse_name": item.get("warehouse_name"),
+            }
+            row.updated_at = captured_at
+
+        session.flush()
+
+        existing = {
+            (int(row.product_id), row.warehouse_id, row.stock_type): row
+            for row in session.query(OzonWarehouseStock).all()
+        }
+        retained: set[tuple[int, int, str]] = set()
+        for item in items:
+            warehouse = warehouses[int(item["warehouse_id"])]
+            stock_type = str(item["_stock_type"])
+            key = (int(item["product_id"]), warehouse.id, stock_type)
+            retained.add(key)
+            row = existing.get(key)
+            raw_data = {key: value for key, value in item.items() if key != "_stock_type"}
+            if row is None:
+                row = OzonWarehouseStock(
+                    product_id=key[0],
+                    warehouse_id=warehouse.id,
+                    stock_type=stock_type,
+                    raw_data=raw_data,
+                    fetched_at=captured_at,
+                )
+                session.add(row)
+                existing[key] = row
+            row.offer_id = item.get("offer_id")
+            row.sku = int(item["sku"])
+            row.present = int(item.get("present") or 0)
+            row.reserved = int(item.get("reserved") or 0)
+            row.raw_data = raw_data
+            row.fetched_at = captured_at
+
+        for key, row in existing.items():
+            if key not in retained:
+                row.present = 0
+                row.reserved = 0
+                row.raw_data = {
+                    **(row.raw_data or {}),
+                    "present": 0,
+                    "reserved": 0,
+                    "zeroed_by_inventory_sync": True,
+                }
+                row.fetched_at = captured_at
+        return len(retained)
+
+    @staticmethod
     def _create_snapshots(session: Any, snapshot_date: date, captured_at: datetime) -> None:
         for row in session.query(WBFBSStock).all():
             session.add(WBFBSStockSnapshot(
@@ -278,6 +420,78 @@ class InventorySyncService:
                 offer_id=row.offer_id, stock_type=row.stock_type, present=row.present,
                 reserved=row.reserved, raw_data=row.raw_data,
             ))
+        for row in session.query(OzonWarehouseStock).all():
+            session.add(OzonWarehouseStockSnapshot(
+                snapshot_date=snapshot_date,
+                captured_at=captured_at,
+                product_id=row.product_id,
+                offer_id=row.offer_id,
+                sku=row.sku,
+                warehouse_id=row.warehouse_id,
+                stock_type=row.stock_type,
+                present=row.present,
+                reserved=row.reserved,
+                raw_data=row.raw_data,
+            ))
+
+    @staticmethod
+    def _ozon_skus(items: list[dict[str, Any]]) -> list[int]:
+        return list(dict.fromkeys(
+            int(stock["sku"])
+            for item in items
+            for stock in (item.get("stocks") or [])
+            if isinstance(stock, dict) and stock.get("sku") is not None
+        ))
+
+    @staticmethod
+    def _validate_ozon_warehouse_items(
+        aggregate_items: list[dict[str, Any]],
+        warehouse_items: list[dict[str, Any]],
+    ) -> None:
+        required = ("sku", "product_id", "warehouse_id")
+        seen: set[tuple[int, int, str]] = set()
+        actual: dict[tuple[int, str], tuple[int, int]] = {}
+        for item in warehouse_items:
+            missing = [field for field in required if item.get(field) is None]
+            if missing:
+                raise RuntimeError(f"Ozon warehouse stock row has no {', '.join(missing)}")
+            stock_type = str(item.get("_stock_type") or "")
+            identity = (int(item["product_id"]), int(item["warehouse_id"]), stock_type)
+            if identity in seen:
+                raise RuntimeError(f"duplicate Ozon warehouse stock identity: {identity}")
+            seen.add(identity)
+            key = (int(item["sku"]), stock_type)
+            present, reserved = actual.get(key, (0, 0))
+            actual[key] = (
+                present + int(item.get("present") or 0),
+                reserved + int(item.get("reserved") or 0),
+            )
+
+        expected: dict[tuple[int, str], tuple[int, int]] = {}
+        for item in aggregate_items:
+            for stock in item.get("stocks") or []:
+                if not isinstance(stock, dict) or stock.get("sku") is None:
+                    continue
+                stock_type = str(stock.get("type") or "").lower()
+                if stock_type not in {"fbo", "fbs"}:
+                    continue
+                expected[(int(stock["sku"]), stock_type)] = (
+                    int(stock.get("present") or 0),
+                    int(stock.get("reserved") or 0),
+                )
+
+        mismatches = [
+            (key, expected.get(key), actual.get(key))
+            for key in sorted(set(expected) | set(actual))
+            if expected.get(key) != actual.get(key)
+        ]
+        if mismatches:
+            logger.warning(
+                "Ozon aggregate and warehouse stock totals differ for %s keys; "
+                "warehouse rows are authoritative because both APIs are realtime. Examples: %s",
+                len(mismatches),
+                mismatches[:5],
+            )
 
     @staticmethod
     def _fbo_warehouse_key(item: dict[str, Any]) -> tuple[int, str, str]:
@@ -321,6 +535,7 @@ class InventorySyncService:
                 row.wb_fbs_rows = counts["wb_fbs"]
                 row.wb_fbo_rows = counts["wb_fbo"]
                 row.ozon_rows = counts["ozon"]
+                row.ozon_warehouse_rows = counts["ozon_warehouse"]
             session.commit()
 
     @staticmethod

@@ -10,6 +10,9 @@ from app.models import (
     InventorySyncRun,
     OzonStock,
     OzonStockSnapshot,
+    OzonWarehouse,
+    OzonWarehouseStock,
+    OzonWarehouseStockSnapshot,
     WBFboStock,
     WBFboStockSnapshot,
     WBFboWarehouse,
@@ -21,6 +24,7 @@ from app.models import (
 )
 from inventory_sync.scheduler import InventoryScheduler, InventorySyncSettings
 from inventory_sync.service import InventorySyncService
+from ozon.exceptions import OzonHTTPError
 
 
 class FBSAPI:
@@ -43,7 +47,49 @@ class FBOAPI:
 
 class OzonAPI:
     def list(self):
-        return [{"product_id": 100, "offer_id": "offer-100", "stocks": [{"type": "fbo", "present": 9, "reserved": 3}]}]
+        return [{
+            "product_id": 100,
+            "offer_id": "offer-100",
+            "stocks": [{"type": "fbo", "sku": 1000, "present": 9, "reserved": 3}],
+        }]
+
+
+class OzonWarehouseAPI:
+    def list_fbo(self, *, skus):
+        assert skus == [1000]
+        return [{
+            "product_id": 100,
+            "offer_id": "offer-100",
+            "sku": 1000,
+            "warehouse_id": 700,
+            "present": 9,
+            "reserved": 3,
+        }]
+
+    def list_fbs(self, *, skus):
+        assert skus == [1000]
+        return []
+
+    def list_analytics(self, *, skus):
+        assert skus == [1000]
+        return [{
+            "sku": 1000,
+            "warehouse_id": 700,
+            "warehouse_name": "Хоругвино",
+            "cluster_id": 77,
+            "cluster_name": "Москва",
+        }]
+
+
+class DuplicateOzonWarehouseAPI(OzonWarehouseAPI):
+    def list_fbo(self, *, skus):
+        row = super().list_fbo(skus=skus)[0]
+        return [row, dict(row)]
+
+
+class MetadataFailureOzonWarehouseAPI(OzonWarehouseAPI):
+    def list_analytics(self, *, skus):
+        raise OzonHTTPError("temporary analytics failure")
 
 
 @pytest.fixture
@@ -61,10 +107,30 @@ def inventory_db():
         fbo_warehouse = WBFboWarehouse(wb_id=500, name="Коледино", region_name="Москва")
         session.add_all([current_size, missing_size, fbs_warehouse, fbo_warehouse])
         session.flush()
+        old_ozon_warehouse = OzonWarehouse(
+            ozon_warehouse_id=900,
+            name="Old Ozon warehouse",
+            stock_types=["fbo"],
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(old_ozon_warehouse)
+        session.flush()
         session.add_all([
             WBFBSStock(size_id=missing_size.id, warehouse_id=fbs_warehouse.id, sku="old-fbs", quantity=5),
             WBFboStock(size_id=missing_size.id, warehouse_id=fbo_warehouse.id, quantity=6, in_way_to_client=4, in_way_from_client=2),
             OzonStock(product_id=200, offer_id="old", stock_type="fbo", present=11, reserved=1, raw_data={}, fetched_at=datetime.now(timezone.utc)),
+            OzonWarehouseStock(
+                product_id=200,
+                offer_id="old",
+                sku=2000,
+                warehouse_id=old_ozon_warehouse.id,
+                stock_type="fbo",
+                present=11,
+                reserved=1,
+                raw_data={},
+                fetched_at=datetime.now(timezone.utc),
+            ),
         ])
         session.commit()
     return session_factory
@@ -73,6 +139,7 @@ def inventory_db():
 def test_daily_snapshot_updates_current_rows_and_zeroes_missing_inventory(inventory_db):
     service = InventorySyncService(
         wb_fbs_api=FBSAPI(), wb_fbo_api=FBOAPI(), ozon_api=OzonAPI(),
+        ozon_warehouse_api=OzonWarehouseAPI(),
         session_factory=inventory_db, request_pause_seconds=0, sleeper=lambda value: None,
     )
     snapshot_day = date(2026, 8, 16)
@@ -80,19 +147,63 @@ def test_daily_snapshot_updates_current_rows_and_zeroes_missing_inventory(invent
 
     result = service.snapshot(snapshot_day, scheduled_for=scheduled_for)
 
-    assert result == {"wb_fbs": 1, "wb_fbo": 1, "ozon": 1}
+    assert result == {"wb_fbs": 1, "wb_fbo": 1, "ozon": 1, "ozon_warehouse": 1}
     with inventory_db() as session:
         assert session.query(WBFBSStock).filter_by(sku="sku-10").one().quantity == 7
         assert session.query(WBFBSStock).filter_by(sku="old-fbs").one().quantity == 0
         assert session.query(WBFboStock).filter_by(size_id=2).one().quantity == 0
         assert session.query(OzonStock).filter_by(product_id=200).one().present == 0
+        assert session.query(OzonWarehouseStock).filter_by(product_id=200).one().present == 0
+        warehouse = session.query(OzonWarehouse).filter_by(ozon_warehouse_id=700).one()
+        assert warehouse.name == "Хоругвино"
+        assert warehouse.cluster_name == "Москва"
+        assert session.query(OzonWarehouseStock).filter_by(product_id=100).one().warehouse_id == warehouse.id
         assert session.query(WBFBSStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 2
         assert session.query(WBFboStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 2
         assert session.query(OzonStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 2
+        assert session.query(OzonWarehouseStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 2
         run = session.query(InventorySyncRun).filter_by(snapshot_date=snapshot_day).one()
         assert run.status == "completed"
+        assert run.ozon_warehouse_rows == 1
 
     assert service.snapshot(snapshot_day, scheduled_for=scheduled_for)["skipped"] is True
+
+
+def test_duplicate_ozon_warehouse_rows_fail_before_inventory_is_changed(inventory_db):
+    service = InventorySyncService(
+        wb_fbs_api=FBSAPI(),
+        wb_fbo_api=FBOAPI(),
+        ozon_api=OzonAPI(),
+        ozon_warehouse_api=DuplicateOzonWarehouseAPI(),
+        session_factory=inventory_db,
+        request_pause_seconds=0,
+        sleeper=lambda value: None,
+    )
+
+    with pytest.raises(RuntimeError, match="duplicate Ozon warehouse stock identity"):
+        service.refresh()
+
+    with inventory_db() as session:
+        assert session.query(OzonStock).filter_by(product_id=200).one().present == 11
+        assert session.query(OzonWarehouseStock).filter_by(product_id=200).one().present == 11
+        assert session.query(InventorySyncRun).filter_by(status="failed").count() == 1
+
+
+def test_analytics_metadata_failure_does_not_block_stock_quantities(inventory_db):
+    service = InventorySyncService(
+        wb_fbs_api=FBSAPI(),
+        wb_fbo_api=FBOAPI(),
+        ozon_api=OzonAPI(),
+        ozon_warehouse_api=MetadataFailureOzonWarehouseAPI(),
+        session_factory=inventory_db,
+        request_pause_seconds=0,
+        sleeper=lambda value: None,
+    )
+
+    assert service.refresh()["ozon_warehouse"] == 1
+    with inventory_db() as session:
+        row = session.query(OzonWarehouseStock).filter_by(product_id=100).one()
+        assert (row.present, row.reserved) == (9, 3)
 
 
 class RecordingInventoryService:
