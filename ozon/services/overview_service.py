@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
 from sqlalchemy import func
 
-from app.config import OZON_HISTORY_FROM, OZON_SYNC_OVERLAP_DAYS
+from app.config import OZON_HISTORY_FROM, OZON_SUPPLY_REQUEST_PAUSE_SECONDS, OZON_SYNC_OVERLAP_DAYS
 from app.db import SessionLocal
 from app.models import OzonDailySale, OzonFinanceAccrual, OzonQuestion, OzonReview, OzonSupply
 from ozon.analytics import OzonAnalyticsAPI
@@ -78,9 +79,15 @@ class OzonOverviewService:
         *,
         history_from: date | None = None,
         today: Callable[[], date] = ozon_today,
+        supply_request_pause_seconds: float = OZON_SUPPLY_REQUEST_PAUSE_SECONDS,
+        sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
+        if supply_request_pause_seconds < 0:
+            raise ValueError("OZON_SUPPLY_REQUEST_PAUSE_SECONDS must not be negative")
         self.history_from = history_from or date.fromisoformat(OZON_HISTORY_FROM)
         self.today = today
+        self.supply_request_pause_seconds = supply_request_pause_seconds
+        self.sleeper = sleeper
         self.analytics = OzonAnalyticsAPI()
         self.communications = OzonCommunicationsAPI()
         self.finances = OzonFinancesAPI()
@@ -91,10 +98,12 @@ class OzonOverviewService:
         now = datetime.now(timezone.utc)
         saved = 0
         with SessionLocal() as session:
-            for item in rows:
+            for index, item in enumerate(rows):
                 identifier = item.get("supply_order_id")
                 if identifier is None:
                     continue
+                if index and self.supply_request_pause_seconds:
+                    self.sleeper(self.supply_request_pause_seconds)
                 detail = self.supplies.get(int(identifier))
                 data = {**item, **detail}
                 created = _dt(data.get("created_date") or data.get("created_at"))

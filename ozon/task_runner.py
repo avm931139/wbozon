@@ -41,8 +41,14 @@ class OzonTaskRunner:
                 self._create_run(run_id, task, started_at)
                 result = self.service.run_task(task)
                 normalized = self._result_summary(result)
-                status = "skipped" if isinstance(result, dict) and result.get("skipped") else "completed"
-                self._finish_run(run_id, status, result=normalized)
+                partial_error = self._partial_error(result)
+                if isinstance(result, dict) and result.get("skipped"):
+                    status = "skipped"
+                elif partial_error:
+                    status = "partial"
+                else:
+                    status = "completed"
+                self._finish_run(run_id, status, result=normalized, error=partial_error)
                 return {"task": task, "status": status, "result": normalized}
             except Exception as exc:
                 self._finish_run(run_id, "failed", error=f"{type(exc).__name__}: {exc}")
@@ -78,6 +84,13 @@ class OzonTaskRunner:
         if isinstance(value, list):
             return {"count": len(value)}
         return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+
+    @staticmethod
+    def _partial_error(value: Any) -> str | None:
+        if not isinstance(value, dict):
+            return None
+        errors = [f"{key}={item}" for key, item in value.items() if key.endswith("_error") and item]
+        return "; ".join(errors) or None
 
     @staticmethod
     def _lock_id(task: str) -> int:

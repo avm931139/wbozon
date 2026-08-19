@@ -23,8 +23,9 @@ def main() -> None:
     action.add_argument("--sync-ads", action="store_true", help="synchronize Ozon Performance campaigns")
     args = parser.parse_args()
     if args.task:
-        print(json.dumps(OzonTaskRunner().run(args.task), ensure_ascii=False, default=str))
-        return
+        result = OzonTaskRunner().run(args.task)
+        print(json.dumps(result, ensure_ascii=False, default=str))
+        raise SystemExit(1 if result["status"] == "partial" else 0)
     if args.sync_ads:
         from ozon.performance.service import OzonPerformanceService
         print(OzonPerformanceService().sync_all())

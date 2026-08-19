@@ -21,6 +21,11 @@ class Service:
         return [1, 2, 3]
 
 
+class PartialService(Service):
+    def run_task(self, task):
+        return {"reviews": 0, "questions": 12, "reviews_error": "OzonAuthError: HTTP 403"}
+
+
 @pytest.fixture
 def session_factory():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
@@ -46,6 +51,15 @@ def test_task_runner_records_failure_and_raises(session_factory):
         row = session.query(OzonSyncRun).one()
         assert row.status == "failed"
         assert row.error == "RuntimeError: API unavailable"
+
+
+def test_task_runner_records_partial_result_as_error(session_factory):
+    result = OzonTaskRunner(PartialService(), session_factory=session_factory).run("products")
+    assert result["status"] == "partial"
+    with session_factory() as session:
+        row = session.query(OzonSyncRun).one()
+        assert row.status == "partial"
+        assert row.error == "reviews_error=OzonAuthError: HTTP 403"
 
 
 def test_ozon_business_date_uses_moscow_timezone():
