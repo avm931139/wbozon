@@ -166,3 +166,11 @@ python -m inventory_sync --snapshot
 ## Дополнительная документация
 
 Подробное описание проекта доступно в [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md), интеграции WB — в [wb/README.md](wb/README.md), Ozon — в [ozon/README.md](ozon/README.md), остатков — в [inventory_sync/README.md](inventory_sync/README.md), отчётов — в [telegram_bot/README.md](telegram_bot/README.md).
+
+Проверка работающих сервисов, свежести данных, полноты дневных срезов и доставки Telegram:
+
+```bash
+python -m healthcheck
+```
+
+Команда возвращает код `0`, если все проверки успешны, и `1`, если обнаружена проблема.
