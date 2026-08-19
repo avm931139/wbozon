@@ -11,6 +11,7 @@
 - `ozon/` — интеграционный слой Ozon Seller/Performance API для каталога, логистики, обращений, продаж, финансов и рекламы;
 - `inventory_sync/` — отдельный процесс текущих остатков WB/Ozon, складской детализации Ozon и ежедневных срезов в 00:00 `Europe/Moscow`;
 - `telegram_bot/` — корневой пакет Telegram-отчётов;
+- `healthcheck/` — разовая проверка systemd/cron, свежести загрузок, дневных срезов и доставки Telegram с дедуплицированными оповещениями;
 - `main.py` — совместный запуск синхронизации WB и Telegram-отчётов; Ozon запускается отдельно через `python -m ozon`;
 - `alembic/` — единственный основной механизм эволюции схемы;
 - `tests/` — актуальные тесты новой архитектуры.
@@ -23,7 +24,7 @@
 WB API → wb API class → service → repository/session → app.models → PostgreSQL
 Ozon API → ozon API class → service → repository/session → app.models → PostgreSQL
 WB/Ozon stock APIs → inventory_sync → current stocks + aggregate and warehouse daily snapshots
-Telegram API ← telegram_bot ← PostgreSQL
+Telegram API ← telegram_bot / healthcheck ← PostgreSQL
 ```
 
 Ozon warehouse inventory uses `/v1/product/info/stocks-by-warehouse/fbo` and `/v2/product/info/stocks-by-warehouse/fbs`. Current rows are stored in `ozon_warehouse_stocks`, warehouse metadata in `ozon_warehouses`, and daily rows in `ozon_warehouse_stock_snapshots`. The legacy-compatible aggregate remains in `ozon_stocks` and `ozon_stock_snapshots`. Since 2026-08-17 Ozon stock analytics are realtime; `00:00 Europe/Moscow` is the application's business cutoff.
@@ -36,7 +37,7 @@ Ozon warehouse inventory uses `/v1/product/info/stocks-by-warehouse/fbo` and `/v
 - не смешивать транспорт, бизнес-логику и persistence;
 - использовать timezone-aware даты для нового кода;
 - не менять унаследованный код без явной необходимости;
-- после изменения импортов проверять точки запуска: `python main.py --help`, `python -m telegram_bot --help`, `python -m ozon --help` и `python -m inventory_sync --help`.
+- после изменения импортов проверять точки запуска: `python main.py --help`, `python -m telegram_bot --help`, `python -m ozon --help`, `python -m inventory_sync --help` и `python -m healthcheck`.
 
 ## Проверки перед завершением изменений
 
