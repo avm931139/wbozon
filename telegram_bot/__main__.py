@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from datetime import date, datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from app.config import (
     WB_TG_BOT_TOKEN, WB_TG_CHAT_ID, WB_TG_LOW_STOCK_THRESHOLD, WB_TG_MORNING_TIME,
     WB_TG_OPERATIONAL_INTERVAL_SECONDS, WB_TG_POLL_SECONDS, WB_TG_REQUEST_TIMEOUT_SECONDS,
-    WB_TG_PROXY_URL, WB_TG_TIMEZONE,
+    WB_TG_PROXY_URL, WB_TG_TIMEZONE, WB_LOG_DIR, WB_LOG_LEVEL,
 )
 from wb.sync_logging import configure_wb_logging, install_context_filter
 from telegram_bot.client import TelegramClient
@@ -78,7 +80,13 @@ def main() -> None:
     parser.add_argument("--date", type=date.fromisoformat, help="snapshot date for stock-files (YYYY-MM-DD)")
     parser.add_argument("--force", action="store_true", help="resend even if this report key was delivered")
     args = parser.parse_args()
-    configure_wb_logging(); install_context_filter()
+    telegram_log_dir = Path(WB_LOG_DIR).parent / "telegram"
+    configure_wb_logging(log_dir=telegram_log_dir, file_prefix="telegram")
+    install_context_filter()
+    logging.basicConfig(
+        level=getattr(logging, WB_LOG_LEVEL, logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     dispatcher = build_dispatcher()
     if args.once:
         now = datetime.now(ZoneInfo(WB_TG_TIMEZONE))

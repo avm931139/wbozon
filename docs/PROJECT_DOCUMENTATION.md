@@ -6,17 +6,21 @@
 
 ## Актуальная структура
 
-- [`main.py`](../main.py) — единая точка запуска синхронизации и Telegram-отчётов;
+- [`main.py`](../main.py) — совместимый alias отдельного WB worker;
+- [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — каноническая схема независимых процессов и границ отказов;
+- [`app/README.md`](../app/README.md) — общая конфигурация, БД и правила изменения моделей;
 - [`app/config.py`](../app/config.py) — загрузка настроек из окружения и `.env`;
 - [`app/db.py`](../app/db.py) — SQLAlchemy engine и фабрика сессий;
 - [`app/models.py`](../app/models.py) — модели каталога, остатков, заказов, финансов, рекламы, обращений, журналов и доставок Telegram;
 - [`wb/`](../wb) — API-клиенты, сервисы, репозитории и периодическая синхронизация WB;
 - [`ozon/`](../ozon) — каталог, остатки, отправления, поставки, обращения, продажи и финансы Ozon Seller API, а также реклама Ozon Performance API;
-- [`inventory_sync/`](../inventory_sync) — отдельное расписание текущих остатков WB/Ozon, детализации Ozon по складам и ежедневных срезов на 00:00 по Москве;
+- [`yandex_market/`](../yandex_market) — клиент Partner API и нормализация складских остатков;
+- [`inventory_sync/`](../inventory_sync) — отдельные workers текущих остатков WB/Ozon/Яндекс Маркета и ежедневных срезов на 00:00 по Москве;
 - [`telegram_bot/`](../telegram_bot) — формирование, планирование и отправка отчётов;
-- [`healthcheck/`](../healthcheck) — проверка systemd/cron, свежести данных, полноты срезов и доставки Telegram;
+- [`healthcheck/`](../healthcheck) — проверка systemd, свежести данных, полноты срезов и доставки Telegram;
 - [`alembic/`](../alembic) — миграции PostgreSQL;
 - [`tests/`](../tests) — модульные тесты;
+- [`deploy/systemd/`](../deploy/systemd) — units постоянных workers и независимые timers;
 - [`logs/wb/`](../logs/wb) — рабочие журналы синхронизации.
 
 Подробности интеграции WB находятся в [`wb/README.md`](../wb/README.md), Ozon — в [`ozon/README.md`](../ozon/README.md), периодических остатков — в [`inventory_sync/README.md`](../inventory_sync/README.md), отчётов — в [`telegram_bot/README.md`](../telegram_bot/README.md).
@@ -24,14 +28,14 @@
 ## Поток данных
 
 ```text
-WB API → API-модули wb → сервисы → репозитории/SQLAlchemy → PostgreSQL
-                                                                  ↓
-                                                telegram_bot → Telegram API
-Ozon API → API-модули ozon → сервисы → репозитории/SQLAlchemy ┘
-Ozon warehouse APIs → inventory_sync → текущие строки и дневные срезы по физическим складам
+WB API → wb worker / inventory@wb ───────────────────────────────┐
+Ozon API → ozon tasks / inventory@ozon ─────────────────────────┤→ PostgreSQL
+Яндекс Маркет API → inventory@yandex_market ────────────────────┤
+                                                                 ├→ telegram workers → Telegram API
+                                                                 └→ healthcheck → Telegram API
 ```
 
-Telegram-модуль не запрашивает данные маркетплейсов напрямую. Он строит отчёты WB/Ozon только по уже синхронизированной базе.
+Telegram-модуль не запрашивает данные маркетплейсов напрямую. Он строит отчёты только по уже синхронизированной базе.
 
 ## Конфигурация
 
@@ -69,35 +73,36 @@ cd ~/wbozon
 git pull --ff-only origin master
 ./.venv/bin/pip install -r requirements.txt
 ./.venv/bin/python -m alembic upgrade head
-./.venv/bin/python -m inventory_sync --once
-sudo systemctl restart wbozon-inventory.service
-sudo systemctl status wbozon-inventory.service --no-pager
+./.venv/bin/python -m inventory_sync --marketplace wb --once
+./.venv/bin/python -m inventory_sync --marketplace ozon --once
+./.venv/bin/python -m inventory_sync --marketplace yandex_market --once
+sudo systemctl restart 'wbozon-inventory@*.service'
+systemctl --no-pager status 'wbozon-inventory@*.service'
 ```
 
 Если `git status --short` показывает локальные изменения, сначала разберите их; принудительный сброс рабочей копии в процедуру обновления не входит.
 
-На рабочем VPS `inventory_sync` запускается постоянно как `wbozon-inventory.service`. Excel-отчёты запускаются пользовательским cron в 09:00 МСК:
-
-```cron
-CRON_TZ=Europe/Moscow
-0 9 * * * cd /home/wbozon/wbozon && /home/wbozon/wbozon/.venv/bin/python -m telegram_bot --once stock-files >> /home/wbozon/wbozon/logs/telegram-stock.log 2>&1
-```
+На рабочем VPS используются отдельные `wbozon-inventory@wb.service`, `wbozon-inventory@ozon.service` и `wbozon-inventory@yandex_market.service`. Excel-отчёты запускает `wbozon-telegram-stock.timer` в 09:00 МСК. Старый общий inventory unit и cron-задание после миграции отключаются.
 
 Healthcheck запускается каждые пять минут через `wbozon-healthcheck.timer`; определения unit-файлов и команды управления приведены в [`healthcheck/README.md`](../healthcheck/README.md).
 
 ## Запуск
 
-Синхронизация и Telegram-отчёты вместе:
+Независимые постоянные workers:
 
 ```powershell
-python main.py
+python -m wb
+python -m telegram_bot
+python -m inventory_sync --marketplace wb
+python -m inventory_sync --marketplace ozon
+python -m inventory_sync --marketplace yandex_market
 ```
 
 Другие режимы:
 
 ```powershell
-python main.py --once       # один полный цикл синхронизации
-python main.py --sync-only  # постоянная синхронизация без Telegram
+python -m wb --once         # один полный цикл WB
+python main.py --once       # совместимый alias предыдущей команды
 python -m telegram_bot      # только расписание Telegram
 python -m telegram_bot --once operational
 python -m telegram_bot --once morning
@@ -108,9 +113,9 @@ python -m ozon              # постоянная синхронизация Oz
 python -m ozon --report-day 2026-08-08   # сохранённый дневной срез
 python -m ozon --report-month 2026-08    # сумма сохранённых дневных строк
 python -m ozon --sync-ads                # только Ozon Performance
-python -m inventory_sync                 # почасовые остатки и срез в 00:00 МСК
-python -m inventory_sync --once          # разовое обновление текущих остатков
-python -m inventory_sync --snapshot      # ручной срез за московскую дату
+python -m inventory_sync --marketplace wb --once
+python -m inventory_sync --marketplace ozon --snapshot
+python -m inventory_sync --marketplace yandex_market --once
 python -m healthcheck                    # сервисы, свежесть данных, срезы и Telegram
 ```
 
@@ -121,31 +126,43 @@ python -m healthcheck                    # сервисы, свежесть да
 `ozon_sync_runs`, а повторный параллельный запуск того же задания блокируется
 PostgreSQL advisory lock. Остатки остаются в отдельном `inventory_sync`.
 
+На текущем VPS включены `products`, `orders`, `supplies`, `daily_sales`,
+`finances` и `ads`. `communications` доступен для ручной диагностики, но его timer
+выключен: Questions API работает, Reviews API текущего кабинета отвечает HTTP 403.
+Частичный результат с ключом `*_error` получает статус `partial` и ненулевой код
+возврата.
+
 ```bash
 .venv/bin/python -m ozon --task orders
 ```
 
-Установка systemd units после `git pull`:
+Установка всех systemd units после `git pull` выполняется по инструкции [`deploy/systemd/README.md`](../deploy/systemd/README.md). Для Ozon отдельно включается рабочий набор timers:
 
 ```bash
 .venv/bin/python -m alembic upgrade head
-sudo cp deploy/systemd/wbozon-ozon@.service /etc/systemd/system/
-sudo cp deploy/systemd/wbozon-ozon-*.timer /etc/systemd/system/
+sudo cp deploy/systemd/*.service /etc/systemd/system/
+sudo cp deploy/systemd/*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now \
   wbozon-ozon-products.timer \
   wbozon-ozon-orders.timer \
   wbozon-ozon-supplies.timer \
-  wbozon-ozon-communications.timer \
   wbozon-ozon-daily-sales.timer \
-  wbozon-ozon-finances.timer
+  wbozon-ozon-finances.timer \
+  wbozon-ozon-ads.timer
 ```
 
-Рекламный timer включается отдельно только при заполненных
-`OZON_PERFORMANCE_CLIENT_ID` и `OZON_PERFORMANCE_CLIENT_SECRET`:
+Рекламный timer включается только при заполненных
+`OZON_PERFORMANCE_CLIENT_ID` и `OZON_PERFORMANCE_CLIENT_SECRET`. Если реклама не
+настроена, исключите `ads` из предыдущей команды и из `OZON_REQUIRED_TASKS`.
+
+`communications` можно включить после успешного ручного запуска без
+`reviews_error`:
 
 ```bash
-sudo systemctl enable --now wbozon-ozon-ads.timer
+sudo systemctl start wbozon-ozon@communications.service
+sudo journalctl -u wbozon-ozon@communications.service -n 50 --no-pager
+sudo systemctl enable --now wbozon-ozon-communications.timer
 ```
 
 Перед включением проверок healthcheck выполните каждое обязательное задание хотя
@@ -153,7 +170,7 @@ sudo systemctl enable --now wbozon-ozon-ads.timer
 
 ```dotenv
 OZON_TIMEZONE=Europe/Moscow
-OZON_REQUIRED_TASKS=products,orders,supplies,communications,daily_sales,finances
+OZON_REQUIRED_TASKS=products,orders,supplies,daily_sales,finances,ads
 ```
 
 ```bash
@@ -162,7 +179,11 @@ sudo systemctl start wbozon-ozon@orders.service
 sudo journalctl -u wbozon-ozon@orders.service -n 100 --no-pager
 ```
 
-Если Telegram-настройки отсутствуют, `main.py` продолжает синхронизацию и пишет предупреждение в журнал. Повторная отправка уже доставленного ручного отчёта выполняется с флагом `--force`.
+Расписания задаются в `Europe/Moscow`; systemd показывает поле `NEXT` в локальной
+временной зоне VPS. Полная инструкция находится в
+[`deploy/systemd/README.md`](../deploy/systemd/README.md).
+
+Отсутствие Telegram-настроек не влияет на WB/Ozon/inventory workers, потому что Telegram работает отдельным процессом. Повторная отправка уже доставленного ручного отчёта выполняется с флагом `--force`.
 
 ## Синхронизируемые разделы
 
@@ -178,9 +199,9 @@ sudo journalctl -u wbozon-ozon@orders.service -n 100 --no-pager
 
 Ошибка одной задачи записывается в журнал и не блокирует выполнение следующих независимых задач.
 
-Ozon отдельным процессом последовательно синхронизирует товары, отправления FBS/FBO, поставки, обращения, дневные продажи, финансы и рекламу. Для рекламы используются отдельные учётные данные Ozon Performance API. Ошибка одного раздела не останавливает остальные задачи цикла. Ozon не включён в корневой `main.py`, но дневные срезы его остатков являются источником отдельного Excel-отчёта Telegram.
+Ozon в production запускается набором независимых tasks: товары, отправления FBS/FBO, поставки, обращения, дневные продажи, финансы и реклама. Для рекламы используются отдельные учётные данные Ozon Performance API. Ozon не включён в WB worker, а дневные срезы его остатков являются источником отдельного Excel-отчёта Telegram.
 
-Остатки WB FBS, WB FBO и Ozon загружаются третьим постоянно работающим процессом `inventory_sync`. Текущие таблицы обновляются каждый час, исчезнувшие позиции обнуляются. В 00:00 `Europe/Moscow` создаются идемпотентные срезы в `wb_fbs_stock_snapshots`, `wb_fbo_stock_snapshots`, `ozon_stock_snapshots` и `ozon_warehouse_stock_snapshots`; после простоя отсутствующий срез догоняется при запуске. Неудачный дневной срез повторяется каждые `INVENTORY_SNAPSHOT_RETRY_SECONDS` (по умолчанию 300 секунд), а не только на следующем часовом обновлении. Обязательные ответы API сначала полностью загружаются в память и проверяются, затем текущие значения и срез фиксируются одной транзакцией. Неуспешные и успешные попытки записываются в `inventory_sync_runs`.
+Остатки загружают три постоянно работающих процесса `inventory_sync`, по одному на WB, Ozon и Яндекс Маркет. Текущие таблицы обновляются каждый час, исчезнувшие позиции обнуляются. В 00:00 `Europe/Moscow` каждый worker создаёт собственный идемпотентный срез и после простоя догоняет отсутствующую дату. Неудачный срез повторяется каждые `INVENTORY_SNAPSHOT_RETRY_SECONDS`. Ответы одного маркетплейса загружаются и фиксируются одной транзакцией; отказ другого API не вызывает откат. Запуски разделяются полем `inventory_sync_runs.marketplace` и разными advisory locks.
 
 Ozon хранится в двух представлениях:
 
@@ -199,16 +220,16 @@ Ozon хранится в двух представлениях:
 - оперативный отчёт показывает текущий день;
 - дополнительно выводятся реклама, остатки, обращения и состояние синхронизации;
 - таблица `wb_telegram_deliveries` хранит статусы и защищает от дублей после перезапуска.
-- в 09:00 МСК cron вызывает `python -m telegram_bot --once stock-files` и отправляет два `.xlsx` по срезу на 00:00 текущей московской даты;
+- в 09:00 МСК `wbozon-telegram-stock.timer` вызывает `python -m telegram_bot --once stock-files` и отправляет три `.xlsx` по срезу на 00:00 текущей московской даты;
 - WB-файл содержит FBS/FBO, Ozon-файл — агрегат и детализацию по складам с их названиями и кластерами;
 - нулевые остатки исключаются из Excel, а сами файлы создаются в памяти без временных файлов на диске;
 - при отсутствии среза бот отправляет дедуплицированное предупреждение и продолжает отправку доступного маркетплейса.
 
 ## Журналы и диагностика
 
-Основной журнал общего WB-процесса: `logs/wb/wb_sync.log`. Ошибки также сохраняются в БД и структурированном журнале согласно настройкам `WB_LOG_*`. Отдельный процесс остатков пишет стандартный поток логов процесса, а результат каждого запуска сохраняет в `inventory_sync_runs`.
+Основной журнал WB-процесса: `logs/wb/wb_sync.log`; Telegram использует отдельный каталог `logs/telegram/`. Ozon, inventory и healthcheck пишут в journal systemd, а результаты прикладных запусков дополнительно сохраняются в `ozon_sync_runs` и `inventory_sync_runs`. Процессы не ротируют один файл одновременно.
 
-`python -m healthcheck` проверяет `wbozon-inventory.service`, cron, свежесть последней успешной загрузки, последний запуск, четыре таблицы срезов за текущую московскую дату и доставку складских файлов после 09:30. Команда возвращает `0` при норме и `1` при ошибках. Новый набор ошибок один раз отправляется в Telegram; повтор одинакового набора подавляется, а после восстановления отправляется отдельное сообщение. На VPS команда запускается парой `wbozon-healthcheck.service` (`Type=oneshot`) и `wbozon-healthcheck.timer` каждые пять минут.
+`python -m healthcheck` проверяет отдельные systemd workers, свежесть inventory по каждому маркетплейсу, обязательные Ozon jobs, пять таблиц срезов и доставку трёх складских файлов после 09:30. Команда возвращает `0` при норме и `1` при ошибках. Новый набор ошибок один раз отправляется в Telegram; повтор одинакового набора подавляется, а после восстановления отправляется отдельное сообщение. На VPS команда запускается парой `wbozon-healthcheck.service` (`Type=oneshot`) и `wbozon-healthcheck.timer` каждые пять минут.
 
 Проверка состояния процесса начинается с последних строк журнала:
 

@@ -1,6 +1,6 @@
 # wbozon
 
-Проект на Python для синхронизации данных Wildberries и Ozon с PostgreSQL, формирования Telegram-отчётов и контроля здоровья серверных процессов.
+Проект на Python для синхронизации данных Wildberries, Ozon и Яндекс Маркета с PostgreSQL, формирования Telegram-отчётов и контроля здоровья серверных процессов.
 
 ## Обзор
 
@@ -12,7 +12,8 @@
 - отдельный корневой пакет Telegram-отчётов `telegram_bot`;
 - проверку сервисов, свежести данных и доставки отчётов в пакете `healthcheck`;
 - отдельный интеграционный пакет Ozon Seller API `ozon`;
-- независимый планировщик текущих остатков и ежедневных срезов `inventory_sync`, включая детализацию Ozon по физическим складам;
+- отдельный интеграционный пакет Partner API Яндекс Маркета `yandex_market`;
+- независимые по маркетплейсам workers текущих остатков и ежедневных срезов `inventory_sync`, включая детализацию Ozon по физическим складам;
 - миграции схемы PostgreSQL и автоматические тесты.
 
 ## Структура проекта
@@ -29,12 +30,13 @@
   - exceptions.py — пользовательские исключения.
   - services/ — слой бизнес-логики.
   - repositories/ — слой сохранения данных.
+  - `__main__.py` — отдельная точка запуска `python -m wb`.
 - telegram_bot/
   - client.py — клиент Telegram Bot API.
   - reports.py — формирование дневных и месячных отчётов.
   - scheduler.py — расписание отправки.
   - dispatcher.py — доставка и защита от дублей.
-  - stock_reports.py — Excel-отчёты дневных остатков WB/Ozon в памяти.
+  - stock_reports.py — Excel-отчёты дневных остатков WB/Ozon/Яндекс Маркета в памяти.
 - ozon/
   - client.py — клиент Ozon Seller API.
   - API-модули — каталог, агрегатные и складские остатки, отправления, поставки, обращения, аналитика и финансы.
@@ -42,13 +44,20 @@
   - performance/ — отдельный клиент и сервис Ozon Performance API.
   - services/ и repositories/ — синхронизация, нормализация и сохранение данных.
   - scheduler.py — отдельное расписание Ozon.
+- yandex_market/
+  - client.py — авторизация, повторы и обработка ошибок Partner API.
+  - stocks.py — получение полных остатков кампаний с пагинацией.
 - inventory_sync/
-  - service.py — полная загрузка и атомарное сохранение остатков WB/Ozon, включая Ozon по складам.
+  - service.py — изолированная по маркетплейсам загрузка и атомарное сохранение остатков.
   - scheduler.py — почасовое обновление и срез в 00:00 по Москве.
   - `__main__.py` — команда `python -m inventory_sync`.
 - healthcheck/
-  - `__main__.py` — проверка systemd, cron, БД, дневных срезов и Telegram.
-- main.py — совместный запуск синхронизации WB и Telegram-отчётов.
+  - `__main__.py` — проверка systemd, БД, дневных срезов и Telegram.
+- deploy/systemd/
+  - units всех постоянных workers и независимые timers.
+- legacy_core/
+  - архивный пустой пакет, не участвующий в рабочем процессе.
+- main.py — совместимый alias для отдельного WB worker; Telegram он не запускает.
 - docs/
   - PROJECT_DOCUMENTATION.md — подробная техническая документация проекта.
 - tests/ — тесты.
@@ -119,22 +128,23 @@ python -m alembic upgrade head
 python -m pytest
 ```
 
-## Запуск синхронизации и Telegram-отчётов
+## Независимый запуск процессов
 
-После заполнения `WB_TG_BOT_TOKEN` и `WB_TG_CHAT_ID` оба расписания запускаются одной командой:
+Wildberries и Telegram имеют разные точки запуска:
 
 ```bash
-python main.py
+python -m wb
+python -m telegram_bot
 ```
 
-Для запуска только синхронизации используйте `python main.py --sync-only`. Однократный полный цикл синхронизации запускается командой `python main.py --once`.
-
-Telegram-модуль можно запустить отдельно:
+Однократные проверки:
 
 ```bash
-python -m telegram_bot
+python -m wb --once
 python -m telegram_bot --once operational
 ```
+
+`python main.py` оставлен как alias для `python -m wb`; совместного WB+Telegram процесса больше нет.
 
 Ozon поддерживает общий диагностический цикл и независимые production-задания:
 
@@ -154,24 +164,27 @@ python -m ozon --sync-ads
 
 Каждое задание защищено от параллельного запуска и записывает статус в
 `ozon_sync_runs`. Production-расписания находятся в `deploy/systemd`.
+На текущем VPS включены `products`, `orders`, `supplies`, `daily_sales`, `finances`
+и `ads`. Задание `communications` доступно вручную, но не включено из-за HTTP 403
+от Ozon Reviews API текущего кабинета.
 
-Остатки WB и Ozon запускаются третьим независимым процессом:
+Остатки запускаются тремя независимыми процессами:
 
 ```bash
-python -m inventory_sync
-python -m inventory_sync --once
-python -m inventory_sync --snapshot
+python -m inventory_sync --marketplace wb
+python -m inventory_sync --marketplace ozon
+python -m inventory_sync --marketplace yandex_market
 ```
 
 По умолчанию текущие остатки обновляются каждый час, а ежедневный срез создаётся в 00:00 `Europe/Moscow` независимо от часового пояса сервера.
 
-Если обязательный этап дневного среза завершился ошибкой, `inventory_sync` повторяет его каждые 300 секунд. Обычное обновление текущих остатков при этом остаётся часовым.
+Если обязательный этап дневного среза завершился ошибкой, соответствующий worker повторяет его каждые 300 секунд. Остальные маркетплейсы продолжают работу.
 
 С 17 августа 2026 года Ozon возвращает остатки в реальном времени, поэтому 00:00 МСК является бизнес-временем среза проекта. Агрегаты Ozon сохраняются в `ozon_stocks`, детализация — в `ozon_warehouse_stocks`, справочник складов — в `ozon_warehouses`. Ежедневная складская история записывается в `ozon_warehouse_stock_snapshots`.
 
-Команда `python -m inventory_sync` должна работать постоянно как отдельный процесс. Успешные и неуспешные запуски сохраняются в `inventory_sync_runs`; при ошибке обязательного API-этапа частичный ежедневный срез не записывается. В журнале отдельно фиксируется количество агрегатных строк Ozon и строк Ozon по складам.
+Каждая команда `python -m inventory_sync --marketplace ...` работает постоянно отдельным процессом. Запуски сохраняются в `inventory_sync_runs` вместе с полем `marketplace`; при ошибке API частичный срез только этого маркетплейса не записывается.
 
-Ежедневная отправка двух Excel-файлов по срезу текущей московской даты:
+Ежедневная отправка трёх Excel-файлов по срезу текущей московской даты:
 
 ```bash
 python -m telegram_bot --once stock-files
@@ -184,10 +197,13 @@ python -m telegram_bot --once stock-files
 3. API-модули должны быть узкоспециализированными.
 4. Логика нормализации и бизнес-правила — в сервисах.
 5. Работа с базой данных — в репозиториях.
+6. Production-процессы не запускают друг друга и обмениваются состоянием только через PostgreSQL.
+
+Точная схема процессов, границы отказов и общие зависимости описаны в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Проект является модульным монолитом с независимыми workers, а не набором автономно развертываемых сетевых микросервисов.
 
 ## Дополнительная документация
 
-Подробное описание проекта доступно в [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md), интеграции WB — в [wb/README.md](wb/README.md), Ozon — в [ozon/README.md](ozon/README.md), остатков — в [inventory_sync/README.md](inventory_sync/README.md), отчётов — в [telegram_bot/README.md](telegram_bot/README.md), мониторинга — в [healthcheck/README.md](healthcheck/README.md).
+Полный индекс находится в [docs/README.md](docs/README.md). Подробное описание проекта доступно в [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md), общей инфраструктуры — в [app/README.md](app/README.md), интеграции WB — в [wb/README.md](wb/README.md), Ozon — в [ozon/README.md](ozon/README.md), остатков — в [inventory_sync/README.md](inventory_sync/README.md), отчётов — в [telegram_bot/README.md](telegram_bot/README.md), мониторинга — в [healthcheck/README.md](healthcheck/README.md), systemd-задач — в [deploy/systemd/README.md](deploy/systemd/README.md).
 
 Проверка работающих сервисов, свежести данных, полноты дневных срезов и доставки Telegram:
 

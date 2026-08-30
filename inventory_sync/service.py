@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+import zlib
 from datetime import date, datetime, timezone
 from typing import Any, Callable
 
@@ -37,6 +38,7 @@ from yandex_market.stocks import YandexMarketStocksAPI
 
 logger = logging.getLogger(__name__)
 LOCK_ID = 846_203_101
+MARKETPLACES = ("all", "wb", "ozon", "yandex_market")
 
 
 class InventorySyncAlreadyRunning(RuntimeError):
@@ -49,6 +51,7 @@ class InventorySyncService:
     def __init__(
         self,
         *,
+        marketplace: str = "all",
         wb_fbs_api: StocksAPI | None = None,
         wb_fbo_api: FBOStocksAPI | None = None,
         ozon_api: OzonStocksAPI | None = None,
@@ -59,11 +62,18 @@ class InventorySyncService:
         request_pause_seconds: float = 0.21,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
-        self.wb_fbs_api = wb_fbs_api or StocksAPI()
-        self.wb_fbo_api = wb_fbo_api or FBOStocksAPI()
-        self.ozon_api = ozon_api or OzonStocksAPI()
-        self.ozon_warehouse_api = ozon_warehouse_api or OzonWarehouseStocksAPI()
-        self.yandex_market_api = yandex_market_api or YandexMarketStocksAPI()
+        if marketplace not in MARKETPLACES:
+            raise ValueError(f"marketplace must be one of: {', '.join(MARKETPLACES)}")
+        self.marketplace = marketplace
+        self.wb_fbs_api = wb_fbs_api or (StocksAPI() if marketplace in {"all", "wb"} else None)
+        self.wb_fbo_api = wb_fbo_api or (FBOStocksAPI() if marketplace in {"all", "wb"} else None)
+        self.ozon_api = ozon_api or (OzonStocksAPI() if marketplace in {"all", "ozon"} else None)
+        self.ozon_warehouse_api = ozon_warehouse_api or (
+            OzonWarehouseStocksAPI() if marketplace in {"all", "ozon"} else None
+        )
+        self.yandex_market_api = yandex_market_api or (
+            YandexMarketStocksAPI() if marketplace in {"all", "yandex_market"} else None
+        )
         self.yandex_market_campaign_ids = (
             YANDEX_MARKET_CAMPAIGN_IDS
             if yandex_market_campaign_ids is None
@@ -89,10 +99,16 @@ class InventorySyncService:
         return self._run("daily_snapshot", snapshot_date=snapshot_date, scheduled_for=scheduled_for)
 
     def snapshot_exists(self, snapshot_date: date) -> bool:
+        marketplaces = MARKETPLACES if self.marketplace == "all" else (self.marketplace, "all")
         with self.session_factory() as session:
             return (
                 session.query(InventorySyncRun.id)
-                .filter_by(run_type="daily_snapshot", snapshot_date=snapshot_date, status="completed")
+                .filter(
+                    InventorySyncRun.marketplace.in_(marketplaces),
+                    InventorySyncRun.run_type == "daily_snapshot",
+                    InventorySyncRun.snapshot_date == snapshot_date,
+                    InventorySyncRun.status == "completed",
+                )
                 .first()
                 is not None
             )
@@ -108,35 +124,50 @@ class InventorySyncService:
         started_at = datetime.now(timezone.utc)
         with self.session_factory() as lock_session:
             if not self._acquire_lock(lock_session):
-                raise InventorySyncAlreadyRunning("another inventory synchronization is already running")
+                raise InventorySyncAlreadyRunning(
+                    f"another inventory synchronization overlaps marketplace={self.marketplace}"
+                )
             try:
                 self._create_run(run_id, run_type, snapshot_date, scheduled_for, started_at)
-                wb_fbs = self._fetch_wb_fbs()
-                wb_fbo = self.wb_fbo_api.list()
-                ozon = self.ozon_api.list()
-                ozon_skus = self._ozon_skus(ozon)
-                if ozon and not ozon_skus:
-                    raise RuntimeError("Ozon aggregate stock response contains no SKU")
+                wb_fbs: list[dict[str, Any]] = []
+                wb_fbo: list[dict[str, Any]] = []
+                ozon: list[dict[str, Any]] = []
                 ozon_warehouse: list[dict[str, Any]] = []
                 ozon_warehouse_metadata: list[dict[str, Any]] = []
-                if ozon_skus:
-                    ozon_warehouse.extend(
-                        {**row, "_stock_type": "fbo"}
-                        for row in self.ozon_warehouse_api.list_fbo(skus=ozon_skus)
-                    )
-                    ozon_warehouse.extend(
-                        {**row, "_stock_type": "fbs"}
-                        for row in self.ozon_warehouse_api.list_fbs(skus=ozon_skus)
-                    )
-                    self._validate_ozon_warehouse_items(ozon, ozon_warehouse)
-                    try:
-                        ozon_warehouse_metadata = self.ozon_warehouse_api.list_analytics(skus=ozon_skus)
-                    except OzonError:
-                        logger.warning(
-                            "Ozon warehouse metadata enrichment failed; quantities will still be saved",
-                            exc_info=True,
+                yandex_market: list[dict[str, Any]] | None = None
+
+                if self.marketplace in {"all", "wb"}:
+                    assert self.wb_fbo_api is not None
+                    wb_fbs = self._fetch_wb_fbs()
+                    wb_fbo = self.wb_fbo_api.list()
+
+                if self.marketplace in {"all", "ozon"}:
+                    assert self.ozon_api is not None
+                    assert self.ozon_warehouse_api is not None
+                    ozon = self.ozon_api.list()
+                    ozon_skus = self._ozon_skus(ozon)
+                    if ozon and not ozon_skus:
+                        raise RuntimeError("Ozon aggregate stock response contains no SKU")
+                    if ozon_skus:
+                        ozon_warehouse.extend(
+                            {**row, "_stock_type": "fbo"}
+                            for row in self.ozon_warehouse_api.list_fbo(skus=ozon_skus)
                         )
-                yandex_market = self._fetch_yandex_market()
+                        ozon_warehouse.extend(
+                            {**row, "_stock_type": "fbs"}
+                            for row in self.ozon_warehouse_api.list_fbs(skus=ozon_skus)
+                        )
+                        self._validate_ozon_warehouse_items(ozon, ozon_warehouse)
+                        try:
+                            ozon_warehouse_metadata = self.ozon_warehouse_api.list_analytics(skus=ozon_skus)
+                        except OzonError:
+                            logger.warning(
+                                "Ozon warehouse metadata enrichment failed; quantities will still be saved",
+                                exc_info=True,
+                            )
+
+                if self.marketplace in {"all", "yandex_market"}:
+                    yandex_market = self._fetch_yandex_market()
                 if yandex_market is not None:
                     self._validate_yandex_market_items(yandex_market)
                 captured_at = datetime.now(timezone.utc)
@@ -149,6 +180,7 @@ class InventorySyncService:
                     yandex_market,
                     captured_at,
                     snapshot_date,
+                    self.marketplace,
                 )
                 self._finish_run(run_id, "completed", counts=counts)
                 return counts
@@ -159,6 +191,7 @@ class InventorySyncService:
                 self._release_lock(lock_session)
 
     def _fetch_wb_fbs(self) -> list[dict[str, Any]]:
+        assert self.wb_fbs_api is not None
         with self.session_factory() as session:
             warehouse_ids = [int(row[0]) for row in session.query(WBFBSWarehouse.wb_id).all()]
             chrt_ids = [int(row[0]) for row in session.query(WBProductSize.chrt_id).all()]
@@ -184,8 +217,11 @@ class InventorySyncService:
 
     def _fetch_yandex_market(self) -> list[dict[str, Any]] | None:
         if not self.yandex_market_campaign_ids:
+            if self.marketplace == "yandex_market":
+                raise RuntimeError("YANDEX_MARKET_CAMPAIGN_IDS is required for the Yandex Market inventory worker")
             return None
         result: list[dict[str, Any]] = []
+        assert self.yandex_market_api is not None
         for campaign_id in self.yandex_market_campaign_ids:
             result.extend(self.yandex_market_api.list(campaign_id=campaign_id))
         return result
@@ -200,33 +236,36 @@ class InventorySyncService:
         yandex_market_items: list[dict[str, Any]] | None,
         captured_at: datetime,
         snapshot_date: date | None,
+        marketplace: str,
     ) -> dict[str, int]:
+        counts = {
+            "wb_fbs": 0,
+            "wb_fbo": 0,
+            "ozon": 0,
+            "ozon_warehouse": 0,
+            "yandex_market": 0,
+        }
         with self.session_factory() as session:
-            fbs_count = self._persist_wb_fbs(session, wb_fbs_items)
-            fbo_count = self._persist_wb_fbo(session, wb_fbo_items)
-            ozon_count = self._persist_ozon(session, ozon_items, captured_at)
-            ozon_warehouse_count = self._persist_ozon_warehouses(
-                session,
-                ozon_warehouse_items,
-                ozon_warehouse_metadata,
-                captured_at,
-            )
-            yandex_market_count = (
-                self._persist_yandex_market(session, yandex_market_items, captured_at)
-                if yandex_market_items is not None
-                else 0
-            )
+            if marketplace in {"all", "wb"}:
+                counts["wb_fbs"] = self._persist_wb_fbs(session, wb_fbs_items)
+                counts["wb_fbo"] = self._persist_wb_fbo(session, wb_fbo_items)
+            if marketplace in {"all", "ozon"}:
+                counts["ozon"] = self._persist_ozon(session, ozon_items, captured_at)
+                counts["ozon_warehouse"] = self._persist_ozon_warehouses(
+                    session,
+                    ozon_warehouse_items,
+                    ozon_warehouse_metadata,
+                    captured_at,
+                )
+            if marketplace in {"all", "yandex_market"} and yandex_market_items is not None:
+                counts["yandex_market"] = self._persist_yandex_market(
+                    session, yandex_market_items, captured_at
+                )
             session.flush()
             if snapshot_date is not None:
-                self._create_snapshots(session, snapshot_date, captured_at)
+                self._create_snapshots(session, snapshot_date, captured_at, marketplace)
             session.commit()
-        return {
-            "wb_fbs": fbs_count,
-            "wb_fbo": fbo_count,
-            "ozon": ozon_count,
-            "ozon_warehouse": ozon_warehouse_count,
-            "yandex_market": yandex_market_count,
-        }
+        return counts
 
     @staticmethod
     def _persist_wb_fbs(session: Any, items: list[dict[str, Any]]) -> int:
@@ -488,50 +527,58 @@ class InventorySyncService:
         return len(retained)
 
     @staticmethod
-    def _create_snapshots(session: Any, snapshot_date: date, captured_at: datetime) -> None:
-        for row in session.query(WBFBSStock).all():
-            session.add(WBFBSStockSnapshot(
-                snapshot_date=snapshot_date, captured_at=captured_at, size_id=row.size_id,
-                warehouse_id=row.warehouse_id, sku=row.sku, quantity=row.quantity, raw_data=row.raw_data,
-            ))
-        for row in session.query(WBFboStock).all():
-            session.add(WBFboStockSnapshot(
-                snapshot_date=snapshot_date, captured_at=captured_at, size_id=row.size_id,
-                warehouse_id=row.warehouse_id, quantity=row.quantity,
-                in_way_to_client=row.in_way_to_client, in_way_from_client=row.in_way_from_client,
-                raw_data=row.raw_data,
-            ))
-        for row in session.query(OzonStock).all():
-            session.add(OzonStockSnapshot(
-                snapshot_date=snapshot_date, captured_at=captured_at, product_id=row.product_id,
-                offer_id=row.offer_id, stock_type=row.stock_type, present=row.present,
-                reserved=row.reserved, raw_data=row.raw_data,
-            ))
-        for row in session.query(OzonWarehouseStock).all():
-            session.add(OzonWarehouseStockSnapshot(
-                snapshot_date=snapshot_date,
-                captured_at=captured_at,
-                product_id=row.product_id,
-                offer_id=row.offer_id,
-                sku=row.sku,
-                warehouse_id=row.warehouse_id,
-                stock_type=row.stock_type,
-                present=row.present,
-                reserved=row.reserved,
-                raw_data=row.raw_data,
-            ))
-        for row in session.query(YandexMarketStock).all():
-            session.add(YandexMarketStockSnapshot(
-                snapshot_date=snapshot_date,
-                captured_at=captured_at,
-                campaign_id=row.campaign_id,
-                warehouse_id=row.warehouse_id,
-                offer_id=row.offer_id,
-                stock_type=row.stock_type,
-                count=row.count,
-                source_updated_at=row.source_updated_at,
-                raw_data=row.raw_data,
-            ))
+    def _create_snapshots(
+        session: Any,
+        snapshot_date: date,
+        captured_at: datetime,
+        marketplace: str,
+    ) -> None:
+        if marketplace in {"all", "wb"}:
+            for row in session.query(WBFBSStock).all():
+                session.add(WBFBSStockSnapshot(
+                    snapshot_date=snapshot_date, captured_at=captured_at, size_id=row.size_id,
+                    warehouse_id=row.warehouse_id, sku=row.sku, quantity=row.quantity, raw_data=row.raw_data,
+                ))
+            for row in session.query(WBFboStock).all():
+                session.add(WBFboStockSnapshot(
+                    snapshot_date=snapshot_date, captured_at=captured_at, size_id=row.size_id,
+                    warehouse_id=row.warehouse_id, quantity=row.quantity,
+                    in_way_to_client=row.in_way_to_client, in_way_from_client=row.in_way_from_client,
+                    raw_data=row.raw_data,
+                ))
+        if marketplace in {"all", "ozon"}:
+            for row in session.query(OzonStock).all():
+                session.add(OzonStockSnapshot(
+                    snapshot_date=snapshot_date, captured_at=captured_at, product_id=row.product_id,
+                    offer_id=row.offer_id, stock_type=row.stock_type, present=row.present,
+                    reserved=row.reserved, raw_data=row.raw_data,
+                ))
+            for row in session.query(OzonWarehouseStock).all():
+                session.add(OzonWarehouseStockSnapshot(
+                    snapshot_date=snapshot_date,
+                    captured_at=captured_at,
+                    product_id=row.product_id,
+                    offer_id=row.offer_id,
+                    sku=row.sku,
+                    warehouse_id=row.warehouse_id,
+                    stock_type=row.stock_type,
+                    present=row.present,
+                    reserved=row.reserved,
+                    raw_data=row.raw_data,
+                ))
+        if marketplace in {"all", "yandex_market"}:
+            for row in session.query(YandexMarketStock).all():
+                session.add(YandexMarketStockSnapshot(
+                    snapshot_date=snapshot_date,
+                    captured_at=captured_at,
+                    campaign_id=row.campaign_id,
+                    warehouse_id=row.warehouse_id,
+                    offer_id=row.offer_id,
+                    stock_type=row.stock_type,
+                    count=row.count,
+                    source_updated_at=row.source_updated_at,
+                    raw_data=row.raw_data,
+                ))
 
     @staticmethod
     def _ozon_skus(items: list[dict[str, Any]]) -> list[int]:
@@ -653,7 +700,7 @@ class InventorySyncService:
     ) -> None:
         with self.session_factory() as session:
             session.add(InventorySyncRun(
-                id=run_id, run_type=run_type, snapshot_date=snapshot_date,
+                id=run_id, marketplace=self.marketplace, run_type=run_type, snapshot_date=snapshot_date,
                 scheduled_for=scheduled_for, started_at=started_at, status="running",
             ))
             session.commit()
@@ -681,15 +728,42 @@ class InventorySyncService:
                 row.yandex_market_rows = counts["yandex_market"]
             session.commit()
 
-    @staticmethod
-    def _acquire_lock(session: Any) -> bool:
+    def _acquire_lock(self, session: Any) -> bool:
         bind = session.get_bind()
         if bind.dialect.name != "postgresql":
             return True
-        return bool(session.execute(text("SELECT pg_try_advisory_lock(:lock_id)"), {"lock_id": LOCK_ID}).scalar())
+        acquired: list[int] = []
+        for lock_id in self._lock_ids():
+            locked = bool(session.execute(
+                text("SELECT pg_try_advisory_lock(:lock_id)"),
+                {"lock_id": lock_id},
+            ).scalar())
+            if not locked:
+                for acquired_id in reversed(acquired):
+                    session.execute(
+                        text("SELECT pg_advisory_unlock(:lock_id)"),
+                        {"lock_id": acquired_id},
+                    )
+                return False
+            acquired.append(lock_id)
+        return True
 
-    @staticmethod
-    def _release_lock(session: Any) -> None:
+    def _release_lock(self, session: Any) -> None:
         bind = session.get_bind()
         if bind.dialect.name == "postgresql":
-            session.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": LOCK_ID})
+            for lock_id in reversed(self._lock_ids()):
+                session.execute(
+                    text("SELECT pg_advisory_unlock(:lock_id)"),
+                    {"lock_id": lock_id},
+                )
+
+    def _lock_ids(self) -> tuple[int, ...]:
+        marketplace_ids = tuple(
+            zlib.crc32(f"wbozon:inventory:{name}".encode("utf-8"))
+            for name in MARKETPLACES
+            if name != "all"
+        )
+        if self.marketplace == "all":
+            return (LOCK_ID, *marketplace_ids)
+        index = MARKETPLACES.index(self.marketplace) - 1
+        return (marketplace_ids[index],)

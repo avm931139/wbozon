@@ -13,6 +13,7 @@ from healthcheck.__main__ import (
     _failure_signature,
     _ozon_task_checks,
     _systemctl_active,
+    collect_checks,
 )
 
 
@@ -69,3 +70,27 @@ def test_ozon_task_health_uses_latest_status_and_freshness(monkeypatch):
 
     assert checks[0].ok is True
     assert checks[1] == Check(False, "Ozon products sync", "no runs recorded")
+
+
+def test_collect_checks_targets_independent_workers_instead_of_cron(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    calls = []
+
+    monkeypatch.setattr("healthcheck.__main__.SessionLocal", session_factory)
+    monkeypatch.setattr("healthcheck.__main__.YANDEX_MARKET_CAMPAIGN_IDS", ())
+    monkeypatch.setattr("healthcheck.__main__.WB_TG_BOT_TOKEN", None)
+    monkeypatch.setattr("healthcheck.__main__.WB_TG_CHAT_ID", None)
+    monkeypatch.setattr("healthcheck.__main__.OZON_REQUIRED_TASKS", ())
+
+    collect_checks(
+        now=datetime(2026, 8, 20, 0, 1, tzinfo=ZoneInfo("Europe/Moscow")),
+        systemctl=lambda unit: calls.append(unit) or (True, "active"),
+    )
+
+    assert calls == [
+        "wbozon-inventory@wb.service",
+        "wbozon-inventory@ozon.service",
+        "wbozon-wb.service",
+    ]

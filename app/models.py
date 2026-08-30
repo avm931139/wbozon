@@ -1147,6 +1147,7 @@ class InventorySyncRun(Base):
     __table_args__ = {"comment": "Журнал периодических загрузок и ежедневных срезов остатков."}
 
     id = Column(String, primary_key=True)
+    marketplace = Column(String, nullable=False, default="all", index=True)
     run_type = Column(String, nullable=False, index=True)
     snapshot_date = Column(Date, nullable=True, index=True)
     scheduled_for = Column(DateTime(timezone=True), nullable=True)

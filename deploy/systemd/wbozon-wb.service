@@ -1,17 +1,22 @@
 [Unit]
-Description=wbozon Ozon synchronization task %i
+Description=wbozon Wildberries synchronization worker
 After=network-online.target postgresql.service
 Wants=network-online.target
 
 [Service]
-Type=oneshot
+Type=simple
 User=wbozon
 Group=wbozon
 WorkingDirectory=/home/wbozon/wbozon
 EnvironmentFile=/home/wbozon/wbozon/.env
-ExecStart=/home/wbozon/wbozon/.venv/bin/python -m ozon --task %i
-TimeoutStartSec=45min
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/wbozon/wbozon/.venv/bin/python -m wb
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=45
 UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target

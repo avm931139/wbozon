@@ -1,0 +1,23 @@
+[Unit]
+Description=wbozon inventory worker for %i
+After=network-online.target postgresql.service
+Wants=network-online.target
+Conflicts=wbozon-inventory.service
+
+[Service]
+Type=simple
+User=wbozon
+Group=wbozon
+WorkingDirectory=/home/wbozon/wbozon
+EnvironmentFile=/home/wbozon/wbozon/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/wbozon/wbozon/.venv/bin/python -m inventory_sync --marketplace %i
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=45
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

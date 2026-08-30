@@ -112,6 +112,11 @@ class MetadataFailureOzonWarehouseAPI(OzonWarehouseAPI):
         raise OzonHTTPError("temporary analytics failure")
 
 
+class UnexpectedAPI:
+    def list(self, **kwargs):
+        raise AssertionError("unrelated marketplace API must not be called")
+
+
 @pytest.fixture
 def inventory_db():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
@@ -230,6 +235,117 @@ def test_yandex_market_inventory_is_stored_snapshotted_and_zeroed(inventory_db):
     assert service.refresh()["yandex_market"] == 0
     with inventory_db() as session:
         assert {row.count for row in session.query(YandexMarketStock).all()} == {0}
+
+
+def test_marketplace_worker_does_not_call_or_change_other_marketplaces(inventory_db):
+    service = InventorySyncService(
+        marketplace="wb",
+        wb_fbs_api=FBSAPI(),
+        wb_fbo_api=FBOAPI(),
+        ozon_api=UnexpectedAPI(),
+        yandex_market_api=UnexpectedAPI(),
+        session_factory=inventory_db,
+        request_pause_seconds=0,
+        sleeper=lambda value: None,
+    )
+
+    result = service.refresh()
+
+    assert result == {
+        "wb_fbs": 1,
+        "wb_fbo": 1,
+        "ozon": 0,
+        "ozon_warehouse": 0,
+        "yandex_market": 0,
+    }
+    with inventory_db() as session:
+        assert session.query(OzonStock).filter_by(product_id=200).one().present == 11
+        run = session.query(InventorySyncRun).one()
+        assert run.marketplace == "wb"
+
+
+def test_ozon_worker_is_not_affected_by_yandex_market_failure(inventory_db):
+    service = InventorySyncService(
+        marketplace="ozon",
+        wb_fbs_api=UnexpectedAPI(),
+        wb_fbo_api=UnexpectedAPI(),
+        ozon_api=OzonAPI(),
+        ozon_warehouse_api=OzonWarehouseAPI(),
+        yandex_market_api=UnexpectedAPI(),
+        session_factory=inventory_db,
+    )
+
+    result = service.refresh()
+
+    assert result["ozon"] == 1
+    assert result["ozon_warehouse"] == 1
+    assert result["wb_fbs"] == 0
+    assert result["yandex_market"] == 0
+    with inventory_db() as session:
+        assert session.query(OzonStock).filter_by(product_id=100).one().present == 9
+        assert session.query(WBFBSStock).filter_by(sku="old-fbs").one().quantity == 5
+        assert session.query(InventorySyncRun).one().marketplace == "ozon"
+
+
+def test_marketplace_snapshot_only_writes_its_own_tables(inventory_db):
+    service = InventorySyncService(
+        marketplace="wb",
+        wb_fbs_api=FBSAPI(),
+        wb_fbo_api=FBOAPI(),
+        session_factory=inventory_db,
+        request_pause_seconds=0,
+        sleeper=lambda value: None,
+    )
+    snapshot_day = date(2026, 8, 31)
+
+    service.snapshot(
+        snapshot_day,
+        scheduled_for=datetime(2026, 8, 31, 0, 0, tzinfo=ZoneInfo("Europe/Moscow")),
+    )
+
+    with inventory_db() as session:
+        assert session.query(WBFBSStockSnapshot).filter_by(snapshot_date=snapshot_day).count() > 0
+        assert session.query(WBFboStockSnapshot).filter_by(snapshot_date=snapshot_day).count() > 0
+        assert session.query(OzonStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 0
+        assert session.query(YandexMarketStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 0
+
+
+def test_yandex_market_worker_requires_campaign_ids(inventory_db):
+    service = InventorySyncService(
+        marketplace="yandex_market",
+        yandex_market_api=YandexMarketAPI(),
+        yandex_market_campaign_ids=(),
+        session_factory=inventory_db,
+    )
+
+    with pytest.raises(RuntimeError, match="YANDEX_MARKET_CAMPAIGN_IDS"):
+        service.refresh()
+
+
+def test_inventory_workers_use_distinct_locks_and_all_mode_reserves_each_one():
+    wb = InventorySyncService(marketplace="wb", wb_fbs_api=FBSAPI(), wb_fbo_api=FBOAPI())
+    ozon = InventorySyncService(
+        marketplace="ozon",
+        ozon_api=OzonAPI(),
+        ozon_warehouse_api=OzonWarehouseAPI(),
+    )
+    yandex = InventorySyncService(
+        marketplace="yandex_market",
+        yandex_market_api=YandexMarketAPI(),
+        yandex_market_campaign_ids=(300,),
+    )
+    combined = InventorySyncService(
+        wb_fbs_api=FBSAPI(),
+        wb_fbo_api=FBOAPI(),
+        ozon_api=OzonAPI(),
+        ozon_warehouse_api=OzonWarehouseAPI(),
+        yandex_market_api=YandexMarketAPI(),
+        yandex_market_campaign_ids=(300,),
+    )
+
+    isolated = wb._lock_ids() + ozon._lock_ids() + yandex._lock_ids()
+    assert len(set(isolated)) == 3
+    assert set(isolated).issubset(combined._lock_ids())
 
 
 def test_duplicate_ozon_warehouse_rows_fail_before_inventory_is_changed(inventory_db):

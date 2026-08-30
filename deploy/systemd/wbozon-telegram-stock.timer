@@ -1,0 +1,11 @@
+[Unit]
+Description=Send marketplace stock workbooks daily at 09:00 Moscow time
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=30
+Unit=wbozon-telegram-stock.service
+
+[Install]
+WantedBy=timers.target

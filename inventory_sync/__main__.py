@@ -8,12 +8,18 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from inventory_sync.scheduler import InventoryScheduler, InventorySyncSettings
-from inventory_sync.service import InventorySyncService
+from inventory_sync.service import InventorySyncService, MARKETPLACES
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Periodic WB, Ozon, and Yandex Market inventory synchronization"
+    )
+    parser.add_argument(
+        "--marketplace",
+        choices=MARKETPLACES,
+        default="all",
+        help="isolate one marketplace worker; 'all' is retained for compatibility",
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--once", action="store_true", help="refresh current inventory once")
@@ -22,7 +28,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     settings = InventorySyncSettings()
-    service = InventorySyncService()
+    service = InventorySyncService(marketplace=args.marketplace)
     if args.once:
         print(service.refresh())
         return

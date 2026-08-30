@@ -120,35 +120,58 @@ def collect_checks(
     current = current.replace(tzinfo=timezone) if current.tzinfo is None else current.astimezone(timezone)
     checks: list[Check] = []
 
-    inventory_ok, inventory_status = systemctl("wbozon-inventory.service")
-    checks.append(Check(inventory_ok, "inventory service", inventory_status))
-    cron_ok, cron_status = systemctl("cron.service")
-    if not cron_ok and cron_status in {"unknown", "inactive", "exit 4"}:
-        cron_ok, cron_status = systemctl("crond.service")
-    checks.append(Check(cron_ok, "cron service", cron_status))
+    inventory_marketplaces = ["wb", "ozon"]
+    if YANDEX_MARKET_CAMPAIGN_IDS:
+        inventory_marketplaces.append("yandex_market")
+    for marketplace in inventory_marketplaces:
+        unit = f"wbozon-inventory@{marketplace}.service"
+        ok, status = systemctl(unit)
+        checks.append(Check(ok, f"{marketplace} inventory service", status))
+
+    wb_ok, wb_status = systemctl("wbozon-wb.service")
+    checks.append(Check(wb_ok, "WB synchronization service", wb_status))
+    if WB_TG_BOT_TOKEN and WB_TG_CHAT_ID:
+        telegram_ok, telegram_status = systemctl("wbozon-telegram.service")
+        checks.append(Check(telegram_ok, "Telegram report service", telegram_status))
+        stock_timer_ok, stock_timer_status = systemctl("wbozon-telegram-stock.timer")
+        checks.append(Check(stock_timer_ok, "Telegram stock timer", stock_timer_status))
+        if WB_TG_PROXY_URL:
+            relay_ok, relay_status = systemctl("wbozon-telegram-relay.service")
+            checks.append(Check(relay_ok, "Telegram relay service", relay_status))
 
     with SessionLocal() as session:
-        latest = session.query(InventorySyncRun).order_by(InventorySyncRun.started_at.desc()).first()
-        completed = session.query(InventorySyncRun).filter_by(status="completed").order_by(
-            InventorySyncRun.finished_at.desc()
-        ).first()
-        if latest is None:
-            checks.append(Check(False, "latest inventory run", "no runs recorded"))
-        else:
-            detail = f"{latest.status}, started {latest.started_at}, type={latest.run_type}"
-            if latest.error:
-                detail += f", error={latest.error[:300]}"
-            checks.append(Check(latest.status in {"completed", "running"}, "latest inventory run", detail))
+        for marketplace in inventory_marketplaces:
+            latest = session.query(InventorySyncRun).filter_by(marketplace=marketplace).order_by(
+                InventorySyncRun.started_at.desc()
+            ).first()
+            completed = session.query(InventorySyncRun).filter_by(
+                marketplace=marketplace, status="completed"
+            ).order_by(InventorySyncRun.finished_at.desc()).first()
+            if latest is None:
+                checks.append(Check(False, f"latest {marketplace} inventory run", "no runs recorded"))
+            else:
+                detail = f"{latest.status}, started {latest.started_at}, type={latest.run_type}"
+                if latest.error:
+                    detail += f", error={latest.error[:300]}"
+                checks.append(Check(
+                    latest.status in {"completed", "running"},
+                    f"latest {marketplace} inventory run",
+                    detail,
+                ))
 
-        if completed is None or completed.finished_at is None:
-            checks.append(Check(False, "inventory freshness", "no completed runs"))
-        else:
-            finished_at = completed.finished_at
-            if finished_at.tzinfo is None:
-                finished_at = finished_at.replace(tzinfo=ZoneInfo("UTC"))
-            age = current - finished_at.astimezone(timezone)
-            max_age = timedelta(seconds=INVENTORY_SYNC_INTERVAL_SECONDS * 2 + 900)
-            checks.append(Check(age <= max_age, "inventory freshness", f"last success {age} ago"))
+            if completed is None or completed.finished_at is None:
+                checks.append(Check(False, f"{marketplace} inventory freshness", "no completed runs"))
+            else:
+                finished_at = completed.finished_at
+                if finished_at.tzinfo is None:
+                    finished_at = finished_at.replace(tzinfo=ZoneInfo("UTC"))
+                age = current - finished_at.astimezone(timezone)
+                max_age = timedelta(seconds=INVENTORY_SYNC_INTERVAL_SECONDS * 2 + 900)
+                checks.append(Check(
+                    age <= max_age,
+                    f"{marketplace} inventory freshness",
+                    f"last success {age} ago",
+                ))
 
         checks.extend(_ozon_task_checks(session, current))
 

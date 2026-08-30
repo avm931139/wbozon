@@ -96,12 +96,13 @@ def configure_wb_logging(
     level: str = WB_LOG_LEVEL,
     max_bytes: int = WB_LOG_MAX_BYTES,
     backup_count: int = WB_LOG_BACKUP_COUNT,
+    file_prefix: str = "wb",
 ) -> tuple[Path, Path]:
     global _database_logging_enabled
     directory = Path(log_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    activity_path = directory / "wb_sync.log"
-    error_path = directory / "wb_errors.jsonl"
+    activity_path = directory / f"{file_prefix}_sync.log"
+    error_path = directory / f"{file_prefix}_errors.jsonl"
 
     formatter = logging.Formatter(
         "%(asctime)s %(levelname)s %(name)s cycle=%(cycle_id)s task=%(task)s: %(message)s"

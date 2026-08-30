@@ -1,0 +1,88 @@
+# Развертывание независимых systemd-процессов
+
+Файлы в этом каталоге реализуют production-схему из [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md). Постоянные workers разделены по ответственности, а периодические операции оформлены как oneshot-service с timer.
+
+## Установка unit-файлов
+
+```bash
+cd /home/wbozon/wbozon
+sudo cp deploy/systemd/*.service /etc/systemd/system/
+sudo cp deploy/systemd/*.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemd-analyze verify /etc/systemd/system/wbozon-*.service /etc/systemd/system/wbozon-*.timer
+```
+
+Все прикладные units работают от `wbozon`, читают `/home/wbozon/wbozon/.env` и используют виртуальное окружение проекта. Если путь или пользователь отличаются, unit-файлы нужно изменить перед копированием.
+
+## Переход со старого общего inventory service
+
+Сначала примените миграцию, затем остановите старый общий процесс и включите три изолированных workers:
+
+```bash
+./.venv/bin/python -m alembic upgrade head
+sudo systemctl disable --now wbozon-inventory.service
+sudo systemctl enable --now \
+  wbozon-inventory@wb.service \
+  wbozon-inventory@ozon.service \
+  wbozon-inventory@yandex_market.service
+```
+
+Не запускайте старый `wbozon-inventory.service` одновременно с новыми instances. Режим `--marketplace all` оставлен только для совместимости и ручной диагностики.
+Шаблон дополнительно содержит `Conflicts=wbozon-inventory.service`, а advisory locks совместимого режима пересекаются со всеми тремя новыми locks.
+
+Если Яндекс Маркет не настроен, не включайте `wbozon-inventory@yandex_market.service`; healthcheck также не требует его без `YANDEX_MARKET_CAMPAIGN_IDS`.
+
+## Основные сервисы и Telegram
+
+```bash
+sudo systemctl enable --now \
+  wbozon-wb.service \
+  wbozon-telegram-relay.service \
+  wbozon-telegram.service \
+  wbozon-telegram-stock.timer \
+  wbozon-healthcheck.timer
+```
+
+`wbozon-telegram-relay.service` нужен на текущем VPS из-за блокировки Telegram. В среде с прямым доступом relay можно не включать и удалить `WB_TG_PROXY_URL` из `.env`.
+
+После включения `wbozon-telegram-stock.timer` удалите старую cron-строку `python -m telegram_bot --once stock-files`, иначе возможны параллельные попытки. Дедупликация защищает от повторной доставки, но второй механизм расписания не нужен.
+
+## Ozon timers
+
+```bash
+sudo systemctl enable --now \
+  wbozon-ozon-products.timer \
+  wbozon-ozon-orders.timer \
+  wbozon-ozon-supplies.timer \
+  wbozon-ozon-daily-sales.timer \
+  wbozon-ozon-finances.timer \
+  wbozon-ozon-ads.timer
+```
+
+`communications` на текущем кабинете не включается: Questions API доступен, но Reviews API отвечает HTTP 403. После выдачи доступа проверьте ручной запуск и только затем включите timer:
+
+```bash
+sudo systemctl start wbozon-ozon@communications.service
+sudo journalctl -u wbozon-ozon@communications.service -n 50 --no-pager
+sudo systemctl enable --now wbozon-ozon-communications.timer
+```
+
+## Проверка
+
+```bash
+systemctl --no-pager --full status \
+  wbozon-wb.service \
+  wbozon-inventory@wb.service \
+  wbozon-inventory@ozon.service \
+  wbozon-inventory@yandex_market.service \
+  wbozon-telegram.service \
+  wbozon-telegram-relay.service
+
+systemctl list-timers 'wbozon-*' --all
+sudo systemctl start wbozon-healthcheck.service
+sudo journalctl -u wbozon-healthcheck.service -n 100 --no-pager
+```
+
+`inactive (dead)` нормально только для успешно завершившихся oneshot services. Постоянные `wbozon-wb.service`, `wbozon-inventory@*.service`, `wbozon-telegram.service` и relay должны быть `active (running)`.
+
+Календарь timers задан в `Europe/Moscow`; поле `NEXT` выводится systemd в локальной временной зоне VPS.

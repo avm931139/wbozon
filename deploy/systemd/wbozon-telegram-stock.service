@@ -1,0 +1,17 @@
+[Unit]
+Description=wbozon daily marketplace stock workbooks
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wbozon
+Group=wbozon
+WorkingDirectory=/home/wbozon/wbozon
+EnvironmentFile=/home/wbozon/wbozon/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/wbozon/wbozon/.venv/bin/python -m telegram_bot --once stock-files
+TimeoutStartSec=15min
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes

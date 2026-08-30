@@ -1,5 +1,5 @@
 [Unit]
-Description=wbozon Ozon synchronization task %i
+Description=wbozon application healthcheck
 After=network-online.target postgresql.service
 Wants=network-online.target
 
@@ -9,9 +9,9 @@ User=wbozon
 Group=wbozon
 WorkingDirectory=/home/wbozon/wbozon
 EnvironmentFile=/home/wbozon/wbozon/.env
-ExecStart=/home/wbozon/wbozon/.venv/bin/python -m ozon --task %i
-TimeoutStartSec=45min
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/wbozon/wbozon/.venv/bin/python -m healthcheck
+TimeoutStartSec=5min
 UMask=0077
-
-[Install]
-WantedBy=multi-user.target
+NoNewPrivileges=yes
+PrivateTmp=yes

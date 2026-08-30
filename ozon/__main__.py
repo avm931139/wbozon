@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import signal
 from datetime import date
 from typing import Any
 
-from wb.sync_logging import configure_wb_logging, install_context_filter
 from ozon.scheduler import OzonPeriodicSync
 from ozon.services.overview_service import OzonOverviewService
 from ozon.services.sync_service import OzonSyncService
@@ -14,6 +14,10 @@ from ozon.task_runner import OzonTaskRunner
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     parser = argparse.ArgumentParser(description="Ozon Seller API synchronization")
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--once", action="store_true", help="run one complete Ozon cycle and exit")
@@ -38,8 +42,6 @@ def main() -> None:
         year, month = (int(value) for value in args.report_month.split("-"))
         print(json.dumps(OzonOverviewService.month_report(year, month), ensure_ascii=False, indent=2))
         return
-    configure_wb_logging()
-    install_context_filter()
     scheduler = OzonPeriodicSync()
 
     def stop(signum: int, frame: Any) -> None:
