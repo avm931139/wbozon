@@ -12,7 +12,9 @@ from inventory_sync.service import InventorySyncService
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Periodic WB and Ozon inventory synchronization")
+    parser = argparse.ArgumentParser(
+        description="Periodic WB, Ozon, and Yandex Market inventory synchronization"
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--once", action="store_true", help="refresh current inventory once")
     group.add_argument("--snapshot", action="store_true", help="create today's Moscow-time inventory snapshot")

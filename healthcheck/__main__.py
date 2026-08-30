@@ -26,6 +26,7 @@ from app.config import (
     WB_TG_MORNING_TIME,
     WB_TG_PROXY_URL,
     WB_TG_REQUEST_TIMEOUT_SECONDS,
+    YANDEX_MARKET_CAMPAIGN_IDS,
 )
 from app.db import SessionLocal
 from app.models import (
@@ -36,6 +37,7 @@ from app.models import (
     WBFboStockSnapshot,
     WBFBSStockSnapshot,
     WBTelegramDelivery,
+    YandexMarketStockSnapshot,
 )
 from telegram_bot.client import TelegramClient
 from telegram_bot.dispatcher import TelegramReportDispatcher
@@ -88,7 +90,7 @@ def _failure_signature(checks: list[Check]) -> str:
 
 def _error_message(checks: list[Check], now: datetime) -> str:
     failures = [check for check in checks if not check.ok]
-    lines = [f"⚠️ Ошибки WB/Ozon — {now:%d.%m.%Y %H:%M} МСК"]
+    lines = [f"⚠️ Ошибки WB/Ozon/Yandex Market — {now:%d.%m.%Y %H:%M} МСК"]
     lines.extend(f"• {check.name}: {check.detail}" for check in failures)
     return "\n".join(lines)
 
@@ -150,12 +152,14 @@ def collect_checks(
 
         checks.extend(_ozon_task_checks(session, current))
 
-        snapshot_models = (
+        snapshot_models = [
             ("WB FBS snapshot", WBFBSStockSnapshot),
             ("WB FBO snapshot", WBFboStockSnapshot),
             ("Ozon snapshot", OzonStockSnapshot),
             ("Ozon warehouse snapshot", OzonWarehouseStockSnapshot),
-        )
+        ]
+        if YANDEX_MARKET_CAMPAIGN_IDS:
+            snapshot_models.append(("Yandex Market snapshot", YandexMarketStockSnapshot))
         snapshot_grace = current.replace(hour=0, minute=15, second=0, microsecond=0)
         require_snapshot = current >= snapshot_grace
         for name, model in snapshot_models:

@@ -1092,6 +1092,56 @@ class OzonWarehouseStockSnapshot(Base):
     raw_data = Column(JSON, nullable=False)
 
 
+class YandexMarketStock(Base):
+    __tablename__ = "yandex_market_stocks"
+    __table_args__ = (
+        UniqueConstraint(
+            "campaign_id",
+            "warehouse_id",
+            "offer_id",
+            "stock_type",
+            name="uq_yandex_market_stock_identity",
+        ),
+        {"comment": "Текущие остатки Яндекс Маркета по магазину, складу, SKU и типу."},
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(BigInteger, nullable=False, index=True)
+    warehouse_id = Column(BigInteger, nullable=False, index=True)
+    offer_id = Column(String, nullable=False, index=True)
+    stock_type = Column(String, nullable=False, index=True)
+    count = Column(Integer, nullable=False, default=0)
+    source_updated_at = Column(DateTime(timezone=True), nullable=True)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class YandexMarketStockSnapshot(Base):
+    __tablename__ = "yandex_market_stock_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "snapshot_date",
+            "campaign_id",
+            "warehouse_id",
+            "offer_id",
+            "stock_type",
+            name="uq_yandex_market_stock_snapshot",
+        ),
+        {"comment": "Ежедневные срезы остатков Яндекс Маркета на 00:00 по Москве."},
+    )
+
+    id = Column(Integer, primary_key=True)
+    snapshot_date = Column(Date, nullable=False, index=True)
+    captured_at = Column(DateTime(timezone=True), nullable=False)
+    campaign_id = Column(BigInteger, nullable=False, index=True)
+    warehouse_id = Column(BigInteger, nullable=False, index=True)
+    offer_id = Column(String, nullable=False, index=True)
+    stock_type = Column(String, nullable=False, index=True)
+    count = Column(Integer, nullable=False, default=0)
+    source_updated_at = Column(DateTime(timezone=True), nullable=True)
+    raw_data = Column(JSON, nullable=False)
+
+
 class InventorySyncRun(Base):
     __tablename__ = "inventory_sync_runs"
     __table_args__ = {"comment": "Журнал периодических загрузок и ежедневных срезов остатков."}
@@ -1107,6 +1157,7 @@ class InventorySyncRun(Base):
     wb_fbo_rows = Column(Integer, nullable=False, default=0)
     ozon_rows = Column(Integer, nullable=False, default=0)
     ozon_warehouse_rows = Column(Integer, nullable=False, default=0)
+    yandex_market_rows = Column(Integer, nullable=False, default=0)
     error = Column(Text, nullable=True)
 
 

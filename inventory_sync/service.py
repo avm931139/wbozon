@@ -9,6 +9,7 @@ from typing import Any, Callable
 from sqlalchemy import text
 
 from app.db import SessionLocal
+from app.config import YANDEX_MARKET_CAMPAIGN_IDS
 from app.models import (
     InventorySyncRun,
     OzonStock,
@@ -23,12 +24,15 @@ from app.models import (
     WBFBSStockSnapshot,
     WBFBSWarehouse,
     WBProductSize,
+    YandexMarketStock,
+    YandexMarketStockSnapshot,
 )
 from ozon.exceptions import OzonError
 from ozon.stocks import OzonStocksAPI
 from ozon.warehouse_stocks import OzonWarehouseStocksAPI
 from wb.fbo_stocks import FBOStocksAPI
 from wb.stocks import StocksAPI
+from yandex_market.stocks import YandexMarketStocksAPI
 
 
 logger = logging.getLogger(__name__)
@@ -49,6 +53,8 @@ class InventorySyncService:
         wb_fbo_api: FBOStocksAPI | None = None,
         ozon_api: OzonStocksAPI | None = None,
         ozon_warehouse_api: OzonWarehouseStocksAPI | None = None,
+        yandex_market_api: YandexMarketStocksAPI | None = None,
+        yandex_market_campaign_ids: tuple[int, ...] | None = None,
         session_factory: Callable[..., Any] = SessionLocal,
         request_pause_seconds: float = 0.21,
         sleeper: Callable[[float], None] = time.sleep,
@@ -57,6 +63,12 @@ class InventorySyncService:
         self.wb_fbo_api = wb_fbo_api or FBOStocksAPI()
         self.ozon_api = ozon_api or OzonStocksAPI()
         self.ozon_warehouse_api = ozon_warehouse_api or OzonWarehouseStocksAPI()
+        self.yandex_market_api = yandex_market_api or YandexMarketStocksAPI()
+        self.yandex_market_campaign_ids = (
+            YANDEX_MARKET_CAMPAIGN_IDS
+            if yandex_market_campaign_ids is None
+            else tuple(yandex_market_campaign_ids)
+        )
         self.session_factory = session_factory
         self.request_pause_seconds = request_pause_seconds
         self.sleeper = sleeper
@@ -66,7 +78,14 @@ class InventorySyncService:
 
     def snapshot(self, snapshot_date: date, *, scheduled_for: datetime) -> dict[str, int | bool]:
         if self.snapshot_exists(snapshot_date):
-            return {"skipped": True, "wb_fbs": 0, "wb_fbo": 0, "ozon": 0, "ozon_warehouse": 0}
+            return {
+                "skipped": True,
+                "wb_fbs": 0,
+                "wb_fbo": 0,
+                "ozon": 0,
+                "ozon_warehouse": 0,
+                "yandex_market": 0,
+            }
         return self._run("daily_snapshot", snapshot_date=snapshot_date, scheduled_for=scheduled_for)
 
     def snapshot_exists(self, snapshot_date: date) -> bool:
@@ -117,6 +136,9 @@ class InventorySyncService:
                             "Ozon warehouse metadata enrichment failed; quantities will still be saved",
                             exc_info=True,
                         )
+                yandex_market = self._fetch_yandex_market()
+                if yandex_market is not None:
+                    self._validate_yandex_market_items(yandex_market)
                 captured_at = datetime.now(timezone.utc)
                 counts = self._persist(
                     wb_fbs,
@@ -124,6 +146,7 @@ class InventorySyncService:
                     ozon,
                     ozon_warehouse,
                     ozon_warehouse_metadata,
+                    yandex_market,
                     captured_at,
                     snapshot_date,
                 )
@@ -159,6 +182,14 @@ class InventorySyncService:
                 request_number += 1
         return result
 
+    def _fetch_yandex_market(self) -> list[dict[str, Any]] | None:
+        if not self.yandex_market_campaign_ids:
+            return None
+        result: list[dict[str, Any]] = []
+        for campaign_id in self.yandex_market_campaign_ids:
+            result.extend(self.yandex_market_api.list(campaign_id=campaign_id))
+        return result
+
     def _persist(
         self,
         wb_fbs_items: list[dict[str, Any]],
@@ -166,6 +197,7 @@ class InventorySyncService:
         ozon_items: list[dict[str, Any]],
         ozon_warehouse_items: list[dict[str, Any]],
         ozon_warehouse_metadata: list[dict[str, Any]],
+        yandex_market_items: list[dict[str, Any]] | None,
         captured_at: datetime,
         snapshot_date: date | None,
     ) -> dict[str, int]:
@@ -179,6 +211,11 @@ class InventorySyncService:
                 ozon_warehouse_metadata,
                 captured_at,
             )
+            yandex_market_count = (
+                self._persist_yandex_market(session, yandex_market_items, captured_at)
+                if yandex_market_items is not None
+                else 0
+            )
             session.flush()
             if snapshot_date is not None:
                 self._create_snapshots(session, snapshot_date, captured_at)
@@ -188,6 +225,7 @@ class InventorySyncService:
             "wb_fbo": fbo_count,
             "ozon": ozon_count,
             "ozon_warehouse": ozon_warehouse_count,
+            "yandex_market": yandex_market_count,
         }
 
     @staticmethod
@@ -401,6 +439,55 @@ class InventorySyncService:
         return len(retained)
 
     @staticmethod
+    def _persist_yandex_market(
+        session: Any,
+        items: list[dict[str, Any]],
+        captured_at: datetime,
+    ) -> int:
+        existing = {
+            (int(row.campaign_id), int(row.warehouse_id), row.offer_id, row.stock_type): row
+            for row in session.query(YandexMarketStock).all()
+        }
+        retained: set[tuple[int, int, str, str]] = set()
+        for item in items:
+            campaign_id = int(item["campaignId"])
+            warehouse_id = int(item["warehouseId"])
+            offer_id = str(item["offerId"])
+            source_updated_at = InventorySyncService._parse_source_datetime(item.get("updatedAt"))
+            for stock in item.get("stocks") or []:
+                if not isinstance(stock, dict):
+                    continue
+                stock_type = str(stock["type"]).upper()
+                key = (campaign_id, warehouse_id, offer_id, stock_type)
+                retained.add(key)
+                row = existing.get(key)
+                if row is None:
+                    row = YandexMarketStock(
+                        campaign_id=campaign_id,
+                        warehouse_id=warehouse_id,
+                        offer_id=offer_id,
+                        stock_type=stock_type,
+                        raw_data=item,
+                        fetched_at=captured_at,
+                    )
+                    session.add(row)
+                    existing[key] = row
+                row.count = int(stock.get("count") or 0)
+                row.source_updated_at = source_updated_at
+                row.raw_data = item
+                row.fetched_at = captured_at
+
+        for key, row in existing.items():
+            if key not in retained:
+                row.count = 0
+                row.raw_data = {
+                    **(row.raw_data or {}),
+                    "zeroed_by_inventory_sync": True,
+                }
+                row.fetched_at = captured_at
+        return len(retained)
+
+    @staticmethod
     def _create_snapshots(session: Any, snapshot_date: date, captured_at: datetime) -> None:
         for row in session.query(WBFBSStock).all():
             session.add(WBFBSStockSnapshot(
@@ -431,6 +518,18 @@ class InventorySyncService:
                 stock_type=row.stock_type,
                 present=row.present,
                 reserved=row.reserved,
+                raw_data=row.raw_data,
+            ))
+        for row in session.query(YandexMarketStock).all():
+            session.add(YandexMarketStockSnapshot(
+                snapshot_date=snapshot_date,
+                captured_at=captured_at,
+                campaign_id=row.campaign_id,
+                warehouse_id=row.warehouse_id,
+                offer_id=row.offer_id,
+                stock_type=row.stock_type,
+                count=row.count,
+                source_updated_at=row.source_updated_at,
                 raw_data=row.raw_data,
             ))
 
@@ -494,6 +593,49 @@ class InventorySyncService:
             )
 
     @staticmethod
+    def _validate_yandex_market_items(items: list[dict[str, Any]]) -> None:
+        seen: set[tuple[int, int, str, str]] = set()
+        for item in items:
+            missing = [
+                field
+                for field in ("campaignId", "warehouseId", "offerId")
+                if item.get(field) is None
+            ]
+            if missing:
+                raise RuntimeError(
+                    f"Yandex Market stock row has no {', '.join(missing)}"
+                )
+            stocks = item.get("stocks")
+            if not isinstance(stocks, list):
+                raise RuntimeError("Yandex Market stock row has no stocks list")
+            for stock in stocks:
+                if not isinstance(stock, dict) or not stock.get("type"):
+                    raise RuntimeError("Yandex Market stock row has an invalid stock type")
+                identity = (
+                    int(item["campaignId"]),
+                    int(item["warehouseId"]),
+                    str(item["offerId"]),
+                    str(stock["type"]).upper(),
+                )
+                if identity in seen:
+                    raise RuntimeError(
+                        f"duplicate Yandex Market stock identity: {identity}"
+                    )
+                seen.add(identity)
+
+    @staticmethod
+    def _parse_source_datetime(value: Any) -> datetime | None:
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise RuntimeError(f"invalid Yandex Market updatedAt: {value}") from exc
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+    @staticmethod
     def _fbo_warehouse_key(item: dict[str, Any]) -> tuple[int, str, str]:
         return (
             int(item.get("warehouseId") or 0),
@@ -536,6 +678,7 @@ class InventorySyncService:
                 row.wb_fbo_rows = counts["wb_fbo"]
                 row.ozon_rows = counts["ozon"]
                 row.ozon_warehouse_rows = counts["ozon_warehouse"]
+                row.yandex_market_rows = counts["yandex_market"]
             session.commit()
 
     @staticmethod

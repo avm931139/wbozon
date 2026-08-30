@@ -78,6 +78,19 @@ OZON_DAILY_SALES_MAX_AGE_SECONDS = int(os.getenv("OZON_DAILY_SALES_MAX_AGE_SECON
 OZON_FINANCES_MAX_AGE_SECONDS = int(os.getenv("OZON_FINANCES_MAX_AGE_SECONDS", "14400"))
 OZON_ADS_MAX_AGE_SECONDS = int(os.getenv("OZON_ADS_MAX_AGE_SECONDS", "7200"))
 
+# Yandex Market Partner API inventory.
+YANDEX_MARKET_API_KEY = os.getenv("YANDEX_MARKET_API_KEY")
+YANDEX_MARKET_BASE_URL = os.getenv(
+    "YANDEX_MARKET_BASE_URL",
+    "https://api.partner.market.yandex.ru",
+)
+YANDEX_MARKET_TIMEOUT_SECONDS = int(os.getenv("YANDEX_MARKET_TIMEOUT_SECONDS", "10"))
+YANDEX_MARKET_CAMPAIGN_IDS = tuple(
+    int(value.strip())
+    for value in os.getenv("YANDEX_MARKET_CAMPAIGN_IDS", "").split(",")
+    if value.strip()
+)
+
 # Ozon inventory is realtime; 00:00 Moscow is our daily business cutoff.
 # Server timezone does not affect the snapshot schedule.
 INVENTORY_SYNC_INTERVAL_SECONDS = int(os.getenv("INVENTORY_SYNC_INTERVAL_SECONDS", "3600"))

@@ -1,4 +1,4 @@
-"""Independent WB and Ozon inventory synchronization."""
+"""Independent WB, Ozon, and Yandex Market inventory synchronization."""
 
 from inventory_sync.service import InventorySyncService
 

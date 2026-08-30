@@ -21,6 +21,8 @@ from app.models import (
     WBFBSWarehouse,
     WBProduct,
     WBProductSize,
+    YandexMarketStock,
+    YandexMarketStockSnapshot,
 )
 from inventory_sync.scheduler import InventoryScheduler, InventorySyncSettings
 from inventory_sync.service import InventorySyncService
@@ -79,6 +81,24 @@ class OzonWarehouseAPI:
             "cluster_id": 77,
             "cluster_name": "Москва",
         }]
+
+
+class YandexMarketAPI:
+    def __init__(self):
+        self.rows = [{
+            "campaignId": 300,
+            "warehouseId": 800,
+            "offerId": "market-sku-1",
+            "stocks": [
+                {"type": "AVAILABLE", "count": 12},
+                {"type": "FREEZE", "count": 2},
+            ],
+            "updatedAt": "2026-08-30T12:00:00Z",
+        }]
+
+    def list(self, *, campaign_id):
+        assert campaign_id == 300
+        return self.rows
 
 
 class DuplicateOzonWarehouseAPI(OzonWarehouseAPI):
@@ -147,7 +167,13 @@ def test_daily_snapshot_updates_current_rows_and_zeroes_missing_inventory(invent
 
     result = service.snapshot(snapshot_day, scheduled_for=scheduled_for)
 
-    assert result == {"wb_fbs": 1, "wb_fbo": 1, "ozon": 1, "ozon_warehouse": 1}
+    assert result == {
+        "wb_fbs": 1,
+        "wb_fbo": 1,
+        "ozon": 1,
+        "ozon_warehouse": 1,
+        "yandex_market": 0,
+    }
     with inventory_db() as session:
         assert session.query(WBFBSStock).filter_by(sku="sku-10").one().quantity == 7
         assert session.query(WBFBSStock).filter_by(sku="old-fbs").one().quantity == 0
@@ -167,6 +193,43 @@ def test_daily_snapshot_updates_current_rows_and_zeroes_missing_inventory(invent
         assert run.ozon_warehouse_rows == 1
 
     assert service.snapshot(snapshot_day, scheduled_for=scheduled_for)["skipped"] is True
+
+
+def test_yandex_market_inventory_is_stored_snapshotted_and_zeroed(inventory_db):
+    api = YandexMarketAPI()
+    service = InventorySyncService(
+        wb_fbs_api=FBSAPI(),
+        wb_fbo_api=FBOAPI(),
+        ozon_api=OzonAPI(),
+        ozon_warehouse_api=OzonWarehouseAPI(),
+        yandex_market_api=api,
+        yandex_market_campaign_ids=(300,),
+        session_factory=inventory_db,
+        request_pause_seconds=0,
+        sleeper=lambda value: None,
+    )
+    snapshot_day = date(2026, 8, 30)
+
+    result = service.snapshot(
+        snapshot_day,
+        scheduled_for=datetime(2026, 8, 30, 0, 0, tzinfo=ZoneInfo("Europe/Moscow")),
+    )
+
+    assert result["yandex_market"] == 2
+    with inventory_db() as session:
+        available = session.query(YandexMarketStock).filter_by(stock_type="AVAILABLE").one()
+        assert available.count == 12
+        assert available.source_updated_at.replace(tzinfo=timezone.utc) == datetime(
+            2026, 8, 30, 12, 0, tzinfo=timezone.utc
+        )
+        assert session.query(YandexMarketStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 2
+        run = session.query(InventorySyncRun).filter_by(snapshot_date=snapshot_day).one()
+        assert run.yandex_market_rows == 2
+
+    api.rows = []
+    assert service.refresh()["yandex_market"] == 0
+    with inventory_db() as session:
+        assert {row.count for row in session.query(YandexMarketStock).all()} == {0}
 
 
 def test_duplicate_ozon_warehouse_rows_fail_before_inventory_is_changed(inventory_db):
