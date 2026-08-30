@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -32,14 +33,33 @@ def split_text(text: str, limit: int = 3900) -> list[str]:
 
 
 class TelegramClient:
-    def __init__(self, token: str, chat_id: str, *, timeout: int = 30, session: Any = None) -> None:
+    def __init__(
+        self,
+        token: str,
+        chat_id: str,
+        *,
+        timeout: int = 30,
+        proxy_url: str | None = None,
+        session: Any = None,
+    ) -> None:
         if not token or not chat_id:
             raise ValueError("WB_TG_BOT_TOKEN and WB_TG_CHAT_ID must be set")
+        if proxy_url:
+            parsed_proxy = urlparse(proxy_url)
+            if parsed_proxy.scheme not in {"http", "https", "socks5", "socks5h"} or not parsed_proxy.netloc:
+                raise ValueError("WB_TG_PROXY_URL must be an HTTP(S) or SOCKS5 proxy URL")
         self.chat_id = str(chat_id)
         self.timeout = timeout
         self.session = session or requests.Session()
+        if proxy_url:
+            self.session.proxies.update({"http": proxy_url, "https": proxy_url})
+        self._token = token
         self.base_url = f"https://api.telegram.org/bot{token}"
         self.url = f"{self.base_url}/sendMessage"
+
+    def _transport_error(self, exc: Exception) -> TelegramError:
+        detail = str(exc).replace(self._token, "<redacted>")
+        return TelegramError(f"Telegram transport error: {detail}")
 
     def send_text(self, text: str) -> list[int]:
         message_ids: list[int] = []
@@ -53,7 +73,7 @@ class TelegramClient:
                 response.raise_for_status()
                 payload = response.json()
             except (requests.RequestException, ValueError) as exc:
-                raise TelegramError(f"Telegram transport error: {exc}") from exc
+                raise self._transport_error(exc) from None
             if not payload.get("ok"):
                 raise TelegramError(f"Telegram API rejected message: {payload.get('description', 'unknown error')}")
             message_ids.append(int(payload["result"]["message_id"]))
@@ -82,7 +102,7 @@ class TelegramClient:
             response.raise_for_status()
             payload = response.json()
         except (requests.RequestException, ValueError) as exc:
-            raise TelegramError(f"Telegram transport error: {exc}") from exc
+            raise self._transport_error(exc) from None
         if not payload.get("ok"):
             raise TelegramError(f"Telegram API rejected document: {payload.get('description', 'unknown error')}")
         return int(payload["result"]["message_id"])

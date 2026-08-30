@@ -24,6 +24,7 @@ from app.config import (
     WB_TG_BOT_TOKEN,
     WB_TG_CHAT_ID,
     WB_TG_MORNING_TIME,
+    WB_TG_PROXY_URL,
     WB_TG_REQUEST_TIMEOUT_SECONDS,
 )
 from app.db import SessionLocal
@@ -205,6 +206,7 @@ def notify_telegram(checks: list[Check], now: datetime | None = None) -> str:
         WB_TG_BOT_TOKEN or "",
         WB_TG_CHAT_ID or "",
         timeout=WB_TG_REQUEST_TIMEOUT_SECONDS,
+        proxy_url=WB_TG_PROXY_URL,
     )
     dispatcher = TelegramReportDispatcher(client, reports=None)
     result = dispatcher.send_text_content(report_type, report_key, lambda: content)

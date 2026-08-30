@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from app.config import (
     WB_TG_BOT_TOKEN, WB_TG_CHAT_ID, WB_TG_LOW_STOCK_THRESHOLD, WB_TG_MORNING_TIME,
     WB_TG_OPERATIONAL_INTERVAL_SECONDS, WB_TG_POLL_SECONDS, WB_TG_REQUEST_TIMEOUT_SECONDS,
-    WB_TG_TIMEZONE,
+    WB_TG_PROXY_URL, WB_TG_TIMEZONE,
 )
 from wb.sync_logging import configure_wb_logging, install_context_filter
 from telegram_bot.client import TelegramClient
@@ -18,7 +18,12 @@ from telegram_bot.stock_reports import StockExcelReportService, StockSnapshotNot
 
 
 def build_dispatcher() -> TelegramReportDispatcher:
-    client = TelegramClient(WB_TG_BOT_TOKEN or "", WB_TG_CHAT_ID or "", timeout=WB_TG_REQUEST_TIMEOUT_SECONDS)
+    client = TelegramClient(
+        WB_TG_BOT_TOKEN or "",
+        WB_TG_CHAT_ID or "",
+        timeout=WB_TG_REQUEST_TIMEOUT_SECONDS,
+        proxy_url=WB_TG_PROXY_URL,
+    )
     reports = TelegramReportService(timezone_name=WB_TG_TIMEZONE, low_stock_threshold=WB_TG_LOW_STOCK_THRESHOLD)
     return TelegramReportDispatcher(client, reports)
 

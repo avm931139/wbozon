@@ -2,9 +2,11 @@ from datetime import date, datetime
 from io import BytesIO
 
 from openpyxl import load_workbook
+import pytest
+import requests
 from zoneinfo import ZoneInfo
 
-from telegram_bot.client import TelegramClient, split_text
+from telegram_bot.client import TelegramClient, TelegramError, split_text
 from telegram_bot.__main__ import send_stock_files
 from telegram_bot.reports import TelegramReportService
 from telegram_bot.scheduler import TelegramReportScheduler
@@ -18,7 +20,7 @@ class FakeResponse:
 
 
 class FakeHTTPSession:
-    def __init__(self): self.calls = []
+    def __init__(self): self.calls = []; self.proxies = {}
     def post(self, url, **kwargs):
         self.calls.append((url, kwargs)); return FakeResponse(len(self.calls))
 
@@ -49,6 +51,32 @@ def test_client_sends_document_as_multipart_without_disk_file():
     assert url.endswith("/sendDocument")
     assert kwargs["data"] == {"chat_id": "-1001", "caption": "Stocks"}
     assert kwargs["files"]["document"][0:2] == ("stocks.xlsx", b"xlsx")
+
+
+def test_client_applies_proxy_only_to_its_session():
+    session = FakeHTTPSession()
+    proxy_url = "socks5h://127.0.0.1:1080"
+    TelegramClient("secret", "-1001", proxy_url=proxy_url, session=session)
+    assert session.proxies == {"http": proxy_url, "https": proxy_url}
+
+
+def test_client_rejects_invalid_proxy_url():
+    with pytest.raises(ValueError, match="WB_TG_PROXY_URL"):
+        TelegramClient("secret", "-1001", proxy_url="ftp://proxy.example", session=FakeHTTPSession())
+
+
+def test_transport_error_redacts_bot_token():
+    token = "123456:very-secret-token"
+
+    class FailingSession(FakeHTTPSession):
+        def post(self, url, **kwargs):
+            raise requests.ConnectionError(f"connection failed for {url}")
+
+    client = TelegramClient(token, "-1001", session=FailingSession())
+    with pytest.raises(TelegramError) as error:
+        client.send_text("hello")
+    assert token not in str(error.value)
+    assert "<redacted>" in str(error.value)
 
 
 def test_build_workbook_returns_in_memory_xlsx():
