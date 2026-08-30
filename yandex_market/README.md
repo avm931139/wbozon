@@ -34,3 +34,5 @@ ORDER BY campaign_id, warehouse_id, stock_type;
 ```
 
 Официальная документация: [получение остатков](https://yandex.ru/dev/market/partner-api/doc/ru/reference/stocks/getStocks), [авторизация по API-Key](https://yandex.ru/dev/market/partner-api/doc/ru/concepts/authorization).
+
+Полный проверенный каталог Partner API: [API_ENDPOINTS.md](API_ENDPOINTS.md).

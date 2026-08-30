@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 from ozon.client import OzonClient
+from ozon.endpoints import OzonEndpoints
 
 
 class OzonCommunicationsAPI:
@@ -9,10 +10,10 @@ class OzonCommunicationsAPI:
         self.client = client or OzonClient()
 
     def reviews(self, limit: int = 100) -> list[dict[str, Any]]:
-        return self._cursor("/v1/review/list", "reviews", {"limit": limit, "sort_dir": "DESC"})
+        return self._cursor(OzonEndpoints.REVIEWS, "reviews", {"limit": limit, "sort_dir": "DESC"})
 
     def questions(self, limit: int = 100) -> list[dict[str, Any]]:
-        return self._cursor("/v1/question/list", "questions", {"limit": limit, "sort_dir": "DESC"})
+        return self._cursor(OzonEndpoints.QUESTIONS, "questions", {"limit": limit, "sort_dir": "DESC"})
 
     def _cursor(self, path: str, key: str, body: dict[str, Any]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
