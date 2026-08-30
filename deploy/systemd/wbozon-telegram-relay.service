@@ -1,0 +1,33 @@
+[Unit]
+Description=Telegram SOCKS relay through the legacy VPS
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=wbozon
+Group=wbozon
+ExecStart=/usr/bin/ssh -N -D 127.0.0.1:1080 \
+  -o BatchMode=yes \
+  -o IdentitiesOnly=yes \
+  -o StrictHostKeyChecking=yes \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -o TCPKeepAlive=yes \
+  -i /home/wbozon/.ssh/telegram_relay \
+  wbozon@46.30.47.95
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
