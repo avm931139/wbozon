@@ -169,14 +169,24 @@ def collect_checks(
         hour, minute = (int(part) for part in WB_TG_MORNING_TIME.split(":"))
         delivery_grace = current.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(minutes=30)
         if current >= delivery_grace:
-            keys = [f"stock_excel:{marketplace}:{current.date().isoformat()}" for marketplace in ("wb", "ozon")]
+            marketplaces = ("wb", "ozon", "yandex_market")
+            keys = [
+                f"stock_excel:{marketplace}:{current.date().isoformat()}"
+                for marketplace in marketplaces
+            ]
             sent = session.query(WBTelegramDelivery).filter(
                 WBTelegramDelivery.report_key.in_(keys), WBTelegramDelivery.status == "sent"
             ).count()
             warning = session.query(WBTelegramDelivery).filter_by(
                 report_key=f"stock_warning:{current.date().isoformat()}", status="sent"
             ).first()
-            checks.append(Check(sent == 2 or warning is not None, "Telegram stock report", f"{sent}/2 files sent"))
+            checks.append(
+                Check(
+                    sent == len(marketplaces) or warning is not None,
+                    "Telegram stock report",
+                    f"{sent}/{len(marketplaces)} files sent",
+                )
+            )
 
     return checks
 
@@ -204,7 +214,7 @@ def notify_telegram(checks: list[Check], now: datetime | None = None) -> str:
             return "healthy; no Telegram notification needed"
         report_type = "health_recovery"
         report_key = f"health_recovery:{current:%Y%m%d%H%M%S}"
-        content = f"✅ WB/Ozon: работа восстановлена — {current:%d.%m.%Y %H:%M} МСК"
+        content = f"✅ WB/Ozon/Yandex Market: работа восстановлена — {current:%d.%m.%Y %H:%M} МСК"
 
     client = TelegramClient(
         WB_TG_BOT_TOKEN or "",

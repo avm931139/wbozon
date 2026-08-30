@@ -22,6 +22,7 @@ from app.models import (
     WBFBSWarehouse,
     WBProduct,
     WBProductSize,
+    YandexMarketStockSnapshot,
 )
 
 
@@ -161,3 +162,72 @@ class StockExcelReportService:
         ])
         filename = f"ozon_stocks_{snapshot_date.isoformat()}.xlsx"
         return filename, content, f"Остатки Ozon на {snapshot_date:%d.%m.%Y} (00:00 МСК)"
+
+    def yandex_market(self, snapshot_date: date) -> tuple[str, bytes, str]:
+        with self.session_factory() as session:
+            summary = session.query(
+                YandexMarketStockSnapshot.snapshot_date,
+                YandexMarketStockSnapshot.campaign_id,
+                YandexMarketStockSnapshot.stock_type,
+                func.count(YandexMarketStockSnapshot.id),
+                func.sum(YandexMarketStockSnapshot.count),
+            ).filter(
+                YandexMarketStockSnapshot.snapshot_date == snapshot_date,
+                YandexMarketStockSnapshot.count > 0,
+            ).group_by(
+                YandexMarketStockSnapshot.snapshot_date,
+                YandexMarketStockSnapshot.campaign_id,
+                YandexMarketStockSnapshot.stock_type,
+            ).order_by(
+                YandexMarketStockSnapshot.campaign_id,
+                YandexMarketStockSnapshot.stock_type,
+            ).all()
+            warehouses = session.query(
+                YandexMarketStockSnapshot.snapshot_date,
+                YandexMarketStockSnapshot.captured_at,
+                YandexMarketStockSnapshot.campaign_id,
+                YandexMarketStockSnapshot.warehouse_id,
+                YandexMarketStockSnapshot.offer_id,
+                YandexMarketStockSnapshot.stock_type,
+                YandexMarketStockSnapshot.count,
+                YandexMarketStockSnapshot.source_updated_at,
+            ).filter(
+                YandexMarketStockSnapshot.snapshot_date == snapshot_date,
+                YandexMarketStockSnapshot.count > 0,
+            ).order_by(
+                YandexMarketStockSnapshot.campaign_id,
+                YandexMarketStockSnapshot.offer_id,
+                YandexMarketStockSnapshot.warehouse_id,
+                YandexMarketStockSnapshot.stock_type,
+            ).all()
+        if not warehouses:
+            raise StockSnapshotNotFound(
+                f"Yandex Market stock snapshot for {snapshot_date.isoformat()} was not found"
+            )
+        content = build_workbook([
+            (
+                "Сводка",
+                ("Дата", "Campaign ID", "Тип остатка", "Позиций", "Количество"),
+                summary,
+            ),
+            (
+                "По складам",
+                (
+                    "Дата",
+                    "Снято",
+                    "Campaign ID",
+                    "ID склада",
+                    "Offer ID / SKU",
+                    "Тип остатка",
+                    "Количество",
+                    "Обновлено в Маркете",
+                ),
+                warehouses,
+            ),
+        ])
+        filename = f"yandex_market_stocks_{snapshot_date.isoformat()}.xlsx"
+        return (
+            filename,
+            content,
+            f"Остатки Яндекс Маркета на {snapshot_date:%d.%m.%Y} (00:00 МСК)",
+        )

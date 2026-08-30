@@ -4,13 +4,21 @@ from io import BytesIO
 from openpyxl import load_workbook
 import pytest
 import requests
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from zoneinfo import ZoneInfo
 
+from app.db import Base
+from app.models import YandexMarketStockSnapshot
 from telegram_bot.client import TelegramClient, TelegramError, split_text
 from telegram_bot.__main__ import send_stock_files
 from telegram_bot.reports import TelegramReportService
 from telegram_bot.scheduler import TelegramReportScheduler
-from telegram_bot.stock_reports import StockSnapshotNotFound, build_workbook
+from telegram_bot.stock_reports import (
+    StockExcelReportService,
+    StockSnapshotNotFound,
+    build_workbook,
+)
 
 
 class FakeResponse:
@@ -100,6 +108,8 @@ class PartiallyMissingStockReports:
         raise StockSnapshotNotFound("missing WB")
     def ozon(self, snapshot_date):
         return "ozon.xlsx", b"xlsx", "Ozon"
+    def yandex_market(self, snapshot_date):
+        raise StockSnapshotNotFound("missing Yandex Market")
 
 
 def test_stock_files_warn_when_daily_snapshot_is_missing_but_send_available_file():
@@ -114,7 +124,61 @@ def test_stock_files_warn_when_daily_snapshot_is_missing_but_send_available_file
     assert dispatcher.documents[0][0] == "stock_excel_ozon"
     assert dispatcher.warnings[0][1] == "stock_warning:2026-08-20"
     assert "Wildberries" in dispatcher.warnings[0][2]
+    assert "Яндекс Маркет" in dispatcher.warnings[0][2]
     assert "20.08.2026" in dispatcher.warnings[0][2]
+
+
+def test_yandex_market_stock_report_contains_summary_and_warehouse_rows():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    snapshot_date = date(2026, 8, 30)
+    with session_factory() as session:
+        session.add_all([
+            YandexMarketStockSnapshot(
+                snapshot_date=snapshot_date,
+                captured_at=datetime(2026, 8, 30, 0, 1, tzinfo=ZoneInfo("UTC")),
+                campaign_id=149007825,
+                warehouse_id=10,
+                offer_id="sku-1",
+                stock_type="AVAILABLE",
+                count=12,
+                source_updated_at=datetime(2026, 8, 29, 23, 59, tzinfo=ZoneInfo("UTC")),
+                raw_data={},
+            ),
+            YandexMarketStockSnapshot(
+                snapshot_date=snapshot_date,
+                captured_at=datetime(2026, 8, 30, 0, 1, tzinfo=ZoneInfo("UTC")),
+                campaign_id=149007825,
+                warehouse_id=10,
+                offer_id="sku-zero",
+                stock_type="AVAILABLE",
+                count=0,
+                source_updated_at=None,
+                raw_data={},
+            ),
+        ])
+        session.commit()
+
+    filename, payload, caption = StockExcelReportService(
+        session_factory=session_factory
+    ).yandex_market(snapshot_date)
+
+    assert filename == "yandex_market_stocks_2026-08-30.xlsx"
+    assert "Яндекс Маркета" in caption
+    workbook = load_workbook(BytesIO(payload), read_only=True)
+    assert workbook.sheetnames == ["Сводка", "По складам"]
+    assert list(workbook["Сводка"].values)[1] == (
+        datetime(2026, 8, 30),
+        149007825,
+        "AVAILABLE",
+        1,
+        12,
+    )
+    warehouse_rows = list(workbook["По складам"].values)
+    assert len(warehouse_rows) == 2
+    assert warehouse_rows[1][4:7] == ("sku-1", "AVAILABLE", 12)
+    workbook.close()
 
 
 def test_sales_block_keeps_event_definitions_separate():

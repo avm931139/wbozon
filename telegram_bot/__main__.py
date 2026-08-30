@@ -39,7 +39,12 @@ def send_stock_files(
     results: list[dict] = []
     errors: list[str] = []
     missing: list[str] = []
-    for marketplace, factory in (("wb", reports.wb), ("ozon", reports.ozon)):
+    report_factories = (
+        ("wb", "Wildberries", reports.wb),
+        ("ozon", "Ozon", reports.ozon),
+        ("yandex_market", "Яндекс Маркет", reports.yandex_market),
+    )
+    for marketplace, marketplace_name, factory in report_factories:
         try:
             results.append(dispatcher.send_document(
                 f"stock_excel_{marketplace}",
@@ -48,7 +53,7 @@ def send_stock_files(
                 force=force,
             ))
         except StockSnapshotNotFound:
-            missing.append("Wildberries" if marketplace == "wb" else "Ozon")
+            missing.append(marketplace_name)
         except Exception as exc:
             errors.append(f"{marketplace}: {exc}")
     if missing:
