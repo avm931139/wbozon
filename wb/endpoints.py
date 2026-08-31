@@ -35,6 +35,17 @@ class WBCategoriesEndpoints:
     LIST = "/content/v2/object/all"
 
 
+class WBDocumentsEndpoints:
+    CATEGORIES = "/api/v1/documents/categories"
+    LIST = "/api/v1/documents/list"
+    DOWNLOAD = "/api/v1/documents/download"
+    DOWNLOAD_ALL = "/api/v1/documents/download/all"
+
+
+class WBFinanceEndpoints:
+    BALANCE = "/api/v1/account/balance"
+
+
 class WBEndpoints:
     """Compatibility facade for existing imports."""
 
@@ -46,3 +57,8 @@ class WBEndpoints:
     FBS_ORDERS_STATUS = WBOrdersEndpoints.FBS_STATUS
     ORDERS_HISTORY = WBOrdersEndpoints.HISTORY
     CATEGORIES_LIST = WBCategoriesEndpoints.LIST
+    DOCUMENT_CATEGORIES = WBDocumentsEndpoints.CATEGORIES
+    DOCUMENTS_LIST = WBDocumentsEndpoints.LIST
+    DOCUMENT_DOWNLOAD = WBDocumentsEndpoints.DOWNLOAD
+    DOCUMENTS_DOWNLOAD_ALL = WBDocumentsEndpoints.DOWNLOAD_ALL
+    ACCOUNT_BALANCE = WBFinanceEndpoints.BALANCE

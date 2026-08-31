@@ -13,6 +13,7 @@ from app.models import (
     OzonSyncRun,
     WBSyncRun,
     WBTelegramDelivery,
+    WBDocumentSyncRun,
 )
 from operations_bot.service import OperationsNotificationService, OperationsSettings
 from operations_bot.__main__ import private_chats
@@ -287,3 +288,28 @@ def test_operations_digest_includes_health_failure_and_recovery_only(operations_
     assert "Контроль состояния · обнаружена проблема" in client.messages[0]
     assert "Yandex inventory service: inactive" in client.messages[0]
     assert "Контроль состояния · восстановление" in client.messages[0]
+
+
+def test_operations_digest_explains_wb_document_failure(operations_db):
+    now = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+    with operations_db() as session:
+        session.add(WBDocumentSyncRun(
+            id="documents-failed",
+            started_at=now - timedelta(minutes=2),
+            finished_at=now - timedelta(minutes=1),
+            status="partial",
+            result={"documents": {"status": "completed", "result": 12}},
+            error="balance: HTTP 403 Forbidden",
+        ))
+        session.commit()
+
+    client = RecordingTelegramClient()
+    OperationsNotificationService(
+        client=client,
+        settings=settings(),
+        session_factory=operations_db,
+    ).run(now=now)
+
+    assert "Wildberries · документы и бухгалтерия" in client.messages[0]
+    assert "HTTP 403 Forbidden" in client.messages[0]
+    assert "нет нужного разрешения" in client.messages[0]

@@ -254,6 +254,7 @@ cards = ProductsAPI().list(limit=100)
 
 Работает с Finance API.
 
+- `balance()` — текущий баланс продавца;
 - `sales_reports()` — реестр отчётов продаж;
 - `sales_details()` — детализация продаж за период;
 - `sales_details_by_report()` — детализация конкретного отчёта;
@@ -267,6 +268,17 @@ cards = ProductsAPI().list(limit=100)
 - `_rrd_pages()` — курсор `rrdId`, с защитой от неподвижного курсора.
 
 `list(**kwargs)` по умолчанию вызывает `sales_reports()`.
+
+### `wb/documents.py` — `DocumentsAPI`
+
+Read-only модуль документов поддерживает получение категорий и списка документов,
+фильтрацию по периоду и категории, offset-пагинацию, а также скачивание одного
+документа или архива до 50 документов. `DocumentStorage` проверяет и атомарно
+сохраняет декодированный файл в `WB_DOCUMENT_STORAGE_DIR`. Каждый формат хранится
+отдельно в `wb_document_files`; повреждённые файлы выявляются по размеру и SHA-256.
+Независимый `python -m wb.document_sync` обновляет метаданные, баланс и ограниченную
+очередь файлов. Полная схема, права токена и production timer описаны в
+[`DOCUMENTS.md`](DOCUMENTS.md).
 
 ### `wb/customer_communications.py` — `CustomerCommunicationsAPI`
 

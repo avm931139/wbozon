@@ -10,6 +10,7 @@ python -m healthcheck
 
 - активность отдельных `wbozon-inventory@wb.service`, `wbozon-inventory@ozon.service` и, при настроенных кампаниях, `wbozon-inventory@yandex_market.service`;
 - активность `wbozon-wb.service`, Telegram worker, stock timer и, если настроен proxy, SSH relay;
+- активность ежедневного timer документов WB и свежесть его журнала, если `WB_DOCUMENT_SYNC_REQUIRED=true`;
 - активность `wbozon-operations.timer`, свежесть его курсора и ошибки очереди, если задан `OPERATIONS_TG_CHAT_ID`;
 - статус и свежесть последнего успешного запуска inventory отдельно по каждому маркетплейсу;
 - наличие строк за текущую дату во всех snapshot-таблицах после 00:15 МСК;

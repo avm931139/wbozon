@@ -12,7 +12,7 @@
 - [`app/config.py`](../app/config.py) — загрузка настроек из окружения и `.env`;
 - [`app/db.py`](../app/db.py) — SQLAlchemy engine и фабрика сессий;
 - [`app/models.py`](../app/models.py) — модели каталога, остатков, заказов, финансов, рекламы, обращений, журналов и доставок Telegram;
-- [`wb/`](../wb) — API-клиенты, сервисы, репозитории и периодическая синхронизация WB;
+- [`wb/`](../wb) — API-клиенты, сервисы, репозитории, периодическая синхронизация WB и отдельная задача документов/баланса;
 - [`ozon/`](../ozon) — каталог, остатки, отправления, поставки, обращения, продажи и финансы Ozon Seller API, а также реклама Ozon Performance API;
 - [`yandex_market/`](../yandex_market) — клиент Partner API и нормализация складских остатков;
 - [`inventory_sync/`](../inventory_sync) — отдельные workers текущих остатков WB/Ozon/Яндекс Маркета и ежедневных срезов на 00:00 по Москве;
@@ -24,12 +24,12 @@
 - [`deploy/systemd/`](../deploy/systemd) — units постоянных workers и независимые timers;
 - [`logs/wb/`](../logs/wb) — рабочие журналы синхронизации.
 
-Подробности интеграции WB находятся в [`wb/README.md`](../wb/README.md), Ozon — в [`ozon/README.md`](../ozon/README.md), периодических остатков — в [`inventory_sync/README.md`](../inventory_sync/README.md), групповых отчётов — в [`telegram_bot/README.md`](../telegram_bot/README.md), личного журнала — в [`operations_bot/README.md`](../operations_bot/README.md).
+Подробности интеграции WB находятся в [`wb/README.md`](../wb/README.md), а документов и бухгалтерии — в [`wb/DOCUMENTS.md`](../wb/DOCUMENTS.md). Ozon описан в [`ozon/README.md`](../ozon/README.md), периодические остатки — в [`inventory_sync/README.md`](../inventory_sync/README.md), групповые отчёты — в [`telegram_bot/README.md`](../telegram_bot/README.md), личный журнал — в [`operations_bot/README.md`](../operations_bot/README.md).
 
 ## Поток данных
 
 ```text
-WB API → wb worker / inventory@wb ───────────────────────────────┐
+WB API → wb worker / WB documents / inventory@wb ────────────────┐
 Ozon API → ozon tasks / inventory@ozon ─────────────────────────┤→ PostgreSQL
 Яндекс Маркет API → inventory@yandex_market ────────────────────┤
                                                                  ├→ telegram workers → Telegram-группа
@@ -99,6 +99,7 @@ Healthcheck запускается каждые пять минут через `
 
 ```powershell
 python -m wb
+python -m wb.document_sync  # документы, локальные файлы и баланс WB
 python -m telegram_bot
 python -m inventory_sync --marketplace wb
 python -m inventory_sync --marketplace ozon
@@ -193,7 +194,7 @@ sudo journalctl -u wbozon-ozon@orders.service -n 100 --no-pager
 
 Отсутствие Telegram-настроек не влияет на WB/Ozon/inventory workers, потому что Telegram работает отдельным процессом. Повторная отправка уже доставленного ручного отчёта выполняется с флагом `--force`.
 
-`operations_bot` также изолирован от рабочих процессов. Он читает только завершённые записи `wb_sync_runs`, `ozon_sync_runs`, `inventory_sync_runs` и `wb_telegram_deliveries`. Новые события сначала фиксируются в `operations_event_deliveries`, поэтому при недоступном Telegram они не теряются и повторяются следующим запуском. Курсор `operations_monitor_states` исключает повторное чтение, а уникальный ключ события защищает от дублей.
+`operations_bot` также изолирован от рабочих процессов. Он читает только завершённые записи `wb_sync_runs`, `wb_document_sync_runs`, `ozon_sync_runs`, `inventory_sync_runs` и `wb_telegram_deliveries`. Новые события сначала фиксируются в `operations_event_deliveries`, поэтому при недоступном Telegram они не теряются и повторяются следующим запуском. Курсор `operations_monitor_states` исключает повторное чтение, а уникальный ключ события защищает от дублей.
 
 ## Синхронизируемые разделы
 
@@ -208,6 +209,13 @@ sudo journalctl -u wbozon-ozon@orders.service -n 100 --no-pager
 7. кампании и статистику рекламы.
 
 Ошибка одной задачи записывается в журнал и не блокирует выполнение следующих независимых задач.
+
+Документы и баланс WB обновляет отдельный ежедневный `wbozon-wb-documents.timer`.
+Он сохраняет справочник категорий, метаданные, один локальный файл на каждый
+доступный формат документа, снимок баланса и общий результат в
+`wb_document_sync_runs`. Его этапы выполняются независимо: ошибка Finance API не
+откатывает уже сохранённые категории и документы. Подробнее — в
+[`wb/DOCUMENTS.md`](../wb/DOCUMENTS.md).
 
 Ozon в production запускается набором независимых tasks: товары, отправления FBS/FBO, поставки, обращения, дневные продажи, финансы и реклама. Для рекламы используются отдельные учётные данные Ozon Performance API. Ozon не включён в WB worker, а дневные срезы его остатков являются источником отдельного Excel-отчёта Telegram.
 
@@ -235,7 +243,7 @@ Ozon хранится в двух представлениях:
 - нулевые остатки исключаются из Excel, а сами файлы создаются в памяти без временных файлов на диске;
 - при отсутствии среза бот отправляет дедуплицированное предупреждение и продолжает отправку доступного маркетплейса.
 
-Отдельный `wbozon-operations.timer` каждые пять минут отправляет в личный чат компактный журнал действий: успешные циклы WB, независимые задания Ozon, обновления и срезы остатков каждого маркетплейса, успешные или ошибочные Telegram-доставки, новые ошибки healthcheck и последующее восстановление. Неизменный набор healthcheck-ошибок повторно не отправляется. Для ошибок добавляется сохранённая причина, вероятное объяснение и команда журнала соответствующего systemd unit. Успешные события можно отключить через `OPERATIONS_TG_INCLUDE_SUCCESSES=false`.
+Отдельный `wbozon-operations.timer` каждые пять минут отправляет в личный чат компактный журнал действий: успешные циклы WB, синхронизацию документов и баланса WB, независимые задания Ozon, обновления и срезы остатков каждого маркетплейса, успешные или ошибочные Telegram-доставки, новые ошибки healthcheck и последующее восстановление. Неизменный набор healthcheck-ошибок повторно не отправляется. Для ошибок добавляется сохранённая причина, вероятное объяснение и команда журнала соответствующего systemd unit. Успешные события можно отключить через `OPERATIONS_TG_INCLUDE_SUCCESSES=false`.
 
 ## Журналы и диагностика
 

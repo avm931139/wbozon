@@ -6,6 +6,8 @@ from typing import Any
 from app.config import WB_FINANCE_BASE_URL
 from wb.base import WBAPIBase
 from wb.client import WBClient
+from wb.endpoints import WBFinanceEndpoints
+from wb.exceptions import WBParseError
 
 
 class FinancesAPI(WBAPIBase):
@@ -14,6 +16,15 @@ class FinancesAPI(WBAPIBase):
 
     def list(self, **kwargs: Any) -> list[dict[str, Any]]:
         return self.sales_reports(**kwargs)
+
+    def balance(self) -> dict[str, Any]:
+        payload = self.client.get(WBFinanceEndpoints.BALANCE, retries=8)
+        data = payload.get("data", payload) if isinstance(payload, dict) else {}
+        if not isinstance(data, dict) or not any(
+            key in data for key in ("currency", "current", "for_withdraw")
+        ):
+            raise WBParseError("WB balance response has an unexpected shape")
+        return data
 
     def sales_reports(self, date_from: date, date_to: date, period: str = "weekly", limit: int = 100) -> list[dict[str, Any]]:
         return self._offset_pages("/api/finance/v1/sales-reports/list", {

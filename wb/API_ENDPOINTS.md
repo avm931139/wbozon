@@ -582,14 +582,14 @@
 
 ### Balance (1)
 
-- `GET /api/v1/account/balance` — Get Seller Balance — `finance-api.wildberries.ru`
+- `GET /api/v1/account/balance` — Get Seller Balance — `finance-api.wildberries.ru` — **РЕАЛИЗОВАНО**
 
 ### Documents (4)
 
-- `GET /api/v1/documents/categories` — Documents Categories — `documents-api.wildberries.ru`
-- `GET /api/v1/documents/download` — Get Document — `documents-api.wildberries.ru`
-- `POST /api/v1/documents/download/all` — Get Documents — `documents-api.wildberries.ru`
-- `GET /api/v1/documents/list` — Documents List — `documents-api.wildberries.ru`
+- `GET /api/v1/documents/categories` — Documents Categories — `documents-api.wildberries.ru` — **РЕАЛИЗОВАНО**
+- `GET /api/v1/documents/download` — Get Document — `documents-api.wildberries.ru` — **РЕАЛИЗОВАНО**
+- `POST /api/v1/documents/download/all` — Get Documents — `documents-api.wildberries.ru` — **РЕАЛИЗОВАНО**
+- `GET /api/v1/documents/list` — Documents List — `documents-api.wildberries.ru` — **РЕАЛИЗОВАНО**
 
 
 ## Рекомендуемый порядок развития

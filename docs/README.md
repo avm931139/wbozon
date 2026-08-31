@@ -6,6 +6,7 @@
 - [Контекст для AI-ассистентов](project_context_for_chatgpt.md)
 - [Общая инфраструктура и ORM](../app/README.md)
 - [Интеграция Wildberries](../wb/README.md)
+- [Документы и бухгалтерия Wildberries](../wb/DOCUMENTS.md)
 - [Интеграция Ozon](../ozon/README.md)
 - [Интеграция Яндекс Маркета](../yandex_market/README.md)
 - [Архитектура складских остатков Ozon](../ozon/WAREHOUSE_STOCK_ARCHITECTURE.md)

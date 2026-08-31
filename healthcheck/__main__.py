@@ -29,6 +29,8 @@ from app.config import (
     WB_TG_MORNING_TIME,
     WB_TG_PROXY_URL,
     WB_TG_REQUEST_TIMEOUT_SECONDS,
+    WB_DOCUMENT_MAX_AGE_SECONDS,
+    WB_DOCUMENT_SYNC_REQUIRED,
     YANDEX_MARKET_CAMPAIGN_IDS,
 )
 from app.db import SessionLocal
@@ -42,6 +44,7 @@ from app.models import (
     OzonWarehouseStockSnapshot,
     WBFboStockSnapshot,
     WBFBSStockSnapshot,
+    WBDocumentSyncRun,
     WBTelegramDelivery,
     YandexMarketStockSnapshot,
 )
@@ -171,6 +174,9 @@ def collect_checks(
 
     wb_ok, wb_status = systemctl("wbozon-wb.service")
     checks.append(Check(wb_ok, "WB synchronization service", wb_status))
+    if WB_DOCUMENT_SYNC_REQUIRED:
+        documents_ok, documents_status = systemctl("wbozon-wb-documents.timer")
+        checks.append(Check(documents_ok, "WB documents timer", documents_status))
     if WB_TG_BOT_TOKEN and WB_TG_CHAT_ID:
         telegram_ok, telegram_status = systemctl("wbozon-telegram.service")
         checks.append(Check(telegram_ok, "Telegram report service", telegram_status))
@@ -219,6 +225,26 @@ def collect_checks(
                 ))
 
         checks.extend(_ozon_task_checks(session, current))
+
+        if WB_DOCUMENT_SYNC_REQUIRED:
+            latest_documents = session.query(WBDocumentSyncRun).order_by(
+                WBDocumentSyncRun.started_at.desc()
+            ).first()
+            if latest_documents is None:
+                checks.append(Check(False, "WB documents sync", "no runs recorded"))
+            else:
+                timestamp = latest_documents.finished_at or latest_documents.started_at
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
+                age = current - timestamp.astimezone(timezone)
+                ok = (
+                    latest_documents.status in {"completed", "running"}
+                    and age <= timedelta(seconds=WB_DOCUMENT_MAX_AGE_SECONDS)
+                )
+                detail = f"{latest_documents.status}, age {age}"
+                if latest_documents.error:
+                    detail += f", error={latest_documents.error[:300]}"
+                checks.append(Check(ok, "WB documents sync", detail))
 
         if operations_enabled:
             monitor_state = session.get(OperationsMonitorState, "main")

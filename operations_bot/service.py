@@ -28,6 +28,7 @@ from app.models import (
     OperationsEventDelivery,
     OperationsMonitorState,
     OzonSyncRun,
+    WBDocumentSyncRun,
     WBSyncRun,
     WBTelegramDelivery,
 )
@@ -218,6 +219,13 @@ class OperationsNotificationService:
         ).all()
         events.extend(self._wb_event(row) for row in wb_rows)
 
+        document_rows = session.query(WBDocumentSyncRun).filter(
+            WBDocumentSyncRun.finished_at.is_not(None),
+            WBDocumentSyncRun.finished_at >= since,
+            WBDocumentSyncRun.finished_at <= until,
+        ).all()
+        events.extend(self._wb_documents_event(row) for row in document_rows)
+
         ozon_rows = session.query(OzonSyncRun).filter(
             OzonSyncRun.finished_at.is_not(None),
             OzonSyncRun.finished_at >= since,
@@ -307,6 +315,27 @@ class OperationsNotificationService:
             occurred_at=self._as_utc(row.finished_at),
             severity=severity,
             title=f"Ozon · {titles.get(row.task, row.task)}",
+            detail=self._trim(detail),
+        )
+
+    def _wb_documents_event(self, row: WBDocumentSyncRun) -> OperationEvent:
+        if row.status == "completed":
+            severity = "success"
+            detail = f"Выполнено успешно. Результат: {self._compact(row.result)}."
+        else:
+            severity = "error"
+            error = row.error or "причина не записана"
+            detail = (
+                f"Статус {row.status}. Ошибка: {error}. {self._problem_hint(error)} "
+                "Проверить: journalctl -u wbozon-wb-documents.service."
+            )
+        return OperationEvent(
+            key=f"wb_documents:{row.id}:{row.status}",
+            source_type="wb_documents",
+            source_id=str(row.id),
+            occurred_at=self._as_utc(row.finished_at),
+            severity=severity,
+            title="Wildberries · документы и бухгалтерия",
             detail=self._trim(detail),
         )
 

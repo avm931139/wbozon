@@ -16,6 +16,13 @@ WB_ANALYTICS_BASE_URL = os.getenv("WB_ANALYTICS_BASE_URL", "https://seller-analy
 WB_STATISTICS_BASE_URL = os.getenv("WB_STATISTICS_BASE_URL", "https://statistics-api.wildberries.ru")
 WB_SUPPLIES_BASE_URL = os.getenv("WB_SUPPLIES_BASE_URL", "https://supplies-api.wildberries.ru")
 WB_FINANCE_BASE_URL = os.getenv("WB_FINANCE_BASE_URL", "https://finance-api.wildberries.ru")
+WB_DOCUMENTS_BASE_URL = os.getenv("WB_DOCUMENTS_BASE_URL", "https://documents-api.wildberries.ru")
+WB_DOCUMENT_STORAGE_DIR = os.getenv("WB_DOCUMENT_STORAGE_DIR", "data/wb/documents")
+WB_DOCUMENT_DOWNLOAD_LIMIT = int(os.getenv("WB_DOCUMENT_DOWNLOAD_LIMIT", "5"))
+WB_DOCUMENT_MAX_FILE_BYTES = int(os.getenv("WB_DOCUMENT_MAX_FILE_BYTES", "104857600"))
+WB_DOCUMENT_LOOKBACK_DAYS = int(os.getenv("WB_DOCUMENT_LOOKBACK_DAYS", "90"))
+WB_DOCUMENT_TIMEZONE = os.getenv("WB_DOCUMENT_TIMEZONE", "Europe/Moscow")
+WB_DOCUMENT_MAX_AGE_SECONDS = int(os.getenv("WB_DOCUMENT_MAX_AGE_SECONDS", "129600"))
 WB_FEEDBACKS_BASE_URL = os.getenv("WB_FEEDBACKS_BASE_URL", "https://feedbacks-api.wildberries.ru")
 WB_PROMOTION_BASE_URL = os.getenv("WB_PROMOTION_BASE_URL", "https://advert-api.wildberries.ru")
 WB_PROMOTION_API_KEY = os.getenv("WB_PROMOTION_API_KEY") or WB_API_KEY
@@ -33,6 +40,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 WB_SYNC_INTERVAL_SECONDS = int(os.getenv("WB_SYNC_INTERVAL_SECONDS", "21600"))
 WB_SYNC_RUN_ON_START = _env_bool("WB_SYNC_RUN_ON_START", True)
+WB_DOCUMENT_SYNC_REQUIRED = _env_bool("WB_DOCUMENT_SYNC_REQUIRED", False)
 WB_SYNC_HISTORY_START = os.getenv("WB_SYNC_HISTORY_START", "2019-01-01")
 WB_SYNC_PROMOTION_LOOKBACK_DAYS = int(os.getenv("WB_SYNC_PROMOTION_LOOKBACK_DAYS", "31"))
 WB_SYNC_FBS_ORDER_OVERLAP_DAYS = int(os.getenv("WB_SYNC_FBS_ORDER_OVERLAP_DAYS", "2"))

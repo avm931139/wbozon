@@ -6,6 +6,7 @@ __pycache__/
 .vscode/
 .idea/
 logs/
+data/wb/documents/
 ~$*
 tree.txt
 tests/dialog gpt/

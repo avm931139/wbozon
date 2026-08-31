@@ -7,7 +7,7 @@
 ## Актуальная архитектура
 
 - `app/` — конфигурация, подключение к БД и ORM-модели;
-- `wb/` — основной интеграционный слой Wildberries;
+- `wb/` — основной интеграционный слой Wildberries и независимый worker документов/баланса;
 - `ozon/` — интеграционный слой Ozon Seller/Performance API с независимыми jobs для каталога, логистики, обращений, продаж, финансов и рекламы;
 - `yandex_market/` — Partner API Яндекс Маркета;
 - `inventory_sync/` — отдельные workers `wb`, `ozon`, `yandex_market` для текущих остатков и ежедневных срезов в 00:00 `Europe/Moscow`;
@@ -25,6 +25,7 @@
 
 ```text
 WB API → wb API class → service → repository/session → app.models → PostgreSQL
+WB Documents/Finance API → wb.document_sync → files + wb_document_sync_runs → PostgreSQL
 Ozon API → ozon task runner → service → repository/session → app.models + ozon_sync_runs → PostgreSQL
 WB/Ozon/Yandex stock APIs → separate inventory workers → current stocks + daily snapshots
 Telegram API ← telegram_bot / healthcheck ← PostgreSQL
@@ -56,6 +57,7 @@ PostgreSQL advisory lock для защиты от пересечения и за
 - использовать timezone-aware даты для нового кода;
 - не менять унаследованный код без явной необходимости;
 - после изменения импортов проверять точки запуска: `python -m wb --help`, `python -m telegram_bot --help`, `python -m ozon --help`, `python -m inventory_sync --help` и `python -m healthcheck`.
+- worker документов запускать отдельно через `python -m wb.document_sync`; не встраивать его в постоянный WB-цикл или inventory workers.
 - `operations_bot` не импортировать и не вызывать из marketplace workers: Telegram не должен влиять на их транзакции или exit code.
 - не восстанавливать удалённый `mantra_sync`: он не относится к рабочей архитектуре.
 
@@ -64,6 +66,7 @@ PostgreSQL advisory lock для защиты от пересечения и за
 ```powershell
 python -m pytest -q
 python -m alembic heads
+python -m wb.document_sync --help
 ```
 
-Дополнительная документация: [`PROJECT_DOCUMENTATION.md`](PROJECT_DOCUMENTATION.md), [`VPS_RUNBOOK.md`](VPS_RUNBOOK.md), [`../wb/README.md`](../wb/README.md), [`../ozon/README.md`](../ozon/README.md), [`../inventory_sync/README.md`](../inventory_sync/README.md), [`../telegram_bot/README.md`](../telegram_bot/README.md).
+Дополнительная документация: [`PROJECT_DOCUMENTATION.md`](PROJECT_DOCUMENTATION.md), [`VPS_RUNBOOK.md`](VPS_RUNBOOK.md), [`../wb/README.md`](../wb/README.md), [`../wb/DOCUMENTS.md`](../wb/DOCUMENTS.md), [`../ozon/README.md`](../ozon/README.md), [`../inventory_sync/README.md`](../inventory_sync/README.md), [`../telegram_bot/README.md`](../telegram_bot/README.md).

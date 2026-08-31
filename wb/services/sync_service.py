@@ -6,6 +6,7 @@ from wb.services.order_service import FBOOrderService, FBSOrderService
 from wb.services.fbw_supply_service import FBWSupplyService
 from wb.services.finance_service import FinanceService
 from wb.services.customer_communication_service import CustomerCommunicationService
+from wb.services.document_service import DocumentService
 from wb.services.promotion_service import PromotionService
 from wb.services.product_service import ProductService
 from wb.services.stock_service import StockService
@@ -29,6 +30,7 @@ class WBSyncService:
         self.customer_communication_service = CustomerCommunicationService()
         self.promotion_service = PromotionService()
         self.sales_service = SalesService()
+        self.document_service = DocumentService()
 
         self.products_api = self.product_service.api
         self.warehouses_api = self.warehouse_service.api
@@ -38,6 +40,7 @@ class WBSyncService:
         self.finances_api = self.finance_service.api
         self.customer_communications_api = self.customer_communication_service.api
         self.promotion_api = self.promotion_service.api
+        self.documents_api = self.document_service.api
 
     def sync_products(self, **kwargs: Any) -> list[dict[str, Any]]:
         return self.product_service.sync_from_api(**kwargs)
@@ -83,6 +86,12 @@ class WBSyncService:
 
     def sync_financial_acquiring_details(self, **kwargs: Any) -> int:
         return self.finance_service.sync_acquiring_details(**kwargs)
+
+    def sync_documents_and_accounting(self, **kwargs: Any) -> dict[str, Any]:
+        return self.document_service.sync_all(**kwargs)
+
+    def sync_missing_document_files(self, **kwargs: Any) -> dict[str, Any]:
+        return self.document_service.sync_missing_files(**kwargs)
 
     def sync_customer_communications(self) -> dict[str, int]:
         return self.customer_communication_service.sync_all()

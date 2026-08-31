@@ -616,6 +616,75 @@ class WBFinancialAcquiringRow(Base):
     report = relationship("WBFinancialAcquiringReport", back_populates="rows")
 
 
+class WBFinanceBalanceSnapshot(Base):
+    __tablename__ = "wb_finance_balance_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    fetched_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    currency = Column(String(10), nullable=True, index=True)
+    current = Column(Numeric(20, 2), nullable=True)
+    for_withdraw = Column(Numeric(20, 2), nullable=True)
+    raw_data = Column(JSON, nullable=False)
+
+
+class WBDocumentCategory(Base):
+    __tablename__ = "wb_document_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True, index=True)
+    title = Column(String, nullable=True)
+    raw_data = Column(JSON, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class WBDocument(Base):
+    __tablename__ = "wb_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    service_name = Column(String, nullable=False, unique=True, index=True)
+    category = Column(String, nullable=True, index=True)
+    title = Column(String, nullable=True)
+    extensions = Column(JSON, nullable=False, default=list)
+    document_created_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    viewed = Column(Boolean, nullable=True, index=True)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+    files = relationship("WBDocumentFile", back_populates="document", cascade="all, delete-orphan")
+
+
+class WBDocumentFile(Base):
+    __tablename__ = "wb_document_files"
+    __table_args__ = (
+        UniqueConstraint("document_id", "extension", name="uq_wb_document_file_document_extension"),
+        {"comment": "Локальные файлы документов WB; один документ может иметь несколько форматов."},
+    )
+
+    id = Column(Integer, primary_key=True)
+    document_id = Column(Integer, ForeignKey("wb_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    extension = Column(String(30), nullable=False, index=True)
+    local_path = Column(String, nullable=False)
+    file_name = Column(String, nullable=False)
+    file_size = Column(BigInteger, nullable=False)
+    file_sha256 = Column(String(64), nullable=False, index=True)
+    downloaded_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+    document = relationship("WBDocument", back_populates="files")
+
+
+class WBDocumentSyncRun(Base):
+    __tablename__ = "wb_document_sync_runs"
+    __table_args__ = {"comment": "Журнал независимой синхронизации документов и баланса WB."}
+
+    id = Column(String(32), primary_key=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    status = Column(String(20), nullable=False, index=True)
+    result = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+
+
 class WBCustomerQuestion(Base):
     __tablename__ = "wb_customer_questions"
     __table_args__ = {"comment": "Вопросы покупателей Wildberries и метрики качества ответа продавца."}

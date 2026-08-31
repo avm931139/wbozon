@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
-from app.models import HealthcheckRun, OzonSyncRun
+from app.models import HealthcheckRun, OzonSyncRun, WBDocumentSyncRun
 from healthcheck.__main__ import (
     Check,
     OZON_TASK_MAX_AGES,
@@ -85,6 +85,7 @@ def test_collect_checks_targets_independent_workers_instead_of_cron(monkeypatch)
     monkeypatch.setattr("healthcheck.__main__.WB_TG_CHAT_ID", None)
     monkeypatch.setattr("healthcheck.__main__.OPERATIONS_TG_BOT_TOKEN", None)
     monkeypatch.setattr("healthcheck.__main__.OPERATIONS_TG_CHAT_ID", None)
+    monkeypatch.setattr("healthcheck.__main__.WB_DOCUMENT_SYNC_REQUIRED", False)
     monkeypatch.setattr("healthcheck.__main__.OZON_REQUIRED_TASKS", ())
 
     collect_checks(
@@ -97,6 +98,40 @@ def test_collect_checks_targets_independent_workers_instead_of_cron(monkeypatch)
         "wbozon-inventory@ozon.service",
         "wbozon-wb.service",
     ]
+
+
+def test_collect_checks_monitors_required_wb_document_worker(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    now = datetime(2026, 8, 31, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    with session_factory() as session:
+        session.add(WBDocumentSyncRun(
+            id="documents-run",
+            started_at=datetime(2026, 8, 31, 7, 0, tzinfo=ZoneInfo("UTC")),
+            finished_at=datetime(2026, 8, 31, 7, 5, tzinfo=ZoneInfo("UTC")),
+            status="completed",
+        ))
+        session.commit()
+
+    calls = []
+    monkeypatch.setattr("healthcheck.__main__.SessionLocal", session_factory)
+    monkeypatch.setattr("healthcheck.__main__.YANDEX_MARKET_CAMPAIGN_IDS", ())
+    monkeypatch.setattr("healthcheck.__main__.WB_TG_BOT_TOKEN", None)
+    monkeypatch.setattr("healthcheck.__main__.WB_TG_CHAT_ID", None)
+    monkeypatch.setattr("healthcheck.__main__.OPERATIONS_TG_BOT_TOKEN", None)
+    monkeypatch.setattr("healthcheck.__main__.OPERATIONS_TG_CHAT_ID", None)
+    monkeypatch.setattr("healthcheck.__main__.WB_DOCUMENT_SYNC_REQUIRED", True)
+    monkeypatch.setattr("healthcheck.__main__.OZON_REQUIRED_TASKS", ())
+
+    checks = collect_checks(
+        now=now,
+        systemctl=lambda unit: calls.append(unit) or (True, "active"),
+    )
+
+    assert "wbozon-wb-documents.timer" in calls
+    document_check = next(check for check in checks if check.name == "WB documents sync")
+    assert document_check.ok is True
 
 
 def test_healthcheck_journal_emits_only_failure_changes_and_recovery(monkeypatch):

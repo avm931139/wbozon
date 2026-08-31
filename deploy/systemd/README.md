@@ -57,6 +57,32 @@ sudo journalctl -u wbozon-operations.service -n 50 --no-pager
 
 После включения `wbozon-telegram-stock.timer` удалите старую cron-строку `python -m telegram_bot --once stock-files`, иначе возможны параллельные попытки. Дедупликация защищает от повторной доставки, но второй механизм расписания не нужен.
 
+## Документы и бухгалтерия Wildberries
+
+Этот контур запускается отдельной oneshot-задачей и не входит в постоянный
+`wbozon-wb.service`. Для токена `WB_API_KEY` должны быть разрешены категории
+Wildberries «Документы» и «Финансы». Сначала примените миграцию и выполните
+ручную проверку:
+
+```bash
+./.venv/bin/python -m alembic upgrade head
+./.venv/bin/python -m wb.document_sync --all-history --download-limit 5
+```
+
+Если команда завершилась со статусом `completed`, включите ежедневный timer:
+
+```bash
+sudo systemctl enable --now wbozon-wb-documents.timer
+sudo systemctl start wbozon-wb-documents.service
+sudo journalctl -u wbozon-wb-documents.service -n 100 --no-pager
+```
+
+После успешного production-запуска добавьте в `.env`
+`WB_DOCUMENT_SYNC_REQUIRED=true`. Тогда healthcheck будет проверять timer,
+последний статус и свежесть журнала `wb_document_sync_runs`. Файлы сохраняются
+в `data/wb/documents/` и требуют отдельного резервного копирования. Полная схема
+и ограничения API описаны в [`wb/DOCUMENTS.md`](../../wb/DOCUMENTS.md).
+
 ## Ozon timers
 
 ```bash
@@ -85,6 +111,7 @@ systemctl --no-pager --full status \
   wbozon-inventory@wb.service \
   wbozon-inventory@ozon.service \
   wbozon-inventory@yandex_market.service \
+  wbozon-wb-documents.timer \
   wbozon-telegram.service \
   wbozon-telegram-relay.service \
   wbozon-operations.timer

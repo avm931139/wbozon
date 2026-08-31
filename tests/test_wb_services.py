@@ -8,6 +8,7 @@ def test_sync_service_initializes_api_modules():
     assert service.stocks_api is not None
     assert service.categories_api is not None
     assert service.fbo_stocks_api is not None
+    assert service.documents_api is not None
 
 
 def test_sync_service_delegates_to_persisting_services(monkeypatch):
@@ -39,12 +40,18 @@ def test_sync_service_delegates_to_persisting_services(monkeypatch):
         "sync_from_api",
         lambda **kwargs: calls.append(("fbo_stocks", kwargs)) or [],
     )
+    monkeypatch.setattr(
+        service.document_service,
+        "sync_all",
+        lambda **kwargs: calls.append(("documents", kwargs)) or {},
+    )
 
     service.sync_products(limit=10)
     service.sync_warehouses()
     service.sync_stocks(warehouse_id=1, chrt_ids=[2])
     service.sync_categories(locale="ru")
     service.sync_fbo_stocks(limit=100)
+    service.sync_documents_and_accounting(download_limit=5)
 
     assert calls == [
         ("products", {"limit": 10}),
@@ -52,4 +59,5 @@ def test_sync_service_delegates_to_persisting_services(monkeypatch):
         ("stocks", {"warehouse_id": 1, "chrt_ids": [2]}),
         ("categories", {"locale": "ru"}),
         ("fbo_stocks", {"limit": 100}),
+        ("documents", {"download_limit": 5}),
     ]

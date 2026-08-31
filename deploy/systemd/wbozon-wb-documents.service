@@ -1,0 +1,17 @@
+[Unit]
+Description=wbozon WB documents and accounting synchronization
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wbozon
+Group=wbozon
+WorkingDirectory=/home/wbozon/wbozon
+EnvironmentFile=/home/wbozon/wbozon/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/wbozon/wbozon/.venv/bin/python -m wb.document_sync
+TimeoutStartSec=45min
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
