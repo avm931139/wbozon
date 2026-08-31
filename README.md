@@ -211,7 +211,7 @@ python -m telegram_bot --once stock-files
 
 ## Дополнительная документация
 
-Полный индекс находится в [docs/README.md](docs/README.md). Подробное описание проекта доступно в [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md), общей инфраструктуры — в [app/README.md](app/README.md), интеграции WB — в [wb/README.md](wb/README.md), Ozon — в [ozon/README.md](ozon/README.md), остатков — в [inventory_sync/README.md](inventory_sync/README.md), групповых отчётов — в [telegram_bot/README.md](telegram_bot/README.md), личного журнала — в [operations_bot/README.md](operations_bot/README.md), мониторинга — в [healthcheck/README.md](healthcheck/README.md), systemd-задач — в [deploy/systemd/README.md](deploy/systemd/README.md).
+Полный индекс находится в [docs/README.md](docs/README.md). Подробное описание проекта доступно в [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md), инструкция по production и двум VPS — в [docs/VPS_RUNBOOK.md](docs/VPS_RUNBOOK.md), общей инфраструктуры — в [app/README.md](app/README.md), интеграции WB — в [wb/README.md](wb/README.md), Ozon — в [ozon/README.md](ozon/README.md), остатков — в [inventory_sync/README.md](inventory_sync/README.md), групповых отчётов — в [telegram_bot/README.md](telegram_bot/README.md), личного журнала — в [operations_bot/README.md](operations_bot/README.md), мониторинга — в [healthcheck/README.md](healthcheck/README.md), systemd-задач — в [deploy/systemd/README.md](deploy/systemd/README.md).
 
 Проверка работающих сервисов, свежести данных, полноты дневных срезов и доставки Telegram:
 

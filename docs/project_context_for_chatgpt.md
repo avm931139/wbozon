@@ -33,6 +33,8 @@ Private Telegram ← operations_bot ← sync journals + durable operations queue
 
 Проект — модульный монолит с независимыми процессами и общей PostgreSQL, не набор сетевых микросервисов. Workers не вызывают друг друга напрямую. Каноническое описание: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
+Production VPS — `185.105.111.112`; на нём работают приложение и PostgreSQL. VPS `46.30.47.95` используется только как SSH/SOCKS relay к Telegram. Не предлагать запускать на legacy VPS workers или считать его резервным production. Каноническая инструкция по доступам и эксплуатации: [`VPS_RUNBOOK.md`](VPS_RUNBOOK.md).
+
 Ozon warehouse inventory uses `/v1/product/info/stocks-by-warehouse/fbo` and `/v2/product/info/stocks-by-warehouse/fbs`. Current rows are stored in `ozon_warehouse_stocks`, warehouse metadata in `ozon_warehouses`, and daily rows in `ozon_warehouse_stock_snapshots`. The legacy-compatible aggregate remains in `ozon_stocks` and `ozon_stock_snapshots`. Since 2026-08-17 Ozon stock analytics are realtime; `00:00 Europe/Moscow` is the application's business cutoff.
 
 Доступные Ozon jobs: `products`, `orders`, `supplies`, `communications`,
@@ -64,4 +66,4 @@ python -m pytest -q
 python -m alembic heads
 ```
 
-Дополнительная документация: [`PROJECT_DOCUMENTATION.md`](PROJECT_DOCUMENTATION.md), [`../wb/README.md`](../wb/README.md), [`../ozon/README.md`](../ozon/README.md), [`../inventory_sync/README.md`](../inventory_sync/README.md), [`../telegram_bot/README.md`](../telegram_bot/README.md).
+Дополнительная документация: [`PROJECT_DOCUMENTATION.md`](PROJECT_DOCUMENTATION.md), [`VPS_RUNBOOK.md`](VPS_RUNBOOK.md), [`../wb/README.md`](../wb/README.md), [`../ozon/README.md`](../ozon/README.md), [`../inventory_sync/README.md`](../inventory_sync/README.md), [`../telegram_bot/README.md`](../telegram_bot/README.md).

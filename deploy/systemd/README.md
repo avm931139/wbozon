@@ -1,6 +1,6 @@
 # Развертывание независимых systemd-процессов
 
-Файлы в этом каталоге реализуют production-схему из [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md). Постоянные workers разделены по ответственности, а периодические операции оформлены как oneshot-service с timer.
+Файлы в этом каталоге реализуют production-схему из [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md). Постоянные workers разделены по ответственности, а периодические операции оформлены как oneshot-service с timer. Адреса двух VPS, SSH/Git-доступ, PostgreSQL и диагностика relay описаны в [`docs/VPS_RUNBOOK.md`](../../docs/VPS_RUNBOOK.md).
 
 ## Установка unit-файлов
 
