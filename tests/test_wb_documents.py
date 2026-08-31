@@ -133,7 +133,7 @@ def test_document_storage_rejects_unsafe_or_unexpected_extension(tmp_path):
     with pytest.raises(ValueError, match="extension mismatch"):
         DocumentStorage(tmp_path).save(
             "doc-1",
-            {"fileName": "one.zip", "extension": "zip", "document": encoded},
+            {"fileName": "one.xlsx", "extension": "xlsx", "document": encoded},
             expected_extension="pdf",
         )
 
@@ -146,23 +146,31 @@ def _zip_bytes(files=None):
     return output.getvalue()
 
 
-def test_document_storage_accepts_verified_zip_wrapper_for_requested_xlsx(tmp_path):
-    package = _zip_bytes({"report.xlsx": b"workbook", "report.xlsx.sig": b"signature"})
+@pytest.mark.parametrize(("expected_extension", "member_name"), [
+    ("xlsx", "report.xlsx"),
+    ("pdf", "damaged-product-report.pdf"),
+])
+def test_document_storage_accepts_verified_zip_wrapper_for_requested_format(
+    tmp_path,
+    expected_extension,
+    member_name,
+):
+    package = _zip_bytes({member_name: b"document", f"{member_name}.sig": b"signature"})
     stored = DocumentStorage(tmp_path).save(
-        "doc-1",
+        f"doc-{expected_extension}",
         {
             "fileName": "report.zip",
             "extension": "zip",
             "document": base64.b64encode(package).decode("ascii"),
         },
-        expected_extension="xlsx",
+        expected_extension=expected_extension,
     )
 
     assert stored.extension == "zip"
     assert stored.file_name == "report.zip"
 
     invalid_package = _zip_bytes({"readme.txt": b"not a workbook"})
-    with pytest.raises(ValueError, match="does not contain an XLSX"):
+    with pytest.raises(ValueError, match="does not contain a PDF"):
         DocumentStorage(tmp_path).save(
             "doc-2",
             {
@@ -170,7 +178,7 @@ def test_document_storage_accepts_verified_zip_wrapper_for_requested_xlsx(tmp_pa
                 "extension": "zip",
                 "document": base64.b64encode(invalid_package).decode("ascii"),
             },
-            expected_extension="xlsx",
+            expected_extension="pdf",
         )
 
 

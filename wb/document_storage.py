@@ -69,14 +69,14 @@ class DocumentStorage:
             raise ValueError("WB document response contains an invalid extension")
         if expected_extension is not None:
             normalized_expected = expected_extension.strip().lstrip(".").lower()
-            is_xlsx_package = normalized_expected == "xlsx" and extension == "zip"
-            if extension != normalized_expected and not is_xlsx_package:
+            is_document_package = extension == "zip" and normalized_expected != "zip"
+            if extension != normalized_expected and not is_document_package:
                 raise ValueError(
                     f"WB document extension mismatch: requested {normalized_expected}, got {extension}"
                 )
         self._validate_content(extension, content)
-        if expected_extension is not None and normalized_expected == "xlsx" and extension == "zip":
-            self._validate_xlsx_package(content)
+        if expected_extension is not None and is_document_package:
+            self._validate_document_package(content, normalized_expected)
         safe_service_name = self._safe_part(service_name, "document")
         supplied_name = str(payload.get("fileName") or safe_service_name).replace("\\", "/")
         supplied_leaf = supplied_name.rsplit("/", 1)[-1]
@@ -158,15 +158,18 @@ class DocumentStorage:
                 raise ValueError("WB document ZIP payload is not an XLSX workbook")
 
     @staticmethod
-    def _validate_xlsx_package(content: bytes) -> None:
-        """Validate the outer ZIP WB sometimes returns for a requested XLSX."""
+    def _validate_document_package(content: bytes, expected_extension: str) -> None:
+        """Validate the outer ZIP WB sometimes returns for another requested format."""
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as archive:
                 names = archive.namelist()
         except (OSError, zipfile.BadZipFile) as exc:
-            raise ValueError("WB XLSX package is not a valid ZIP file") from exc
-        if not any(name.lower().endswith(".xlsx") for name in names):
-            raise ValueError("WB XLSX package does not contain an XLSX file")
+            raise ValueError("WB document package is not a valid ZIP file") from exc
+        suffix = f".{expected_extension}"
+        if not any(name.lower().endswith(suffix) for name in names):
+            raise ValueError(
+                f"WB document package does not contain a {expected_extension.upper()} file"
+            )
 
     @staticmethod
     def _safe_part(value: str, fallback: str) -> str:
