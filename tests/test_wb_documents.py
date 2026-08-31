@@ -146,6 +146,34 @@ def _zip_bytes(files=None):
     return output.getvalue()
 
 
+def test_document_storage_accepts_verified_zip_wrapper_for_requested_xlsx(tmp_path):
+    package = _zip_bytes({"report.xlsx": b"workbook", "report.xlsx.sig": b"signature"})
+    stored = DocumentStorage(tmp_path).save(
+        "doc-1",
+        {
+            "fileName": "report.zip",
+            "extension": "zip",
+            "document": base64.b64encode(package).decode("ascii"),
+        },
+        expected_extension="xlsx",
+    )
+
+    assert stored.extension == "zip"
+    assert stored.file_name == "report.zip"
+
+    invalid_package = _zip_bytes({"readme.txt": b"not a workbook"})
+    with pytest.raises(ValueError, match="does not contain an XLSX"):
+        DocumentStorage(tmp_path).save(
+            "doc-2",
+            {
+                "fileName": "report.zip",
+                "extension": "zip",
+                "document": base64.b64encode(invalid_package).decode("ascii"),
+            },
+            expected_extension="xlsx",
+        )
+
+
 def test_document_storage_validates_zip_xlsx_and_size(tmp_path):
     zip_content = _zip_bytes()
     zip_stored = DocumentStorage(tmp_path).save("zip-doc", {
@@ -192,17 +220,25 @@ class FakeDocumentsAPI:
             "serviceName": "redeem-notification-1",
             "name": "redeem-notification",
             "category": "Уведомление",
-            "extensions": ["pdf", "zip"],
+            "extensions": ["pdf", "xlsx"],
             "creationTime": "2026-08-31T10:15:00Z",
             "viewed": False,
         }]
 
     def download(self, service_name, extension):
         self.download_calls.append((service_name, extension))
-        content = b"%PDF-1.7\ndocument" if extension == "pdf" else _zip_bytes()
+        if extension == "pdf":
+            response_extension = "pdf"
+            content = b"%PDF-1.7\ndocument"
+        else:
+            response_extension = "zip"
+            content = _zip_bytes({
+                "account.xlsx": b"workbook",
+                "account.xlsx.sig": b"signature",
+            })
         return {
-            "fileName": f"{service_name}.{extension}",
-            "extension": extension,
+            "fileName": f"{service_name}.{response_extension}",
+            "extension": response_extension,
             "document": base64.b64encode(content).decode("ascii"),
         }
 
@@ -233,7 +269,7 @@ def test_document_service_persists_metadata_balance_and_every_extension(tmp_path
     }
     assert documents_api.download_calls == [
         ("redeem-notification-1", "pdf"),
-        ("redeem-notification-1", "zip"),
+        ("redeem-notification-1", "xlsx"),
     ]
     with session_factory() as session:
         document = session.query(WBDocument).one()
@@ -242,6 +278,8 @@ def test_document_service_persists_metadata_balance_and_every_extension(tmp_path
         assert document.document_created_at is not None
         assert document.viewed is False
         assert session.query(WBDocumentFile).count() == 2
+        xlsx_file = session.query(WBDocumentFile).filter_by(extension="xlsx").one()
+        assert xlsx_file.local_path.endswith(".zip")
         balance = session.query(WBFinanceBalanceSnapshot).one()
         assert balance.currency == "RUB"
         assert str(balance.current) == "1200.25"

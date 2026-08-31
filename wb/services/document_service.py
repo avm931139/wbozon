@@ -143,27 +143,27 @@ class DocumentService:
             payload,
             expected_extension=extension,
         )
-        normalized_extension = stored.extension.lower()
+        logical_extension = extension
         with self.session_factory() as session:
             row = session.query(WBDocument).filter(WBDocument.service_name == service_name).one_or_none()
             if row is None:
                 row = WBDocument(
                     service_name=service_name,
-                    extensions=[normalized_extension],
+                    extensions=[logical_extension],
                     raw_data={},
                 )
                 session.add(row)
                 session.flush()
-            elif normalized_extension not in _extensions(row.extensions):
-                row.extensions = [*_extensions(row.extensions), normalized_extension]
+            elif logical_extension not in _extensions(row.extensions):
+                row.extensions = [*_extensions(row.extensions), logical_extension]
             file_row = session.query(WBDocumentFile).filter_by(
                 document_id=row.id,
-                extension=normalized_extension,
+                extension=logical_extension,
             ).one_or_none()
             if file_row is None:
                 file_row = WBDocumentFile(
                     document_id=row.id,
-                    extension=normalized_extension,
+                    extension=logical_extension,
                     local_path=stored.relative_path,
                     file_name=stored.file_name,
                     file_size=stored.size,
