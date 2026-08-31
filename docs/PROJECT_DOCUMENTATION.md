@@ -2,7 +2,7 @@
 
 ## Назначение
 
-Проект синхронизирует данные кабинетов Wildberries и Ozon с PostgreSQL, отправляет управленческие и складские отчёты в Telegram и контролирует здоровье серверных процессов. Рабочая архитектура находится в пакетах `app`, `wb`, `ozon`, `inventory_sync`, `telegram_bot` и `healthcheck`. Каталог `legacy_core` сохранён как унаследованный каркас и не является частью основного процесса.
+Проект синхронизирует данные кабинетов Wildberries, Ozon и Яндекс Маркета с PostgreSQL, отправляет управленческие и складские отчёты в Telegram, ведёт личный журнал выполненных действий и контролирует здоровье серверных процессов. Рабочая архитектура находится в пакетах `app`, `wb`, `ozon`, `yandex_market`, `inventory_sync`, `telegram_bot`, `operations_bot` и `healthcheck`. Каталог `legacy_core` сохранён как унаследованный каркас и не является частью основного процесса.
 
 ## Актуальная структура
 
@@ -17,13 +17,14 @@
 - [`yandex_market/`](../yandex_market) — клиент Partner API и нормализация складских остатков;
 - [`inventory_sync/`](../inventory_sync) — отдельные workers текущих остатков WB/Ozon/Яндекс Маркета и ежедневных срезов на 00:00 по Москве;
 - [`telegram_bot/`](../telegram_bot) — формирование, планирование и отправка отчётов;
+- [`operations_bot/`](../operations_bot) — личный дайджест успешных и ошибочных действий из журналов PostgreSQL;
 - [`healthcheck/`](../healthcheck) — проверка systemd, свежести данных, полноты срезов и доставки Telegram;
 - [`alembic/`](../alembic) — миграции PostgreSQL;
 - [`tests/`](../tests) — модульные тесты;
 - [`deploy/systemd/`](../deploy/systemd) — units постоянных workers и независимые timers;
 - [`logs/wb/`](../logs/wb) — рабочие журналы синхронизации.
 
-Подробности интеграции WB находятся в [`wb/README.md`](../wb/README.md), Ozon — в [`ozon/README.md`](../ozon/README.md), периодических остатков — в [`inventory_sync/README.md`](../inventory_sync/README.md), отчётов — в [`telegram_bot/README.md`](../telegram_bot/README.md).
+Подробности интеграции WB находятся в [`wb/README.md`](../wb/README.md), Ozon — в [`ozon/README.md`](../ozon/README.md), периодических остатков — в [`inventory_sync/README.md`](../inventory_sync/README.md), групповых отчётов — в [`telegram_bot/README.md`](../telegram_bot/README.md), личного журнала — в [`operations_bot/README.md`](../operations_bot/README.md).
 
 ## Поток данных
 
@@ -31,8 +32,9 @@
 WB API → wb worker / inventory@wb ───────────────────────────────┐
 Ozon API → ozon tasks / inventory@ozon ─────────────────────────┤→ PostgreSQL
 Яндекс Маркет API → inventory@yandex_market ────────────────────┤
-                                                                 ├→ telegram workers → Telegram API
-                                                                 └→ healthcheck → Telegram API
+                                                                 ├→ telegram workers → Telegram-группа
+                                                                 ├→ operations_bot → личный Telegram
+                                                                 └→ healthcheck → Telegram-группа
 ```
 
 Telegram-модуль не запрашивает данные маркетплейсов напрямую. Он строит отчёты только по уже синхронизированной базе.
@@ -50,6 +52,8 @@ Telegram-модуль не запрашивает данные маркетпл�
 
 - `WB_TG_BOT_TOKEN` — токен BotFather;
 - `WB_TG_CHAT_ID` — ID целевой группы, обычно отрицательное число.
+
+Для личного журнала задайте `OPERATIONS_TG_CHAT_ID` — числовой ID личного диалога. Бот должен заранее получить от пользователя `/start`. По умолчанию модуль повторно использует `WB_TG_BOT_TOKEN` и `WB_TG_PROXY_URL`; при необходимости их можно переопределить через `OPERATIONS_TG_BOT_TOKEN` и `OPERATIONS_TG_PROXY_URL`.
 
 Для Ozon нужны `OZON_CLIENT_ID` и `OZON_API_KEY`.
 
@@ -77,6 +81,7 @@ git pull --ff-only origin master
 ./.venv/bin/python -m inventory_sync --marketplace ozon --once
 ./.venv/bin/python -m inventory_sync --marketplace yandex_market --once
 sudo systemctl restart 'wbozon-inventory@*.service'
+sudo systemctl enable --now wbozon-operations.timer
 systemctl --no-pager status 'wbozon-inventory@*.service'
 ```
 
@@ -96,6 +101,7 @@ python -m telegram_bot
 python -m inventory_sync --marketplace wb
 python -m inventory_sync --marketplace ozon
 python -m inventory_sync --marketplace yandex_market
+python -m operations_bot      # один личный дайджест новых событий
 ```
 
 Другие режимы:
@@ -185,6 +191,8 @@ sudo journalctl -u wbozon-ozon@orders.service -n 100 --no-pager
 
 Отсутствие Telegram-настроек не влияет на WB/Ozon/inventory workers, потому что Telegram работает отдельным процессом. Повторная отправка уже доставленного ручного отчёта выполняется с флагом `--force`.
 
+`operations_bot` также изолирован от рабочих процессов. Он читает только завершённые записи `wb_sync_runs`, `ozon_sync_runs`, `inventory_sync_runs` и `wb_telegram_deliveries`. Новые события сначала фиксируются в `operations_event_deliveries`, поэтому при недоступном Telegram они не теряются и повторяются следующим запуском. Курсор `operations_monitor_states` исключает повторное чтение, а уникальный ключ события защищает от дублей.
+
 ## Синхронизируемые разделы
 
 Периодический цикл последовательно обновляет:
@@ -225,11 +233,13 @@ Ozon хранится в двух представлениях:
 - нулевые остатки исключаются из Excel, а сами файлы создаются в памяти без временных файлов на диске;
 - при отсутствии среза бот отправляет дедуплицированное предупреждение и продолжает отправку доступного маркетплейса.
 
+Отдельный `wbozon-operations.timer` каждые пять минут отправляет в личный чат компактный журнал действий: успешные циклы WB, независимые задания Ozon, обновления и срезы остатков каждого маркетплейса, успешные или ошибочные Telegram-доставки, новые ошибки healthcheck и последующее восстановление. Неизменный набор healthcheck-ошибок повторно не отправляется. Для ошибок добавляется сохранённая причина, вероятное объяснение и команда журнала соответствующего systemd unit. Успешные события можно отключить через `OPERATIONS_TG_INCLUDE_SUCCESSES=false`.
+
 ## Журналы и диагностика
 
 Основной журнал WB-процесса: `logs/wb/wb_sync.log`; Telegram использует отдельный каталог `logs/telegram/`. Ozon, inventory и healthcheck пишут в journal systemd, а результаты прикладных запусков дополнительно сохраняются в `ozon_sync_runs` и `inventory_sync_runs`. Процессы не ротируют один файл одновременно.
 
-`python -m healthcheck` проверяет отдельные systemd workers, свежесть inventory по каждому маркетплейсу, обязательные Ozon jobs, пять таблиц срезов и доставку трёх складских файлов после 09:30. Команда возвращает `0` при норме и `1` при ошибках. Новый набор ошибок один раз отправляется в Telegram; повтор одинакового набора подавляется, а после восстановления отправляется отдельное сообщение. На VPS команда запускается парой `wbozon-healthcheck.service` (`Type=oneshot`) и `wbozon-healthcheck.timer` каждые пять минут.
+`python -m healthcheck` проверяет отдельные systemd workers, свежесть inventory по каждому маркетплейсу, обязательные Ozon jobs, пять таблиц срезов, доставку трёх складских файлов после 09:30, активность личного timer, свежесть его курсора и ошибки очереди. Команда возвращает `0` при норме и `1` при ошибках. Новый набор ошибок один раз отправляется в Telegram; повтор одинакового набора подавляется, а после восстановления отправляется отдельное сообщение. На VPS команда запускается парой `wbozon-healthcheck.service` (`Type=oneshot`) и `wbozon-healthcheck.timer` каждые пять минут.
 
 Проверка состояния процесса начинается с последних строк журнала:
 

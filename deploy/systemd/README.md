@@ -43,6 +43,16 @@ sudo systemctl enable --now \
   wbozon-healthcheck.timer
 ```
 
+После настройки `OPERATIONS_TG_CHAT_ID` включите личный операционный дайджест:
+
+```bash
+sudo systemctl enable --now wbozon-operations.timer
+sudo systemctl start wbozon-operations.service
+sudo journalctl -u wbozon-operations.service -n 50 --no-pager
+```
+
+Он читает журналы БД и не является зависимостью WB/Ozon/inventory. Ошибка Telegram оставляет события в очереди и не меняет статус исходной синхронизации.
+
 `wbozon-telegram-relay.service` нужен на текущем VPS из-за блокировки Telegram. В среде с прямым доступом relay можно не включать и удалить `WB_TG_PROXY_URL` из `.env`.
 
 После включения `wbozon-telegram-stock.timer` удалите старую cron-строку `python -m telegram_bot --once stock-files`, иначе возможны параллельные попытки. Дедупликация защищает от повторной доставки, но второй механизм расписания не нужен.
@@ -76,7 +86,8 @@ systemctl --no-pager --full status \
   wbozon-inventory@ozon.service \
   wbozon-inventory@yandex_market.service \
   wbozon-telegram.service \
-  wbozon-telegram-relay.service
+  wbozon-telegram-relay.service \
+  wbozon-operations.timer
 
 systemctl list-timers 'wbozon-*' --all
 sudo systemctl start wbozon-healthcheck.service

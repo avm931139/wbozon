@@ -1,0 +1,11 @@
+[Unit]
+Description=Send private wbozon operational digest every five minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/5:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=20
+Unit=wbozon-operations.service
+
+[Install]
+WantedBy=timers.target

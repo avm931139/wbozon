@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
-from app.models import OzonSyncRun
+from app.models import HealthcheckRun, OzonSyncRun
 from healthcheck.__main__ import (
     Check,
     OZON_TASK_MAX_AGES,
@@ -14,6 +14,7 @@ from healthcheck.__main__ import (
     _ozon_task_checks,
     _systemctl_active,
     collect_checks,
+    record_healthcheck,
 )
 
 
@@ -82,6 +83,8 @@ def test_collect_checks_targets_independent_workers_instead_of_cron(monkeypatch)
     monkeypatch.setattr("healthcheck.__main__.YANDEX_MARKET_CAMPAIGN_IDS", ())
     monkeypatch.setattr("healthcheck.__main__.WB_TG_BOT_TOKEN", None)
     monkeypatch.setattr("healthcheck.__main__.WB_TG_CHAT_ID", None)
+    monkeypatch.setattr("healthcheck.__main__.OPERATIONS_TG_BOT_TOKEN", None)
+    monkeypatch.setattr("healthcheck.__main__.OPERATIONS_TG_CHAT_ID", None)
     monkeypatch.setattr("healthcheck.__main__.OZON_REQUIRED_TASKS", ())
 
     collect_checks(
@@ -94,3 +97,30 @@ def test_collect_checks_targets_independent_workers_instead_of_cron(monkeypatch)
         "wbozon-inventory@ozon.service",
         "wbozon-wb.service",
     ]
+
+
+def test_healthcheck_journal_emits_only_failure_changes_and_recovery(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    monkeypatch.setattr("healthcheck.__main__.SessionLocal", session_factory)
+    now = datetime(2026, 8, 31, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    failed = [Check(False, "Yandex inventory service", "inactive")]
+
+    assert record_healthcheck(failed, now) == "failed"
+    assert record_healthcheck(failed, now.replace(minute=5)) == "unchanged"
+    assert record_healthcheck(
+        [Check(True, "Yandex inventory service", "active")],
+        now.replace(minute=10),
+    ) == "recovered"
+    assert record_healthcheck(
+        [Check(True, "Yandex inventory service", "active")],
+        now.replace(minute=15),
+    ) == "healthy"
+
+    with session_factory() as session:
+        statuses = [
+            row.status
+            for row in session.query(HealthcheckRun).order_by(HealthcheckRun.checked_at)
+        ]
+    assert statuses == ["failed", "unchanged", "recovered", "healthy"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import sys
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable
@@ -13,6 +14,8 @@ from sqlalchemy import func
 from app.config import (
     INVENTORY_SYNC_INTERVAL_SECONDS,
     INVENTORY_TIMEZONE,
+    OPERATIONS_TG_BOT_TOKEN,
+    OPERATIONS_TG_CHAT_ID,
     OZON_ADS_MAX_AGE_SECONDS,
     OZON_COMMUNICATIONS_MAX_AGE_SECONDS,
     OZON_DAILY_SALES_MAX_AGE_SECONDS,
@@ -30,7 +33,10 @@ from app.config import (
 )
 from app.db import SessionLocal
 from app.models import (
+    HealthcheckRun,
     InventorySyncRun,
+    OperationsEventDelivery,
+    OperationsMonitorState,
     OzonSyncRun,
     OzonStockSnapshot,
     OzonWarehouseStockSnapshot,
@@ -88,6 +94,41 @@ def _failure_signature(checks: list[Check]) -> str:
     return hashlib.sha256(names.encode("utf-8")).hexdigest()[:16]
 
 
+def record_healthcheck(checks: list[Check], now: datetime | None = None) -> str:
+    """Persist a health run and classify state transitions for private alerts."""
+    timezone = ZoneInfo(INVENTORY_TIMEZONE)
+    current = now or datetime.now(timezone)
+    current = current.replace(tzinfo=timezone) if current.tzinfo is None else current.astimezone(timezone)
+    failures = [check for check in checks if not check.ok]
+    signature = _failure_signature(checks) if failures else None
+    with SessionLocal() as session:
+        previous = session.query(HealthcheckRun).order_by(HealthcheckRun.checked_at.desc()).first()
+        if failures:
+            unchanged = (
+                previous is not None
+                and previous.status in {"failed", "unchanged"}
+                and previous.failure_signature == signature
+            )
+            status = "unchanged" if unchanged else "failed"
+        else:
+            status = (
+                "recovered"
+                if previous is not None and previous.status in {"failed", "unchanged"}
+                else "healthy"
+            )
+        session.add(HealthcheckRun(
+            id=uuid.uuid4().hex,
+            checked_at=current,
+            status=status,
+            checks_total=len(checks),
+            checks_failed=len(failures),
+            failure_signature=signature,
+            checks=[{"ok": check.ok, "name": check.name, "detail": check.detail} for check in checks],
+        ))
+        session.commit()
+    return status
+
+
 def _error_message(checks: list[Check], now: datetime) -> str:
     failures = [check for check in checks if not check.ok]
     lines = [f"⚠️ Ошибки WB/Ozon/Yandex Market — {now:%d.%m.%Y %H:%M} МСК"]
@@ -138,6 +179,10 @@ def collect_checks(
         if WB_TG_PROXY_URL:
             relay_ok, relay_status = systemctl("wbozon-telegram-relay.service")
             checks.append(Check(relay_ok, "Telegram relay service", relay_status))
+    operations_enabled = bool(OPERATIONS_TG_BOT_TOKEN and OPERATIONS_TG_CHAT_ID)
+    if operations_enabled:
+        operations_ok, operations_status = systemctl("wbozon-operations.timer")
+        checks.append(Check(operations_ok, "private operations timer", operations_status))
 
     with SessionLocal() as session:
         for marketplace in inventory_marketplaces:
@@ -174,6 +219,29 @@ def collect_checks(
                 ))
 
         checks.extend(_ozon_task_checks(session, current))
+
+        if operations_enabled:
+            monitor_state = session.get(OperationsMonitorState, "main")
+            if monitor_state is None:
+                checks.append(Check(False, "private operations monitor", "no runs recorded"))
+            else:
+                cursor_at = monitor_state.cursor_at
+                if cursor_at.tzinfo is None:
+                    cursor_at = cursor_at.replace(tzinfo=ZoneInfo("UTC"))
+                age = current - cursor_at.astimezone(timezone)
+                checks.append(Check(
+                    age <= timedelta(minutes=15),
+                    "private operations monitor",
+                    f"last discovery {age} ago",
+                ))
+            queued_errors = session.query(func.count(OperationsEventDelivery.id)).filter(
+                OperationsEventDelivery.status == "error"
+            ).scalar() or 0
+            checks.append(Check(
+                queued_errors == 0,
+                "private operations delivery",
+                f"{queued_errors} events waiting after Telegram errors",
+            ))
 
         snapshot_models = [
             ("WB FBS snapshot", WBFBSStockSnapshot),
@@ -264,6 +332,12 @@ def main() -> None:
     except Exception as exc:
         failed += 1
         print(f"ERROR Telegram health notification: {type(exc).__name__}: {exc}")
+        checks.append(Check(False, "Telegram health notification", f"{type(exc).__name__}: {exc}"))
+    try:
+        print(f"HEALTH JOURNAL: {record_healthcheck(checks)}")
+    except Exception as exc:
+        failed += 1
+        print(f"ERROR health journal: {type(exc).__name__}: {exc}")
     print(f"SUMMARY: {len(checks) - failed} OK, {failed} ERROR")
     raise SystemExit(1 if failed else 0)
 

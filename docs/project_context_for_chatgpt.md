@@ -12,6 +12,7 @@
 - `yandex_market/` — Partner API Яндекс Маркета;
 - `inventory_sync/` — отдельные workers `wb`, `ozon`, `yandex_market` для текущих остатков и ежедневных срезов в 00:00 `Europe/Moscow`;
 - `telegram_bot/` — корневой пакет Telegram-отчётов;
+- `operations_bot/` — независимый личный дайджест событий из журналов PostgreSQL с долговечной очередью;
 - `healthcheck/` — проверка systemd workers, свежести inventory и обязательных Ozon jobs, дневных срезов и доставки Telegram с дедуплицированными оповещениями;
 - `main.py` — совместимый alias для `python -m wb`; он не запускает Telegram;
 - `deploy/systemd/` — канонические units постоянных workers и timers;
@@ -27,6 +28,7 @@ WB API → wb API class → service → repository/session → app.models → Po
 Ozon API → ozon task runner → service → repository/session → app.models + ozon_sync_runs → PostgreSQL
 WB/Ozon/Yandex stock APIs → separate inventory workers → current stocks + daily snapshots
 Telegram API ← telegram_bot / healthcheck ← PostgreSQL
+Private Telegram ← operations_bot ← sync journals + durable operations queue
 ```
 
 Проект — модульный монолит с независимыми процессами и общей PostgreSQL, не набор сетевых микросервисов. Workers не вызывают друг друга напрямую. Каноническое описание: [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -52,6 +54,7 @@ PostgreSQL advisory lock для защиты от пересечения и за
 - использовать timezone-aware даты для нового кода;
 - не менять унаследованный код без явной необходимости;
 - после изменения импортов проверять точки запуска: `python -m wb --help`, `python -m telegram_bot --help`, `python -m ozon --help`, `python -m inventory_sync --help` и `python -m healthcheck`.
+- `operations_bot` не импортировать и не вызывать из marketplace workers: Telegram не должен влиять на их транзакции или exit code.
 - не восстанавливать удалённый `mantra_sync`: он не относится к рабочей архитектуре.
 
 ## Проверки перед завершением изменений

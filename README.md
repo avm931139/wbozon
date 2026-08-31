@@ -11,6 +11,7 @@
 - переиспользуемый слой интеграции с Wildberries в пакете wb;
 - отдельный корневой пакет Telegram-отчётов `telegram_bot`;
 - проверку сервисов, свежести данных и доставки отчётов в пакете `healthcheck`;
+- личный операционный дайджест успешных и ошибочных действий в пакете `operations_bot`;
 - отдельный интеграционный пакет Ozon Seller API `ozon`;
 - отдельный интеграционный пакет Partner API Яндекс Маркета `yandex_market`;
 - независимые по маркетплейсам workers текущих остатков и ежедневных срезов `inventory_sync`, включая детализацию Ozon по физическим складам;
@@ -53,6 +54,9 @@
   - `__main__.py` — команда `python -m inventory_sync`.
 - healthcheck/
   - `__main__.py` — проверка systemd, БД, дневных срезов и Telegram.
+- operations_bot/
+  - service.py — чтение журналов БД, очередь событий и личный Telegram-дайджест.
+  - `__main__.py` — разовый запуск `python -m operations_bot`.
 - deploy/systemd/
   - units всех постоянных workers и независимые timers.
 - legacy_core/
@@ -86,6 +90,8 @@
 
 - `WB_TG_BOT_TOKEN` — токен бота от BotFather.
 - `WB_TG_CHAT_ID` — ID группы для отчётов.
+
+Для личного технического журнала задайте `OPERATIONS_TG_CHAT_ID`. По умолчанию он использует тот же bot token и proxy, но отправляет сообщения в отдельный личный чат.
 
 Остальные параметры и значения по умолчанию перечислены в [`.env.example`](.env.example).
 
@@ -142,6 +148,7 @@ python -m telegram_bot
 ```bash
 python -m wb --once
 python -m telegram_bot --once operational
+python -m operations_bot
 ```
 
 `python main.py` оставлен как alias для `python -m wb`; совместного WB+Telegram процесса больше нет.
@@ -198,12 +205,13 @@ python -m telegram_bot --once stock-files
 4. Логика нормализации и бизнес-правила — в сервисах.
 5. Работа с базой данных — в репозиториях.
 6. Production-процессы не запускают друг друга и обмениваются состоянием только через PostgreSQL.
+7. Операционные уведомления читают журналы асинхронно и никогда не меняют результат marketplace worker.
 
 Точная схема процессов, границы отказов и общие зависимости описаны в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Проект является модульным монолитом с независимыми workers, а не набором автономно развертываемых сетевых микросервисов.
 
 ## Дополнительная документация
 
-Полный индекс находится в [docs/README.md](docs/README.md). Подробное описание проекта доступно в [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md), общей инфраструктуры — в [app/README.md](app/README.md), интеграции WB — в [wb/README.md](wb/README.md), Ozon — в [ozon/README.md](ozon/README.md), остатков — в [inventory_sync/README.md](inventory_sync/README.md), отчётов — в [telegram_bot/README.md](telegram_bot/README.md), мониторинга — в [healthcheck/README.md](healthcheck/README.md), systemd-задач — в [deploy/systemd/README.md](deploy/systemd/README.md).
+Полный индекс находится в [docs/README.md](docs/README.md). Подробное описание проекта доступно в [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md), общей инфраструктуры — в [app/README.md](app/README.md), интеграции WB — в [wb/README.md](wb/README.md), Ozon — в [ozon/README.md](ozon/README.md), остатков — в [inventory_sync/README.md](inventory_sync/README.md), групповых отчётов — в [telegram_bot/README.md](telegram_bot/README.md), личного журнала — в [operations_bot/README.md](operations_bot/README.md), мониторинга — в [healthcheck/README.md](healthcheck/README.md), systemd-задач — в [deploy/systemd/README.md](deploy/systemd/README.md).
 
 Проверка работающих сервисов, свежести данных, полноты дневных срезов и доставки Telegram:
 

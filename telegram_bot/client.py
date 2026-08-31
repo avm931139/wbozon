@@ -79,6 +79,27 @@ class TelegramClient:
             message_ids.append(int(payload["result"]["message_id"]))
         return message_ids
 
+    def get_updates(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return recent bot updates, primarily for discovering a private chat ID."""
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        try:
+            response = self.session.post(
+                f"{self.base_url}/getUpdates",
+                json={"limit": limit, "timeout": 0},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            raise self._transport_error(exc) from None
+        if not payload.get("ok"):
+            raise TelegramError(
+                f"Telegram API rejected getUpdates: {payload.get('description', 'unknown error')}"
+            )
+        result = payload.get("result")
+        return result if isinstance(result, list) else []
+
     def send_document(
         self,
         filename: str,

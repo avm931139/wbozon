@@ -1,0 +1,17 @@
+[Unit]
+Description=wbozon private operational Telegram digest
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wbozon
+Group=wbozon
+WorkingDirectory=/home/wbozon/wbozon
+EnvironmentFile=/home/wbozon/wbozon/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/wbozon/wbozon/.venv/bin/python -m operations_bot
+TimeoutStartSec=5min
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes

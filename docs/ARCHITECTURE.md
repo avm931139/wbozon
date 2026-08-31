@@ -17,6 +17,7 @@
 | Остатки Яндекс Маркета | `python -m inventory_sync --marketplace yandex_market` | `wbozon-inventory@yandex_market.service` | остатки кампаний и дневные срезы |
 | Telegram-тексты | `python -m telegram_bot` | `wbozon-telegram.service` | утренние и оперативные отчёты |
 | Telegram Excel | `python -m telegram_bot --once stock-files` | `wbozon-telegram-stock.timer` | три складских файла в 09:00 МСК |
+| Личный журнал | `python -m operations_bot` | `wbozon-operations.timer` | дайджест успешных и ошибочных действий программы |
 | Healthcheck | `python -m healthcheck` | `wbozon-healthcheck.timer` | процессы, свежесть БД, срезы и доставка Telegram |
 | Telegram relay | SSH dynamic SOCKS proxy | `wbozon-telegram-relay.service` | доступ к Telegram через старый VPS |
 
@@ -29,6 +30,7 @@
 - Ошибка API одного маркетплейса не откатывает текущие остатки и дневной срез другого маркетплейса.
 - Каждый Ozon task имеет собственный advisory lock и запись в `ozon_sync_runs`.
 - Excel-файлы имеют независимые ключи доставки: уже отправленный файл не дублируется при повторе другого.
+- Личные уведомления читают завершённые события из БД через собственную очередь; недоступность Telegram не меняет результат workers.
 - Общими точками отказа остаются PostgreSQL, каталог проекта, `.venv`, `.env` и сам VPS.
 
 Журналы процессов также разделены: WB пишет в `logs/wb/`, Telegram — в `logs/telegram/`, остальные workers — в journal systemd и свои таблицы запусков. Два процесса не ротируют один файл одновременно.
@@ -42,6 +44,7 @@ Ozon APIs ────────────→ ozon tasks ──────�
 Ozon stock APIs ──────→ inventory@ozon ─────────┤→ PostgreSQL
 Yandex Market API ────→ inventory@yandex_market ┤
                                                    ├→ telegram workers → Telegram API
+                                                   ├→ operations_bot → личный Telegram
                                                    └→ healthcheck → Telegram API
 ```
 

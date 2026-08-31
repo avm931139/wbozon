@@ -33,6 +33,15 @@ class FakeHTTPSession:
         self.calls.append((url, kwargs)); return FakeResponse(len(self.calls))
 
 
+class FakeUpdatesResponse(FakeResponse):
+    def json(self): return {"ok": True, "result": [{"update_id": 1}]}
+
+
+class FakeUpdatesSession(FakeHTTPSession):
+    def post(self, url, **kwargs):
+        self.calls.append((url, kwargs)); return FakeUpdatesResponse(len(self.calls))
+
+
 def sales_data():
     return {
         "orders_placed": 14, "orders_amount": "70010.25", "orders_from_period_now_cancelled": 2,
@@ -59,6 +68,14 @@ def test_client_sends_document_as_multipart_without_disk_file():
     assert url.endswith("/sendDocument")
     assert kwargs["data"] == {"chat_id": "-1001", "caption": "Stocks"}
     assert kwargs["files"]["document"][0:2] == ("stocks.xlsx", b"xlsx")
+
+
+def test_client_get_updates_for_chat_id_discovery():
+    session = FakeUpdatesSession(); client = TelegramClient("secret", "0", session=session)
+    assert client.get_updates() == [{"update_id": 1}]
+    url, kwargs = session.calls[0]
+    assert url.endswith("/getUpdates")
+    assert kwargs["json"] == {"limit": 100, "timeout": 0}
 
 
 def test_client_applies_proxy_only_to_its_session():

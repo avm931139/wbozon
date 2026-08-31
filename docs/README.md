@@ -10,6 +10,7 @@
 - [Архитектура складских остатков Ozon](../ozon/WAREHOUSE_STOCK_ARCHITECTURE.md)
 - [Периодическая синхронизация остатков по маркетплейсам](../inventory_sync/README.md)
 - [Telegram-отчёты](../telegram_bot/README.md)
+- [Личные уведомления о работе программы](../operations_bot/README.md)
 - [Healthcheck и серверный мониторинг](../healthcheck/README.md)
 - [Установка независимых systemd workers и timers](../deploy/systemd/README.md)
 - [Унаследованный каркас legacy_core](../legacy_core/README.md)

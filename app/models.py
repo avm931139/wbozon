@@ -874,6 +874,55 @@ class WBTelegramDelivery(Base):
     sent_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class OperationsMonitorState(Base):
+    """Durable discovery cursor for private operational notifications."""
+
+    __tablename__ = "operations_monitor_states"
+
+    id = Column(String(30), primary_key=True)
+    cursor_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class OperationsEventDelivery(Base):
+    """One durable, deduplicated operational event awaiting a private digest."""
+
+    __tablename__ = "operations_event_deliveries"
+    __table_args__ = (
+        UniqueConstraint("event_key", name="uq_operations_event_delivery_key"),
+        {"comment": "Очередь личных Telegram-уведомлений о работе приложения."},
+    )
+
+    id = Column(Integer, primary_key=True)
+    event_key = Column(String(150), nullable=False, index=True)
+    source_type = Column(String(30), nullable=False, index=True)
+    source_id = Column(String(100), nullable=False, index=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    severity = Column(String(20), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    detail = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, index=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    telegram_message_ids = Column(JSON, nullable=False, default=list)
+    error_text = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class HealthcheckRun(Base):
+    """Health state journal used to notify only on failures and recovery."""
+
+    __tablename__ = "healthcheck_runs"
+
+    id = Column(String(32), primary_key=True)
+    checked_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    status = Column(String(20), nullable=False, index=True)
+    checks_total = Column(Integer, nullable=False)
+    checks_failed = Column(Integer, nullable=False)
+    failure_signature = Column(String(16), nullable=True, index=True)
+    checks = Column(JSON, nullable=False, default=list)
+
+
 class WBAdvertExpense(Base):
     __tablename__ = "wb_advert_expenses"
     __table_args__ = (
