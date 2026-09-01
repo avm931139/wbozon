@@ -38,11 +38,12 @@ Production VPS — `185.105.111.112`; на нём работают прилож�
 
 Ozon warehouse inventory uses `/v1/product/info/stocks-by-warehouse/fbo` and `/v2/product/info/stocks-by-warehouse/fbs`. Current rows are stored in `ozon_warehouse_stocks`, warehouse metadata in `ozon_warehouses`, and daily rows in `ozon_warehouse_stock_snapshots`. The legacy-compatible aggregate remains in `ozon_stocks` and `ozon_stock_snapshots`. Since 2026-08-17 Ozon stock analytics are realtime; `00:00 Europe/Moscow` is the application's business cutoff.
 
-Доступные Ozon jobs: `products`, `orders`, `supplies`, `communications`,
-`daily_sales`, `finances`, `documents`, `ads`. `documents` включается только после
+Доступные Ozon jobs: `products`, `orders`, `supplies`, `supply_reconciliation`,
+`communications`, `daily_sales`, `finances`, `documents`, `ads`. `documents` включается только после
 ручного формирования первых асинхронных отчётов. На текущем VPS до развёртывания
 этого изменения включены `products`, `orders`, `supplies`, `daily_sales`, `finances`
-и `ads`; `documents` ещё требует миграции и первого запуска, а `communications`
+и `ads`; `documents` и `supply_reconciliation` требуют миграции и первого ручного
+запуска перед включением их timers, а `communications`
 выключен, потому что Reviews API кабинета возвращает HTTP 403. Активные задания запускаются независимо, используют
 PostgreSQL advisory lock для защиты от пересечения и записывают результат в
 `ozon_sync_runs`. Бизнес-дата Ozon рассчитывается в `OZON_TIMEZONE`, по умолчанию
@@ -62,6 +63,7 @@ PostgreSQL advisory lock для защиты от пересечения и за
 - после изменения импортов проверять точки запуска: `python -m wb --help`, `python -m telegram_bot --help`, `python -m ozon --help`, `python -m inventory_sync --help` и `python -m healthcheck`.
 - worker документов запускать отдельно через `python -m wb.document_sync`; не встраивать его в постоянный WB-цикл или inventory workers.
 - документы Ozon являются отдельным task `python -m ozon --task documents`; не смешивать его с начислениями `finances`.
+- сверка FBO Ozon является отдельным ежедневным task `python -m ozon --task supply_reconciliation`; не встраивать запросы актов в почасовой `supplies`.
 - `operations_bot` не импортировать и не вызывать из marketplace workers: Telegram не должен влиять на их транзакции или exit code.
 - не восстанавливать удалённый `mantra_sync`: он не относится к рабочей архитектуре.
 

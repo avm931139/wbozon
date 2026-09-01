@@ -110,6 +110,22 @@ sudo journalctl -u wbozon-ozon@documents.service -n 100 --no-pager
 `data/ozon/accounting/` требуют отдельной резервной копии. Полное описание — в
 [`ozon/ACCOUNTING.md`](../../ozon/ACCOUNTING.md).
 
+Сверка отправленного и фактически принятого FBO-количества выполняется отдельной
+ежедневной задачей. Первый исторический запуск выполните вручную:
+
+```bash
+./.venv/bin/python -m alembic upgrade head
+./.venv/bin/python -m ozon --task supply_reconciliation
+sudo systemctl enable --now wbozon-ozon-supply-reconciliation.timer
+sudo systemctl start wbozon-ozon@supply_reconciliation.service
+sudo journalctl -u wbozon-ozon@supply_reconciliation.service -n 100 --no-pager
+```
+
+Timer срабатывает в 03:20 МСК с задержкой до пяти минут. После успешного запуска
+добавьте `supply_reconciliation` в `OZON_REQUIRED_TASKS`. Подробная схема и SQL
+для поиска расхождений находятся в
+[`ozon/SUPPLY_RECONCILIATION.md`](../../ozon/SUPPLY_RECONCILIATION.md).
+
 `communications` на текущем кабинете не включается: Questions API доступен, но Reviews API отвечает HTTP 403. После выдачи доступа проверьте ручной запуск и только затем включите timer:
 
 ```bash

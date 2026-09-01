@@ -10,6 +10,7 @@ class OzonSyncService:
         "products",
         "orders",
         "supplies",
+        "supply_reconciliation",
         "communications",
         "daily_sales",
         "finances",
@@ -34,6 +35,10 @@ class OzonSyncService:
 
     def sync_supplies(self):
         return self.overview_service.sync_supplies()
+
+    def sync_supply_reconciliation(self):
+        from ozon.services.supply_reconciliation_service import OzonSupplyReconciliationService
+        return OzonSupplyReconciliationService().sync_all()
 
     def sync_communications(self):
         return self.overview_service.sync_communications()
@@ -63,6 +68,7 @@ class OzonSyncService:
             "products": self.sync_products,
             "orders": self.sync_orders,
             "supplies": self.sync_supplies,
+            "supply_reconciliation": self.sync_supply_reconciliation,
             "communications": self.sync_communications,
             "daily_sales": self.sync_daily_sales,
             "finances": self.sync_finances,

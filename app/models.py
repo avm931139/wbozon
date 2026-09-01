@@ -1335,6 +1335,85 @@ class OzonSupply(Base):
     fetched_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class OzonFBOSupplyDeclaredItem(Base):
+    __tablename__ = "ozon_fbo_supply_declared_items"
+    __table_args__ = (
+        UniqueConstraint("supply_id", "sku", name="uq_ozon_fbo_declared_supply_sku"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    supply_order_id = Column(BigInteger, nullable=False, index=True)
+    supply_id = Column(BigInteger, nullable=False, index=True)
+    bundle_id = Column(String, nullable=False, index=True)
+    supply_state = Column(String, nullable=True, index=True)
+    storage_warehouse_id = Column(BigInteger, nullable=True, index=True)
+    storage_warehouse_name = Column(String, nullable=True)
+    sku = Column(BigInteger, nullable=False, index=True)
+    product_id = Column(BigInteger, nullable=True, index=True)
+    offer_id = Column(String, nullable=True, index=True)
+    name = Column(String, nullable=True)
+    barcode = Column(String, nullable=True)
+    declared_quantity = Column(Integer, nullable=False, default=0)
+    pack_quantity = Column(Integer, nullable=True)
+    shipment_type = Column(String, nullable=True)
+    placement_zone = Column(String, nullable=True)
+    tags = Column(JSON, nullable=False, default=list)
+    raw_data = Column(JSON, nullable=False)
+    first_seen_at = Column(DateTime(timezone=True), nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class OzonFBOSupplyAct(Base):
+    __tablename__ = "ozon_fbo_supply_acts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    supply_order_id = Column(BigInteger, nullable=False, index=True)
+    supply_id = Column(BigInteger, nullable=False, index=True)
+    act_id = Column(BigInteger, nullable=False, unique=True, index=True)
+    act_number = Column(String, nullable=True, index=True)
+    act_type = Column(String, nullable=False, index=True)
+    act_state = Column(String, nullable=True, index=True)
+    act_created_date = Column(Date, nullable=True, index=True)
+    deadline_at = Column(DateTime(timezone=True), nullable=True)
+    is_agreement_completed = Column(Boolean, nullable=False, default=False, index=True)
+    declared_quantity = Column(Integer, nullable=False, default=0)
+    fact_quantity = Column(Integer, nullable=False, default=0)
+    approved_quantity = Column(Integer, nullable=False, default=0)
+    sku_quantity = Column(Integer, nullable=False, default=0)
+    unidentified_quantity = Column(Integer, nullable=False, default=0)
+    declared_amount = Column(JSON, nullable=True)
+    fact_amount = Column(JSON, nullable=True)
+    approved_amount = Column(JSON, nullable=True)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class OzonFBOSupplyActItem(Base):
+    __tablename__ = "ozon_fbo_supply_act_items"
+    __table_args__ = (
+        UniqueConstraint("act_id", "sku", name="uq_ozon_fbo_act_item_act_sku"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    supply_order_id = Column(BigInteger, nullable=False, index=True)
+    supply_id = Column(BigInteger, nullable=False, index=True)
+    act_id = Column(BigInteger, nullable=False, index=True)
+    act_type = Column(String, nullable=False, index=True)
+    sku = Column(BigInteger, nullable=False, index=True)
+    offer_id = Column(String, nullable=True, index=True)
+    name = Column(String, nullable=True)
+    barcode = Column(String, nullable=True)
+    declared_quantity = Column(Integer, nullable=False, default=0)
+    fact_quantity = Column(Integer, nullable=False, default=0)
+    approved_quantity = Column(Integer, nullable=False, default=0)
+    price_without_vat = Column(JSON, nullable=True)
+    fact_amount = Column(JSON, nullable=True)
+    approved_amount = Column(JSON, nullable=True)
+    defect_reasons = Column(JSON, nullable=False, default=list)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class OzonQuestion(Base):
     __tablename__ = "ozon_questions"
     id = Column(Integer, primary_key=True)

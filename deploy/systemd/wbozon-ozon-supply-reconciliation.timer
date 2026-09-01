@@ -1,0 +1,11 @@
+[Unit]
+Description=Reconcile sent and accepted Ozon FBO supply quantities daily
+
+[Timer]
+OnCalendar=*-*-* 03:20:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=300
+Unit=wbozon-ozon@supply_reconciliation.service
+
+[Install]
+WantedBy=timers.target

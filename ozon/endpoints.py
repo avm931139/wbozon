@@ -26,3 +26,9 @@ class OzonAccountingEndpoints:
     REALIZATION = "/v2/finance/realization"
     BALANCE = "/v1/finance/balance"
     CASH_FLOW = "/v1/finance/cash-flow-statement/list"
+
+
+class OzonSupplyReconciliationEndpoints:
+    BUNDLE = "/v1/supply-order/bundle"
+    ACT_SUMMARY = "/v1/supply-order/act/summary/get"
+    ACT_PRODUCTS = "/v1/supply-order/act/product/get"

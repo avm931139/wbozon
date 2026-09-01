@@ -290,6 +290,7 @@ class OperationsNotificationService:
             "products": "товары",
             "orders": "заказы FBS/FBO",
             "supplies": "поставки",
+            "supply_reconciliation": "сверка поставок FBO",
             "communications": "вопросы и отзывы",
             "daily_sales": "дневные продажи",
             "finances": "финансы",

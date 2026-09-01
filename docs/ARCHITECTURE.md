@@ -16,6 +16,7 @@
 | Документы WB | `python -m wb.document_sync` | `wbozon-wb-documents.timer` | метаданные и файлы документов, снимок баланса; ежедневно и независимо от WB worker |
 | Ozon | `python -m ozon --task <task>` | `wbozon-ozon@<task>.service` и отдельные timers | независимые задания каталога, заказов, поставок, продаж, финансов и рекламы |
 | Документы Ozon | `python -m ozon --task documents` | `wbozon-ozon-documents.timer` | асинхронные бухгалтерские отчёты, локальные файлы и JSON-снимки |
+| Сверка FBO Ozon | `python -m ozon --task supply_reconciliation` | `wbozon-ozon-supply-reconciliation.timer` | отправленный состав, акты приёмки и расхождения по SKU; ежедневно в 03:20 МСК |
 | Остатки WB | `python -m inventory_sync --marketplace wb` | `wbozon-inventory@wb.service` | WB FBS/FBO и дневные срезы |
 | Остатки Ozon | `python -m inventory_sync --marketplace ozon` | `wbozon-inventory@ozon.service` | агрегатные и складские остатки Ozon и дневные срезы |
 | Остатки Яндекс Маркета | `python -m inventory_sync --marketplace yandex_market` | `wbozon-inventory@yandex_market.service` | остатки кампаний и дневные срезы |

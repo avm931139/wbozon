@@ -36,6 +36,13 @@ OZON_REQUIRED_TASKS=products,orders,supplies,daily_sales,finances,ads
 OZON_REQUIRED_TASKS=products,orders,supplies,daily_sales,finances,documents,ads
 ```
 
+После первого запуска сверки FBO и включения её ежедневного timer добавьте также
+`supply_reconciliation`:
+
+```dotenv
+OZON_REQUIRED_TASKS=products,orders,supplies,supply_reconciliation,daily_sales,finances,documents,ads
+```
+
 `ads` требует `OZON_PERFORMANCE_CLIENT_ID` и `OZON_PERFORMANCE_CLIENT_SECRET`.
 `communications` пока не является обязательным: Reviews API текущего кабинета
 возвращает HTTP 403. После появления доступа его можно включить в timer и список

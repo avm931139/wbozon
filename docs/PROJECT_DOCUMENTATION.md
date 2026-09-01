@@ -24,7 +24,7 @@
 - [`deploy/systemd/`](../deploy/systemd) — units постоянных workers и независимые timers;
 - [`logs/wb/`](../logs/wb) — рабочие журналы синхронизации.
 
-Подробности интеграции WB находятся в [`wb/README.md`](../wb/README.md), а документов и бухгалтерии — в [`wb/DOCUMENTS.md`](../wb/DOCUMENTS.md). Ozon описан в [`ozon/README.md`](../ozon/README.md), его документы и бухгалтерия — в [`ozon/ACCOUNTING.md`](../ozon/ACCOUNTING.md), периодические остатки — в [`inventory_sync/README.md`](../inventory_sync/README.md), групповые отчёты — в [`telegram_bot/README.md`](../telegram_bot/README.md), личный журнал — в [`operations_bot/README.md`](../operations_bot/README.md).
+Подробности интеграции WB находятся в [`wb/README.md`](../wb/README.md), а документов и бухгалтерии — в [`wb/DOCUMENTS.md`](../wb/DOCUMENTS.md). Ozon описан в [`ozon/README.md`](../ozon/README.md), его документы и бухгалтерия — в [`ozon/ACCOUNTING.md`](../ozon/ACCOUNTING.md), сверка FBO-поставок — в [`ozon/SUPPLY_RECONCILIATION.md`](../ozon/SUPPLY_RECONCILIATION.md), периодические остатки — в [`inventory_sync/README.md`](../inventory_sync/README.md), групповые отчёты — в [`telegram_bot/README.md`](../telegram_bot/README.md), личный журнал — в [`operations_bot/README.md`](../operations_bot/README.md).
 
 ## Поток данных
 
@@ -131,7 +131,8 @@ python -m healthcheck                    # сервисы, свежесть да
 ### Независимые задания Ozon
 
 В production Ozon разделён на задания `products`, `orders`, `supplies`,
-`communications`, `daily_sales`, `finances`, `documents`, `ads`. Каждый запуск записывается в
+`supply_reconciliation`, `communications`, `daily_sales`, `finances`, `documents`,
+`ads`. Каждый запуск записывается в
 `ozon_sync_runs`, а повторный параллельный запуск того же задания блокируется
 PostgreSQL advisory lock. Остатки остаются в отдельном `inventory_sync`.
 
@@ -145,6 +146,7 @@ PostgreSQL advisory lock. Остатки остаются в отдельном 
 ```bash
 .venv/bin/python -m ozon --task orders
 .venv/bin/python -m ozon --task documents
+.venv/bin/python -m ozon --task supply_reconciliation
 ```
 
 Установка всех systemd units после `git pull` выполняется по инструкции [`deploy/systemd/README.md`](../deploy/systemd/README.md). Для Ozon отдельно включается рабочий набор timers:
@@ -239,6 +241,14 @@ Ozon в production запускается набором независимых 
 `data/ozon/accounting/` и резервируются отдельно от PostgreSQL. Ошибка отдельного
 этапа даёт статус `partial`, не откатывая уже сохранённые этапы. Подробнее — в
 [`ozon/ACCOUNTING.md`](../ozon/ACCOUNTING.md).
+
+Ежедневный task `supply_reconciliation` получает заявленный состав отправленных
+FBO-поставок, сводки актов и фактические строки приёмки по SKU. Нормализованные
+таблицы объединяются SQL-представлением `ozon_fbo_supply_reconciliation`, где
+доступны `sent_quantity`, `accepted_quantity` и `quantity_difference`, а брак,
+излишки и недостачи остаются отдельными показателями. Timer запускается в 03:20
+МСК. Подробнее — в
+[`ozon/SUPPLY_RECONCILIATION.md`](../ozon/SUPPLY_RECONCILIATION.md).
 
 Остатки загружают три постоянно работающих процесса `inventory_sync`, по одному на WB, Ozon и Яндекс Маркет. Текущие таблицы обновляются каждый час, исчезнувшие позиции обнуляются. В 00:00 `Europe/Moscow` каждый worker создаёт собственный идемпотентный срез и после простоя догоняет отсутствующую дату. Неудачный срез повторяется каждые `INVENTORY_SNAPSHOT_RETRY_SECONDS`. Ответы одного маркетплейса загружаются и фиксируются одной транзакцией; отказ другого API не вызывает откат. Запуски разделяются полем `inventory_sync_runs.marketplace` и разными advisory locks.
 

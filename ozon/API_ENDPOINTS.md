@@ -234,7 +234,7 @@ commit `1953152` от 19 августа 2026 года. Канонический 
 ### Доставка FBO (`FBO`, 16)
 - `POST /v1/posting/fbo/cancel-reason/list` — Причины отмены отправлений по схеме FBO
 - `GET /v1/supplier/available_warehouses` — Загруженность складов Ozon
-- `POST /v1/supply-order/bundle` — Состав поставки или заявки на поставку
+- `POST /v1/supply-order/bundle` — Состав поставки или заявки на поставку — **РЕАЛИЗОВАНО**
 - `POST /v1/supply-order/details` — Получить подробную информацию о заявке на поставку
 - `POST /v1/supply-order/pass/create` — Указать данные о водителе и автомобиле
 - `POST /v1/supply-order/pass/status` — Статус ввода данных о водителе и автомобиле
@@ -560,8 +560,8 @@ commit `1953152` от 19 августа 2026 года. Канонический 
 ### Работа с актами FBO (`SupplyOrderAPI`, 4)
 - `POST /v1/supply-order/act/accept` — Согласовать акт
 - `POST /v1/supply-order/act/accept/status` — Получить статус согласования акта
-- `POST /v1/supply-order/act/product/get` — Получить информацию о товарах в акте
-- `POST /v1/supply-order/act/summary/get` — Получить информацию об акте
+- `POST /v1/supply-order/act/product/get` — Получить информацию о товарах в акте — **РЕАЛИЗОВАНО**
+- `POST /v1/supply-order/act/summary/get` — Получить информацию об акте — **РЕАЛИЗОВАНО**
 
 ### Рейтинг продавца (`SellerRating`, 4)
 - `POST /v1/rating/history` — Получить информацию о рейтингах продавца за период

@@ -7,7 +7,8 @@
 - загрузка списка и детальной информации о товарах;
 - API агрегатных и складских остатков FBO/FBS; запись текущих значений и дневных срезов выполняет `inventory_sync`;
 - загрузка отправлений FBS и FBO за настраиваемый период;
-- загрузка поставок, обращений покупателей, дневных продаж и финансовых операций;
+- загрузка поставок, ежедневная сверка отправленного и принятого FBO-количества,
+  обращений покупателей, дневных продаж и финансовых операций;
 - генерация, скачивание и хранение документов и бухгалтерских JSON-отчётов;
 - загрузка кампаний и статистики рекламы через отдельный Ozon Performance API;
 - построение дневного среза и месячного отчёта по сохранённым данным;
@@ -22,6 +23,7 @@
 - `endpoints.py` — пути Seller API;
 - `products.py`, `stocks.py`, `warehouse_stocks.py`, `orders.py`, `supplies.py`, `communications.py`, `analytics.py`, `finances.py`, `accounting.py` — доменные API-модули Seller API;
 - `accounting_storage.py` и `services/accounting_service.py` — безопасное хранение документов и бухгалтерских снимков;
+- `services/supply_reconciliation_service.py` — состав FBO-поставок и фактическая приёмка по актам;
 - `performance/` — OAuth-клиент, API и сервис рекламы;
 - `services/` — синхронизация и нормализация;
 - `repositories/` — поиск строк для idempotent upsert;
@@ -44,6 +46,7 @@ OZON_ORDER_LOOKBACK_DAYS=30
 OZON_HISTORY_FROM=2026-01-01
 OZON_SYNC_OVERLAP_DAYS=3
 OZON_SUPPLY_REQUEST_PAUSE_SECONDS=0.25
+OZON_SUPPLY_RECONCILIATION_FROM=2026-01-01
 OZON_TIMEZONE=Europe/Moscow
 OZON_REQUIRED_TASKS=products,orders,supplies,daily_sales,finances,ads
 OZON_ACCOUNTING_STORAGE_DIR=data/ozon/accounting
@@ -77,6 +80,7 @@ python -m ozon --once
 python -m ozon --task products
 python -m ozon --task orders
 python -m ozon --task supplies
+python -m ozon --task supply_reconciliation
 python -m ozon --task communications
 python -m ozon --task daily_sales
 python -m ozon --task finances
@@ -97,6 +101,11 @@ JSON и скачивает готовые XLSX. Периоды, таблицы, 
 production timer описаны в [`ACCOUNTING.md`](ACCOUNTING.md).
 После первого успешного ручного запуска и включения timer добавьте `documents` в
 `OZON_REQUIRED_TASKS`, чтобы healthcheck контролировал его статус и свежесть.
+
+Задание `supply_reconciliation` ежедневно сопоставляет отправленное количество из
+`/v1/supply-order/bundle` с фактической приёмкой из актов Ozon. Таблицы, запрос
+расхождений и расписание описаны в
+[`SUPPLY_RECONCILIATION.md`](SUPPLY_RECONCILIATION.md).
 
 Если `OZON_PERFORMANCE_CLIENT_ID` и `OZON_PERFORMANCE_CLIENT_SECRET` не заданы, плановый цикл пропускает рекламу без ошибки. Команда `--sync-ads` по-прежнему требует оба реквизита.
 

@@ -9,6 +9,7 @@
 - [Документы и бухгалтерия Wildberries](../wb/DOCUMENTS.md)
 - [Интеграция Ozon](../ozon/README.md)
 - [Документы и бухгалтерия Ozon](../ozon/ACCOUNTING.md)
+- [Сверка FBO-поставок Ozon](../ozon/SUPPLY_RECONCILIATION.md)
 - [Интеграция Яндекс Маркета](../yandex_market/README.md)
 - [Архитектура складских остатков Ozon](../ozon/WAREHOUSE_STOCK_ARCHITECTURE.md)
 - [Периодическая синхронизация остатков по маркетплейсам](../inventory_sync/README.md)

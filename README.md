@@ -11,6 +11,7 @@
 - переиспользуемый слой интеграции с Wildberries в пакете wb;
 - отдельный worker документов, локальных файлов и баланса Wildberries;
 - отдельное Ozon-задание документов, бухгалтерских JSON-отчётов и локальных файлов;
+- ежедневная сверка отправленного и фактически принятого количества FBO Ozon по SKU;
 - отдельный корневой пакет Telegram-отчётов `telegram_bot`;
 - проверку сервисов, свежести данных и доставки отчётов в пакете `healthcheck`;
 - личный операционный дайджест успешных и ошибочных действий в пакете `operations_bot`;
@@ -164,6 +165,7 @@ python -m ozon --once
 python -m ozon --task products
 python -m ozon --task orders
 python -m ozon --task supplies
+python -m ozon --task supply_reconciliation
 python -m ozon --task communications
 python -m ozon --task daily_sales
 python -m ozon --task finances
@@ -178,6 +180,8 @@ python -m ozon --sync-ads
 `ozon_sync_runs`. Production-расписания находятся в `deploy/systemd`.
 На текущем VPS включены `products`, `orders`, `supplies`, `daily_sales`, `finances`
 и `ads`. Задание `documents` включается после миграции и первого ручного запуска.
+Ежедневное задание `supply_reconciliation` также включается после миграции и
+первого исторического запуска.
 Задание `communications` доступно вручную, но не включено из-за HTTP 403 от Ozon
 Reviews API текущего кабинета.
 
@@ -217,7 +221,7 @@ python -m telegram_bot --once stock-files
 
 ## Дополнительная документация
 
-Полный индекс находится в [docs/README.md](docs/README.md). Подробное описание проекта доступно в [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md), инструкция по production и двум VPS — в [docs/VPS_RUNBOOK.md](docs/VPS_RUNBOOK.md), общей инфраструктуры — в [app/README.md](app/README.md), интеграции WB — в [wb/README.md](wb/README.md), документов WB — в [wb/DOCUMENTS.md](wb/DOCUMENTS.md), Ozon — в [ozon/README.md](ozon/README.md), документов Ozon — в [ozon/ACCOUNTING.md](ozon/ACCOUNTING.md), остатков — в [inventory_sync/README.md](inventory_sync/README.md), групповых отчётов — в [telegram_bot/README.md](telegram_bot/README.md), личного журнала — в [operations_bot/README.md](operations_bot/README.md), мониторинга — в [healthcheck/README.md](healthcheck/README.md), systemd-задач — в [deploy/systemd/README.md](deploy/systemd/README.md).
+Полный индекс находится в [docs/README.md](docs/README.md). Подробное описание проекта доступно в [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md), инструкция по production и двум VPS — в [docs/VPS_RUNBOOK.md](docs/VPS_RUNBOOK.md), общей инфраструктуры — в [app/README.md](app/README.md), интеграции WB — в [wb/README.md](wb/README.md), документов WB — в [wb/DOCUMENTS.md](wb/DOCUMENTS.md), Ozon — в [ozon/README.md](ozon/README.md), документов Ozon — в [ozon/ACCOUNTING.md](ozon/ACCOUNTING.md), сверки FBO-поставок — в [ozon/SUPPLY_RECONCILIATION.md](ozon/SUPPLY_RECONCILIATION.md), остатков — в [inventory_sync/README.md](inventory_sync/README.md), групповых отчётов — в [telegram_bot/README.md](telegram_bot/README.md), личного журнала — в [operations_bot/README.md](operations_bot/README.md), мониторинга — в [healthcheck/README.md](healthcheck/README.md), systemd-задач — в [deploy/systemd/README.md](deploy/systemd/README.md).
 
 Проверка работающих сервисов, свежести данных, полноты дневных срезов и доставки Telegram:
 
