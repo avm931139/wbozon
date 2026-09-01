@@ -95,6 +95,21 @@ sudo systemctl enable --now \
   wbozon-ozon-ads.timer
 ```
 
+Документы и бухгалтерия сначала проверяются вручную, потому что первый запуск
+создаёт асинхронные отчёты и может не сразу получить готовые файлы:
+
+```bash
+./.venv/bin/python -m alembic upgrade head
+./.venv/bin/python -m ozon --task documents
+sudo systemctl enable --now wbozon-ozon-documents.timer
+sudo systemctl start wbozon-ozon@documents.service
+sudo journalctl -u wbozon-ozon@documents.service -n 100 --no-pager
+```
+
+После успешного запуска добавьте `documents` в `OZON_REQUIRED_TASKS`. Файлы
+`data/ozon/accounting/` требуют отдельной резервной копии. Полное описание — в
+[`ozon/ACCOUNTING.md`](../../ozon/ACCOUNTING.md).
+
 `communications` на текущем кабинете не включается: Questions API доступен, но Reviews API отвечает HTTP 403. После выдачи доступа проверьте ручной запуск и только затем включите timer:
 
 ```bash

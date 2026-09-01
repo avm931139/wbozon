@@ -8,6 +8,7 @@
 - API агрегатных и складских остатков FBO/FBS; запись текущих значений и дневных срезов выполняет `inventory_sync`;
 - загрузка отправлений FBS и FBO за настраиваемый период;
 - загрузка поставок, обращений покупателей, дневных продаж и финансовых операций;
+- генерация, скачивание и хранение документов и бухгалтерских JSON-отчётов;
 - загрузка кампаний и статистики рекламы через отдельный Ozon Performance API;
 - построение дневного среза и месячного отчёта по сохранённым данным;
 - идемпотентное сохранение в PostgreSQL;
@@ -19,7 +20,8 @@
 
 - `client.py` — HTTP, авторизация, повторы и ошибки;
 - `endpoints.py` — пути Seller API;
-- `products.py`, `stocks.py`, `warehouse_stocks.py`, `orders.py`, `supplies.py`, `communications.py`, `analytics.py`, `finances.py` — доменные API-модули Seller API;
+- `products.py`, `stocks.py`, `warehouse_stocks.py`, `orders.py`, `supplies.py`, `communications.py`, `analytics.py`, `finances.py`, `accounting.py` — доменные API-модули Seller API;
+- `accounting_storage.py` и `services/accounting_service.py` — безопасное хранение документов и бухгалтерских снимков;
 - `performance/` — OAuth-клиент, API и сервис рекламы;
 - `services/` — синхронизация и нормализация;
 - `repositories/` — поиск строк для idempotent upsert;
@@ -44,6 +46,11 @@ OZON_SYNC_OVERLAP_DAYS=3
 OZON_SUPPLY_REQUEST_PAUSE_SECONDS=0.25
 OZON_TIMEZONE=Europe/Moscow
 OZON_REQUIRED_TASKS=products,orders,supplies,daily_sales,finances,ads
+OZON_ACCOUNTING_STORAGE_DIR=data/ozon/accounting
+OZON_ACCOUNTING_HISTORY_FROM=2026-01-01
+OZON_ACCOUNTING_DOWNLOAD_LIMIT=50
+OZON_ACCOUNTING_MAX_FILE_BYTES=104857600
+OZON_REPORT_ALLOWED_HOST_SUFFIXES=ozon.ru,ozone.ru
 OZON_PERFORMANCE_CLIENT_ID=идентификатор_Performance_API
 OZON_PERFORMANCE_CLIENT_SECRET=секрет_Performance_API
 OZON_PERFORMANCE_BASE_URL=https://api-performance.ozon.ru
@@ -73,6 +80,7 @@ python -m ozon --task supplies
 python -m ozon --task communications
 python -m ozon --task daily_sales
 python -m ozon --task finances
+python -m ozon --task documents
 python -m ozon --task ads
 ```
 
@@ -82,7 +90,13 @@ python -m ozon --task ads
 
 Результат задания записывается компактно: коллекция превращается в `{"count": N}`, а составные результаты сохраняют отдельные счётчики. Если сервис вернул ключ вида `*_error`, задача получает статус `partial`, команда завершается кодом `1`, и healthcheck считает запуск неуспешным. Это не позволяет скрыть частично недоступный API за общим статусом `completed`.
 
-Цикл выполняет разделы в порядке: товары, отправления, поставки, обращения, дневные продажи, финансы и реклама. Ошибка одного раздела фиксируется в результате и не останавливает следующие разделы. Текущие остатки и их ежедневные срезы загружает отдельный worker `python -m inventory_sync --marketplace ozon`.
+Цикл выполняет разделы в порядке: товары, отправления, поставки, обращения, дневные продажи, финансы, документы и реклама. Ошибка одного раздела фиксируется в результате и не останавливает следующие разделы. Текущие остатки и их ежедневные срезы загружает отдельный worker `python -m inventory_sync --marketplace ozon`.
+
+Задание `documents` независимо формирует бухгалтерские отчёты Ozon, сохраняет
+JSON и скачивает готовые XLSX. Периоды, таблицы, защита временных ссылок и
+production timer описаны в [`ACCOUNTING.md`](ACCOUNTING.md).
+После первого успешного ручного запуска и включения timer добавьте `documents` в
+`OZON_REQUIRED_TASKS`, чтобы healthcheck контролировал его статус и свежесть.
 
 Если `OZON_PERFORMANCE_CLIENT_ID` и `OZON_PERFORMANCE_CLIENT_SECRET` не заданы, плановый цикл пропускает рекламу без ошибки. Команда `--sync-ads` по-прежнему требует оба реквизита.
 

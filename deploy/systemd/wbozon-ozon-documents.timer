@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize Ozon documents and accounting daily
+
+[Timer]
+OnCalendar=*-*-* 04:40:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=120
+Unit=wbozon-ozon@documents.service
+
+[Install]
+WantedBy=timers.target

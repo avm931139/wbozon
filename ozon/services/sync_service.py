@@ -13,6 +13,7 @@ class OzonSyncService:
         "communications",
         "daily_sales",
         "finances",
+        "documents",
         "ads",
     )
 
@@ -43,6 +44,10 @@ class OzonSyncService:
     def sync_finances(self):
         return self.overview_service.sync_finances()
 
+    def sync_documents(self):
+        from ozon.services.accounting_service import OzonAccountingService
+        return OzonAccountingService().sync_all()
+
     def sync_ads(self):
         if not OZON_PERFORMANCE_CLIENT_ID or not OZON_PERFORMANCE_CLIENT_SECRET:
             return {"skipped": True, "reason": "Performance API credentials are not configured"}
@@ -61,6 +66,7 @@ class OzonSyncService:
             "communications": self.sync_communications,
             "daily_sales": self.sync_daily_sales,
             "finances": self.sync_finances,
+            "documents": self.sync_documents,
             "ads": self.sync_ads,
         }
         try:

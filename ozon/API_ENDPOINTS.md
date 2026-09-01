@@ -197,7 +197,7 @@ commit `1953152` от 19 августа 2026 года. Канонический 
 - `POST /v1/finance/accrual/by-day` — Получить начисления за день — **РЕАЛИЗОВАНО**
 - `POST /v1/finance/accrual/postings` — Получить начисления по отправлениям
 - `POST /v1/finance/accrual/types` — Получить справочник начислений
-- `POST /v1/finance/balance` — Получить отчёт о балансе
+- `POST /v1/finance/balance` — Получить отчёт о балансе — **РЕАЛИЗОВАНО**
 - `POST /v1/posting/fbp/get` — Получить информацию об отправлении по идентификатору
 - `POST /v1/product/stairway-discount/by-quantity/get` — Получить информацию о скидке от количества
 - `POST /v1/product/stairway-discount/by-quantity/set` — Управлять скидкой от количества
@@ -205,7 +205,7 @@ commit `1953152` от 19 августа 2026 года. Канонический 
 - `POST /v1/product/visibility/set` — Настроить видимость товара на витрине Ozon и Ozon Селект
 - `POST /v1/removal/from-stock/list` — Отчёт по вывозу и утилизации со стока FBO
 - `POST /v1/removal/from-supply/list` — Отчёт по вывозу и утилизации с поставки FBO
-- `POST /v1/report/realization/posting/create` — Получить позаказный отчёт о реализации товаров
+- `POST /v1/report/realization/posting/create` — Получить позаказный отчёт о реализации товаров — **РЕАЛИЗОВАНО**
 - `POST /v2/actions/discounts-task/list` — Получить список заявок на скидку
 - `POST /v2/posting/digital/list` — Получить список отправлений
 - `POST /v2/product/certificate/create` — Создать сертификат качества
@@ -326,10 +326,10 @@ commit `1953152` от 19 августа 2026 года. Канонический 
 - `POST /v1/pricing-strategy/update` — Обновить стратегию
 
 ### Отчёты (`ReportAPI`, 11)
-- `POST /v1/finance/cash-flow-statement/list` — Финансовый отчёт
+- `POST /v1/finance/cash-flow-statement/list` — Финансовый отчёт — **РЕАЛИЗОВАНО**
 - `POST /v1/report/discounted/create` — Отчёт об уценённых товарах
-- `POST /v1/report/info` — Информация об отчёте
-- `POST /v1/report/list` — Список отчётов
+- `POST /v1/report/info` — Информация об отчёте — **РЕАЛИЗОВАНО**
+- `POST /v1/report/list` — Список отчётов — **РЕАЛИЗОВАНО**
 - `POST /v1/report/marked-products-sales/create` — Сгенерировать отчёт по продажам товаров с маркировкой
 - `POST /v1/report/placement/by-products/create` — Получить отчёт о стоимости размещения по товарам
 - `POST /v1/report/placement/by-supplies/create` — Получить отчёт о стоимости размещения по поставкам
@@ -401,14 +401,14 @@ commit `1953152` от 19 августа 2026 года. Канонический 
 - `POST /v2/warehouse/list` — Список складов
 
 ### Финансовые отчёты (`FinanceAPI`, 10)
-- `POST /v1/finance/compensation` — Отчёт о компенсациях
-- `POST /v1/finance/decompensation` — Отчёт о декомпенсациях
-- `POST /v1/finance/document-b2b-sales` — Реестр продаж юридическим лицам
-- `POST /v1/finance/document-b2b-sales/json` — Реестр продаж юридическим лицам в JSON-формате
-- `POST /v1/finance/mutual-settlement` — Отчёт о взаиморасчётах
-- `POST /v1/finance/products/buyout` — Отчёт о выкупленных товарах
+- `POST /v1/finance/compensation` — Отчёт о компенсациях — **РЕАЛИЗОВАНО**
+- `POST /v1/finance/decompensation` — Отчёт о декомпенсациях — **РЕАЛИЗОВАНО**
+- `POST /v1/finance/document-b2b-sales` — Реестр продаж юридическим лицам — **РЕАЛИЗОВАНО**
+- `POST /v1/finance/document-b2b-sales/json` — Реестр продаж юридическим лицам в JSON-формате — **РЕАЛИЗОВАНО**
+- `POST /v1/finance/mutual-settlement` — Отчёт о взаиморасчётах — **РЕАЛИЗОВАНО**
+- `POST /v1/finance/products/buyout` — Отчёт о выкупленных товарах — **РЕАЛИЗОВАНО**
 - `POST /v1/finance/realization/posting` — Позаказный отчёт о реализации товаров
-- `POST /v2/finance/realization` — Отчёт о реализации товаров (версия 2)
+- `POST /v2/finance/realization` — Отчёт о реализации товаров (версия 2) — **РЕАЛИЗОВАНО**
 - `POST /v3/finance/transaction/list` — Список транзакций
 - `POST /v3/finance/transaction/totals` — Суммы транзакций
 

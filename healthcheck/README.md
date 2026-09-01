@@ -29,6 +29,13 @@ python -m healthcheck
 OZON_REQUIRED_TASKS=products,orders,supplies,daily_sales,finances,ads
 ```
 
+После успешного первого запуска бухгалтерского задания и включения
+`wbozon-ozon-documents.timer` добавьте `documents`:
+
+```dotenv
+OZON_REQUIRED_TASKS=products,orders,supplies,daily_sales,finances,documents,ads
+```
+
 `ads` требует `OZON_PERFORMANCE_CLIENT_ID` и `OZON_PERFORMANCE_CLIENT_SECRET`.
 `communications` пока не является обязательным: Reviews API текущего кабинета
 возвращает HTTP 403. После появления доступа его можно включить в timer и список

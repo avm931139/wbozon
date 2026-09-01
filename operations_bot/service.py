@@ -293,6 +293,7 @@ class OperationsNotificationService:
             "communications": "вопросы и отзывы",
             "daily_sales": "дневные продажи",
             "finances": "финансы",
+            "documents": "документы и бухгалтерия",
             "ads": "реклама",
         }
         if row.status == "completed":

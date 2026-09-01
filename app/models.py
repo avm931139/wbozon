@@ -1396,6 +1396,88 @@ class OzonFinanceAccrual(Base):
     fetched_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class OzonAccountingReportRequest(Base):
+    __tablename__ = "ozon_accounting_report_requests"
+    __table_args__ = (
+        UniqueConstraint("report_type", "period_start", name="uq_ozon_accounting_request_period"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    report_type = Column(String(50), nullable=False, index=True)
+    period_start = Column(Date, nullable=False, index=True)
+    period_end = Column(Date, nullable=False)
+    report_code = Column(String, nullable=False, unique=True, index=True)
+    status = Column(String(30), nullable=False, index=True)
+    raw_data = Column(JSON, nullable=False)
+    requested_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class OzonAccountingReport(Base):
+    __tablename__ = "ozon_accounting_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, nullable=False, unique=True, index=True)
+    report_type = Column(String(50), nullable=False, index=True)
+    status = Column(String(30), nullable=False, index=True)
+    error = Column(Text, nullable=True)
+    file_url = Column(Text, nullable=True)
+    params = Column(JSON, nullable=False, default=dict)
+    raw_data = Column(JSON, nullable=False)
+    report_created_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    fetched_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    file = relationship(
+        "OzonAccountingReportFile",
+        back_populates="report",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class OzonAccountingReportFile(Base):
+    __tablename__ = "ozon_accounting_report_files"
+
+    id = Column(Integer, primary_key=True)
+    report_id = Column(
+        Integer,
+        ForeignKey("ozon_accounting_reports.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    local_path = Column(String, nullable=False)
+    file_name = Column(String, nullable=False)
+    file_extension = Column(String(30), nullable=False, index=True)
+    content_type = Column(String(100), nullable=True)
+    file_size = Column(BigInteger, nullable=False)
+    file_sha256 = Column(String(64), nullable=False, index=True)
+    downloaded_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+    report = relationship("OzonAccountingReport", back_populates="file")
+
+
+class OzonAccountingSnapshot(Base):
+    __tablename__ = "ozon_accounting_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "snapshot_type",
+            "period_start",
+            "period_end",
+            name="uq_ozon_accounting_snapshot_period",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    snapshot_type = Column(String(50), nullable=False, index=True)
+    period_start = Column(Date, nullable=False, index=True)
+    period_end = Column(Date, nullable=False, index=True)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class OzonAdCampaign(Base):
     __tablename__ = "ozon_ad_campaigns"
     id = Column(Integer, primary_key=True)

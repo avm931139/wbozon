@@ -13,7 +13,7 @@
 - [`app/db.py`](../app/db.py) — SQLAlchemy engine и фабрика сессий;
 - [`app/models.py`](../app/models.py) — модели каталога, остатков, заказов, финансов, рекламы, обращений, журналов и доставок Telegram;
 - [`wb/`](../wb) — API-клиенты, сервисы, репозитории, периодическая синхронизация WB и отдельная задача документов/баланса;
-- [`ozon/`](../ozon) — каталог, остатки, отправления, поставки, обращения, продажи и финансы Ozon Seller API, а также реклама Ozon Performance API;
+- [`ozon/`](../ozon) — каталог, остатки, отправления, поставки, обращения, продажи, документы и бухгалтерия Ozon Seller API, а также реклама Ozon Performance API;
 - [`yandex_market/`](../yandex_market) — клиент Partner API и нормализация складских остатков;
 - [`inventory_sync/`](../inventory_sync) — отдельные workers текущих остатков WB/Ozon/Яндекс Маркета и ежедневных срезов на 00:00 по Москве;
 - [`telegram_bot/`](../telegram_bot) — формирование, планирование и отправка отчётов;
@@ -24,7 +24,7 @@
 - [`deploy/systemd/`](../deploy/systemd) — units постоянных workers и независимые timers;
 - [`logs/wb/`](../logs/wb) — рабочие журналы синхронизации.
 
-Подробности интеграции WB находятся в [`wb/README.md`](../wb/README.md), а документов и бухгалтерии — в [`wb/DOCUMENTS.md`](../wb/DOCUMENTS.md). Ozon описан в [`ozon/README.md`](../ozon/README.md), периодические остатки — в [`inventory_sync/README.md`](../inventory_sync/README.md), групповые отчёты — в [`telegram_bot/README.md`](../telegram_bot/README.md), личный журнал — в [`operations_bot/README.md`](../operations_bot/README.md).
+Подробности интеграции WB находятся в [`wb/README.md`](../wb/README.md), а документов и бухгалтерии — в [`wb/DOCUMENTS.md`](../wb/DOCUMENTS.md). Ozon описан в [`ozon/README.md`](../ozon/README.md), его документы и бухгалтерия — в [`ozon/ACCOUNTING.md`](../ozon/ACCOUNTING.md), периодические остатки — в [`inventory_sync/README.md`](../inventory_sync/README.md), групповые отчёты — в [`telegram_bot/README.md`](../telegram_bot/README.md), личный журнал — в [`operations_bot/README.md`](../operations_bot/README.md).
 
 ## Поток данных
 
@@ -131,18 +131,20 @@ python -m healthcheck                    # сервисы, свежесть да
 ### Независимые задания Ozon
 
 В production Ozon разделён на задания `products`, `orders`, `supplies`,
-`communications`, `daily_sales`, `finances`, `ads`. Каждый запуск записывается в
+`communications`, `daily_sales`, `finances`, `documents`, `ads`. Каждый запуск записывается в
 `ozon_sync_runs`, а повторный параллельный запуск того же задания блокируется
 PostgreSQL advisory lock. Остатки остаются в отдельном `inventory_sync`.
 
 На текущем VPS включены `products`, `orders`, `supplies`, `daily_sales`,
-`finances` и `ads`. `communications` доступен для ручной диагностики, но его timer
+`finances` и `ads`. Новый `documents` включается после миграции и успешного ручного
+запуска. `communications` доступен для ручной диагностики, но его timer
 выключен: Questions API работает, Reviews API текущего кабинета отвечает HTTP 403.
 Частичный результат с ключом `*_error` получает статус `partial` и ненулевой код
 возврата.
 
 ```bash
 .venv/bin/python -m ozon --task orders
+.venv/bin/python -m ozon --task documents
 ```
 
 Установка всех systemd units после `git pull` выполняется по инструкции [`deploy/systemd/README.md`](../deploy/systemd/README.md). Для Ozon отдельно включается рабочий набор timers:
@@ -174,12 +176,22 @@ sudo journalctl -u wbozon-ozon@communications.service -n 50 --no-pager
 sudo systemctl enable --now wbozon-ozon-communications.timer
 ```
 
+`documents` сначала запускается вручную. Первый запуск создаёт асинхронные
+месячные отчёты; готовые файлы могут появиться только при следующем запуске:
+
+```bash
+./.venv/bin/python -m ozon --task documents
+sudo systemctl enable --now wbozon-ozon-documents.timer
+sudo systemctl start wbozon-ozon@documents.service
+sudo journalctl -u wbozon-ozon@documents.service -n 100 --no-pager
+```
+
 Перед включением проверок healthcheck выполните каждое обязательное задание хотя
 бы один раз, затем добавьте в `.env`:
 
 ```dotenv
 OZON_TIMEZONE=Europe/Moscow
-OZON_REQUIRED_TASKS=products,orders,supplies,daily_sales,finances,ads
+OZON_REQUIRED_TASKS=products,orders,supplies,daily_sales,finances,documents,ads
 ```
 
 ```bash
@@ -217,7 +229,16 @@ sudo journalctl -u wbozon-ozon@orders.service -n 100 --no-pager
 откатывает уже сохранённые категории и документы. Подробнее — в
 [`wb/DOCUMENTS.md`](../wb/DOCUMENTS.md).
 
-Ozon в production запускается набором независимых tasks: товары, отправления FBS/FBO, поставки, обращения, дневные продажи, финансы и реклама. Для рекламы используются отдельные учётные данные Ozon Performance API. Ozon не включён в WB worker, а дневные срезы его остатков являются источником отдельного Excel-отчёта Telegram.
+Ozon в production запускается набором независимых tasks: товары, отправления FBS/FBO, поставки, обращения, дневные продажи, начисления, документы/бухгалтерия и реклама. Для рекламы используются отдельные учётные данные Ozon Performance API. Ozon не включён в WB worker, а дневные срезы его остатков являются источником отдельного Excel-отчёта Telegram.
+
+Задание Ozon `documents` создаёт отсутствующие асинхронные месячные отчёты,
+проверяет их готовность, скачивает файлы и сохраняет бухгалтерские JSON-снимки.
+Запросы, статусы, файлы и снимки разделены между таблицами
+`ozon_accounting_report_requests`, `ozon_accounting_reports`,
+`ozon_accounting_report_files` и `ozon_accounting_snapshots`. Файлы находятся в
+`data/ozon/accounting/` и резервируются отдельно от PostgreSQL. Ошибка отдельного
+этапа даёт статус `partial`, не откатывая уже сохранённые этапы. Подробнее — в
+[`ozon/ACCOUNTING.md`](../ozon/ACCOUNTING.md).
 
 Остатки загружают три постоянно работающих процесса `inventory_sync`, по одному на WB, Ozon и Яндекс Маркет. Текущие таблицы обновляются каждый час, исчезнувшие позиции обнуляются. В 00:00 `Europe/Moscow` каждый worker создаёт собственный идемпотентный срез и после простоя догоняет отсутствующую дату. Неудачный срез повторяется каждые `INVENTORY_SNAPSHOT_RETRY_SECONDS`. Ответы одного маркетплейса загружаются и фиксируются одной транзакцией; отказ другого API не вызывает откат. Запуски разделяются полем `inventory_sync_runs.marketplace` и разными advisory locks.
 
