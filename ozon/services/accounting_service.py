@@ -37,6 +37,10 @@ def _dt(value: Any) -> datetime | None:
         return None
 
 
+def _is_not_found(exc: Exception) -> bool:
+    return isinstance(exc, OzonHTTPError) and "HTTP 404" in str(exc)
+
+
 def _month_end(value: date) -> date:
     return value.replace(day=calendar.monthrange(value.year, value.month)[1])
 
@@ -94,6 +98,7 @@ class OzonAccountingService:
     def request_missing_reports(self) -> dict[str, Any]:
         periods = _complete_months(self.history_from, self.today())
         requested = 0
+        unavailable = 0
         skipped = 0
         errors: list[str] = []
         for period_start, period_end in periods:
@@ -127,10 +132,40 @@ class OzonAccountingService:
                         session.commit()
                     requested += 1
                 except Exception as exc:
+                    if _is_not_found(exc):
+                        now = datetime.now(timezone.utc)
+                        with self.session_factory() as session:
+                            session.add(OzonAccountingReportRequest(
+                                report_type=report_type,
+                                period_start=period_start,
+                                period_end=period_end,
+                                report_code=f"NOT_FOUND:{report_type}:{period_start:%Y-%m}",
+                                status="not_found",
+                                raw_data={
+                                    "available": False,
+                                    "reason": str(exc),
+                                },
+                                requested_at=now,
+                                updated_at=now,
+                            ))
+                            session.commit()
+                        unavailable += 1
+                        logger.info(
+                            "Ozon accounting report is absent for this period: %s:%s",
+                            report_type,
+                            period_start.strftime("%Y-%m"),
+                        )
+                        continue
                     error = f"{report_type}:{period_start:%Y-%m}: {type(exc).__name__}: {exc}"
                     logger.exception("Ozon accounting report request failed: %s", error)
                     errors.append(error)
-        return {"requested": requested, "skipped": skipped, "failed": len(errors), "errors": errors}
+        return {
+            "requested": requested,
+            "unavailable": unavailable,
+            "skipped": skipped,
+            "failed": len(errors),
+            "errors": errors,
+        }
 
     def sync_report_registry(self) -> int:
         reports = self.api.reports("ALL")
@@ -148,7 +183,7 @@ class OzonAccountingService:
             pending_codes = [
                 row.report_code
                 for row in session.query(OzonAccountingReportRequest).filter(
-                    OzonAccountingReportRequest.status.notin_(("success", "failed")),
+                    OzonAccountingReportRequest.status.notin_(("success", "failed", "not_found")),
                     OzonAccountingReportRequest.report_code.notin_(known or {""}),
                 ).all()
             ]
@@ -302,7 +337,7 @@ class OzonAccountingService:
                     session.commit()
                 saved += 1
             except Exception as exc:
-                if isinstance(exc, OzonHTTPError) and "HTTP 404" in str(exc):
+                if _is_not_found(exc):
                     with self.session_factory() as session:
                         session.add(OzonAccountingSnapshot(
                             snapshot_type=snapshot_type,

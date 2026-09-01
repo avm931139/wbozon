@@ -21,6 +21,7 @@ from ozon.accounting_storage import (
     OzonAccountingStorage,
     OzonReportDownloader,
 )
+from ozon.exceptions import OzonHTTPError
 from ozon.services.accounting_service import OzonAccountingService
 from ozon.services.sync_service import OzonSyncService
 
@@ -245,7 +246,13 @@ def test_accounting_service_backfills_once_and_keeps_files_idempotent(tmp_path):
     )
 
     result = service.sync_all(download_limit=5)
-    assert result["requests"] == {"requested": 5, "skipped": 0, "failed": 0, "errors": []}
+    assert result["requests"] == {
+        "requested": 5,
+        "unavailable": 0,
+        "skipped": 0,
+        "failed": 0,
+        "errors": [],
+    }
     assert result["registry"] == 5
     assert result["files"] == {"selected": 5, "downloaded": 5, "failed": 0, "errors": []}
     assert result["snapshots"] == {"saved": 6, "skipped": 0, "failed": 0, "errors": []}
@@ -262,6 +269,55 @@ def test_accounting_service_backfills_once_and_keeps_files_idempotent(tmp_path):
     assert repeated["requests"]["skipped"] == 5
     assert repeated["files"]["selected"] == 0
     assert repeated["snapshots"]["skipped"] == 6
+
+
+def test_missing_monthly_documents_are_persisted_as_normal_absence(tmp_path):
+    class MissingDocumentAPI(FakeAccountingAPI):
+        def create_monthly_report(self, report_type, period_start):
+            if report_type in {"COMPENSATION_REPORT", "DECOMPENSATION_REPORT"}:
+                raise OzonHTTPError(
+                    "Ozon API returned HTTP 404: document not found"
+                )
+            return super().create_monthly_report(report_type, period_start)
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    api = MissingDocumentAPI()
+    service = OzonAccountingService(
+        api=api,
+        downloader=FakeDownloader(),
+        storage=OzonAccountingStorage(tmp_path),
+        session_factory=session_factory,
+        history_from=date(2026, 1, 1),
+        today=lambda: date(2026, 2, 1),
+    )
+
+    first = service.request_missing_reports()
+    assert first == {
+        "requested": 3,
+        "unavailable": 2,
+        "skipped": 0,
+        "failed": 0,
+        "errors": [],
+    }
+    with session_factory() as session:
+        missing = session.query(OzonAccountingReportRequest).filter_by(
+            status="not_found"
+        ).all()
+        assert {row.report_type for row in missing} == {
+            "COMPENSATION_REPORT",
+            "DECOMPENSATION_REPORT",
+        }
+
+    repeated = service.request_missing_reports()
+    assert repeated == {
+        "requested": 0,
+        "unavailable": 0,
+        "skipped": 5,
+        "failed": 0,
+        "errors": [],
+    }
 
 
 def test_documents_are_an_independent_ozon_task():
