@@ -5,14 +5,19 @@ import time
 from datetime import date, datetime, timezone
 from typing import Any, Callable
 
-from app.config import OZON_SUPPLY_RECONCILIATION_FROM, OZON_SUPPLY_REQUEST_PAUSE_SECONDS
+from app.config import (
+    OZON_SUPPLY_RECONCILIATION_FROM,
+    OZON_SUPPLY_RECONCILIATION_RATE_LIMIT_BACKOFF_SECONDS,
+    OZON_SUPPLY_RECONCILIATION_RATE_LIMIT_RETRIES,
+    OZON_SUPPLY_RECONCILIATION_REQUEST_PAUSE_SECONDS,
+)
 from app.db import SessionLocal
 from app.models import (
     OzonFBOSupplyAct,
     OzonFBOSupplyActItem,
     OzonFBOSupplyDeclaredItem,
 )
-from ozon.exceptions import OzonHTTPError
+from ozon.exceptions import OzonHTTPError, OzonRateLimitError
 from ozon.supplies import OzonSuppliesAPI
 
 
@@ -68,19 +73,27 @@ class OzonSupplyReconciliationService:
         api: OzonSuppliesAPI | None = None,
         session_factory: Callable[..., Any] = SessionLocal,
         history_from: date | None = None,
-        request_pause_seconds: float = OZON_SUPPLY_REQUEST_PAUSE_SECONDS,
+        request_pause_seconds: float = OZON_SUPPLY_RECONCILIATION_REQUEST_PAUSE_SECONDS,
+        rate_limit_retries: int = OZON_SUPPLY_RECONCILIATION_RATE_LIMIT_RETRIES,
+        rate_limit_backoff_seconds: float = OZON_SUPPLY_RECONCILIATION_RATE_LIMIT_BACKOFF_SECONDS,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         if request_pause_seconds < 0:
             raise ValueError("request_pause_seconds must not be negative")
+        if rate_limit_retries < 0:
+            raise ValueError("rate_limit_retries must not be negative")
+        if rate_limit_backoff_seconds < 0:
+            raise ValueError("rate_limit_backoff_seconds must not be negative")
         self.api = api or OzonSuppliesAPI()
         self.session_factory = session_factory
         self.history_from = history_from or date.fromisoformat(OZON_SUPPLY_RECONCILIATION_FROM)
         self.request_pause_seconds = request_pause_seconds
+        self.rate_limit_retries = rate_limit_retries
+        self.rate_limit_backoff_seconds = rate_limit_backoff_seconds
         self.sleeper = sleeper
 
     def sync_all(self) -> dict[str, Any]:
-        order_refs = self.api.list()
+        order_refs = self._call_with_rate_limit("orders-list", self.api.list)
         orders_scanned = 0
         orders_in_period = 0
         supplies_sent = 0
@@ -98,7 +111,10 @@ class OzonSupplyReconciliationService:
                 self.sleeper(self.request_pause_seconds)
             orders_scanned += 1
             try:
-                order = self.api.get(order_id)
+                order = self._call_with_rate_limit(
+                    f"order:{order_id}",
+                    lambda: self.api.get(order_id),
+                )
             except Exception as exc:
                 errors.append(self._error("order", order_id, exc))
                 continue
@@ -121,7 +137,10 @@ class OzonSupplyReconciliationService:
             summary: dict[str, Any] = {}
             try:
                 self._pause()
-                summary = self.api.act_summary(order_id)
+                summary = self._call_with_rate_limit(
+                    f"act-summary:{order_id}",
+                    lambda: self.api.act_summary(order_id),
+                )
             except Exception as exc:
                 if _act_is_absent(exc):
                     acts_unavailable += len(sent_supplies)
@@ -141,7 +160,10 @@ class OzonSupplyReconciliationService:
                     continue
                 try:
                     self._pause()
-                    bundle_items = self.api.bundle(bundle_id)
+                    bundle_items = self._call_with_rate_limit(
+                        f"bundle:{order_id}:{supply_id}",
+                        lambda: self.api.bundle(bundle_id),
+                    )
                     declared_items += self._save_declared(
                         order_id,
                         supply,
@@ -158,7 +180,10 @@ class OzonSupplyReconciliationService:
                 acts += self._save_act_summaries(order_id, supply_id, group)
                 try:
                     self._pause()
-                    products = self.api.act_products(supply_id)
+                    products = self._call_with_rate_limit(
+                        f"act-products:{order_id}:{supply_id}",
+                        lambda: self.api.act_products(supply_id),
+                    )
                     product_result = self._save_act_products(order_id, supply_id, products)
                     acts += product_result["new_acts"]
                     act_items += product_result["items"]
@@ -352,6 +377,26 @@ class OzonSupplyReconciliationService:
     def _pause(self) -> None:
         if self.request_pause_seconds:
             self.sleeper(self.request_pause_seconds)
+
+    def _call_with_rate_limit(self, label: str, callback: Callable[[], Any]) -> Any:
+        """Retry one logical API call after the client's short HTTP-level retries."""
+        for attempt in range(self.rate_limit_retries + 1):
+            try:
+                return callback()
+            except OzonRateLimitError:
+                if attempt >= self.rate_limit_retries:
+                    raise
+                delay = self.rate_limit_backoff_seconds * (2**attempt)
+                logger.warning(
+                    "Ozon FBO supply reconciliation rate limit for %s; retry %s/%s in %.1fs",
+                    label,
+                    attempt + 1,
+                    self.rate_limit_retries,
+                    delay,
+                )
+                if delay:
+                    self.sleeper(delay)
+        raise RuntimeError("unreachable")
 
     @staticmethod
     def _error(stage: str, identifier: Any, exc: Exception) -> str:

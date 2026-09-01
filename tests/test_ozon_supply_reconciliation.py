@@ -11,7 +11,7 @@ from app.models import (
     OzonFBOSupplyActItem,
     OzonFBOSupplyDeclaredItem,
 )
-from ozon.exceptions import OzonHTTPError
+from ozon.exceptions import OzonHTTPError, OzonRateLimitError
 from ozon.services.supply_reconciliation_service import OzonSupplyReconciliationService
 from ozon.services.sync_service import OzonSyncService
 from ozon.supplies import OzonSuppliesAPI
@@ -253,3 +253,69 @@ def test_missing_acceptance_act_is_normal_for_supply_in_transit():
     assert result["acts_unavailable"] == 1
     assert result["failed"] == 0
     assert "reconciliation_error" not in result
+
+
+def test_rate_limit_retries_the_same_act_without_losing_the_run():
+    class RateLimitedOnceAPI(FakeSupplyAPI):
+        def __init__(self):
+            super().__init__()
+            self.summary_calls = 0
+
+        def act_summary(self, order_id):
+            self.summary_calls += 1
+            if self.summary_calls == 1:
+                raise OzonRateLimitError("Ozon API rate limit exceeded")
+            return super().act_summary(order_id)
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    api = RateLimitedOnceAPI()
+    sleeps = []
+    result = OzonSupplyReconciliationService(
+        api=api,
+        session_factory=session_factory,
+        history_from=date(2026, 1, 1),
+        request_pause_seconds=0,
+        rate_limit_retries=2,
+        rate_limit_backoff_seconds=7,
+        sleeper=sleeps.append,
+    ).sync_all()
+
+    assert result["failed"] == 0
+    assert result["act_items"] == 2
+    assert api.summary_calls == 2
+    assert sleeps == [7]
+
+
+def test_exhausted_rate_limit_keeps_declared_quantities_and_reports_partial():
+    class AlwaysRateLimitedAPI(FakeSupplyAPI):
+        def __init__(self):
+            super().__init__()
+            self.summary_calls = 0
+
+        def act_summary(self, order_id):
+            self.summary_calls += 1
+            raise OzonRateLimitError("Ozon API rate limit exceeded")
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    api = AlwaysRateLimitedAPI()
+    sleeps = []
+    result = OzonSupplyReconciliationService(
+        api=api,
+        session_factory=session_factory,
+        history_from=date(2026, 1, 1),
+        request_pause_seconds=0,
+        rate_limit_retries=2,
+        rate_limit_backoff_seconds=3,
+        sleeper=sleeps.append,
+    ).sync_all()
+
+    assert result["declared_items"] == 1
+    assert result["act_items"] == 0
+    assert result["failed"] == 1
+    assert "act-summary:1001" in result["reconciliation_error"]
+    assert api.summary_calls == 3
+    assert sleeps == [3, 6]
