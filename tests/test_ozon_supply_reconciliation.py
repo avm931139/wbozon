@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import date
+from io import BytesIO
 
+from openpyxl import load_workbook
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -14,6 +16,7 @@ from app.models import (
 from ozon.exceptions import OzonHTTPError, OzonRateLimitError
 from ozon.services.supply_reconciliation_service import OzonSupplyReconciliationService
 from ozon.services.sync_service import OzonSyncService
+from ozon.supply_reconciliation_report import OzonSupplyReconciliationExcelReport
 from ozon.supplies import OzonSuppliesAPI
 
 
@@ -319,3 +322,40 @@ def test_exhausted_rate_limit_keeps_declared_quantities_and_reports_partial():
     assert "act-summary:1001" in result["reconciliation_error"]
     assert api.summary_calls == 3
     assert sleeps == [3, 6]
+
+
+def test_excel_report_contains_product_and_supply_totals(tmp_path):
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    OzonSupplyReconciliationService(
+        api=FakeSupplyAPI(),
+        session_factory=session_factory,
+        history_from=date(2026, 1, 1),
+        request_pause_seconds=0,
+    ).sync_all()
+
+    report = OzonSupplyReconciliationExcelReport(session_factory=session_factory)
+    content, product_rows, supply_rows = report.build()
+    workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+
+    assert workbook.sheetnames == ["По товарам", "По поставкам"]
+    assert product_rows == 2
+    assert supply_rows == 1
+    products = list(workbook["По товарам"].iter_rows(values_only=True))
+    headers = {value: index for index, value in enumerate(products[0])}
+    accepted = next(row for row in products[1:] if row[headers["SKU"]] == 100)
+    assert accepted[headers["Номер заявки"]] == 1001
+    assert accepted[headers["ID поставки"]] == 501
+    assert accepted[headers["Отправлено"]] == 10
+    assert accepted[headers["Принято фактически"]] == 8
+    assert accepted[headers["Расхождение принято−отправлено"]] == -2
+    supplies = list(workbook["По поставкам"].iter_rows(values_only=True))
+    assert supplies[1][supplies[0].index("Отправлено")] == 10
+    assert supplies[1][supplies[0].index("Принято фактически")] == 8
+    workbook.close()
+
+    result = report.save(tmp_path / "report.xlsx")
+    assert result["product_rows"] == 2
+    assert result["supply_rows"] == 1
+    assert (tmp_path / "report.xlsx").read_bytes().startswith(b"PK")

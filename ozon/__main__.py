@@ -24,6 +24,13 @@ def main() -> None:
     action.add_argument("--task", choices=OzonSyncService.task_names(), help="run one independent Ozon task")
     action.add_argument("--report-day", help="build saved daily sales/finance report, YYYY-MM-DD")
     action.add_argument("--report-month", help="build saved monthly report from daily rows, YYYY-MM")
+    action.add_argument(
+        "--supply-reconciliation-report",
+        nargs="?",
+        const="data/ozon/reports/ozon_fbo_supply_reconciliation_all.xlsx",
+        metavar="PATH",
+        help="export all saved FBO sent-versus-accepted quantities to XLSX",
+    )
     action.add_argument("--sync-ads", action="store_true", help="synchronize Ozon Performance campaigns")
     args = parser.parse_args()
     if args.task:
@@ -41,6 +48,12 @@ def main() -> None:
     if args.report_month:
         year, month = (int(value) for value in args.report_month.split("-"))
         print(json.dumps(OzonOverviewService.month_report(year, month), ensure_ascii=False, indent=2))
+        return
+    if args.supply_reconciliation_report:
+        from ozon.supply_reconciliation_report import OzonSupplyReconciliationExcelReport
+
+        result = OzonSupplyReconciliationExcelReport().save(args.supply_reconciliation_report)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return
     scheduler = OzonPeriodicSync()
 

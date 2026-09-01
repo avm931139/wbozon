@@ -84,6 +84,7 @@ python -m ozon --task products
 python -m ozon --task orders
 python -m ozon --task supplies
 python -m ozon --task supply_reconciliation
+python -m ozon --supply-reconciliation-report
 python -m ozon --task communications
 python -m ozon --task daily_sales
 python -m ozon --task finances
