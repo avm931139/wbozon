@@ -13,6 +13,7 @@
 | Контур | Точка запуска | systemd | Назначение |
 |---|---|---|---|
 | Wildberries | `python -m wb` | `wbozon-wb.service` | общий WB-цикл без Telegram и остатков |
+| Заказы WB realtime | `python -m wb.order_feed_sync` | `wbozon-wb-order-feed.timer` | полная лента FBS/FBO для отчётов; каждые 10 минут |
 | Документы WB | `python -m wb.document_sync` | `wbozon-wb-documents.timer` | метаданные и файлы документов, снимок баланса; ежедневно и независимо от WB worker |
 | Ozon | `python -m ozon --task <task>` | `wbozon-ozon@<task>.service` и отдельные timers | независимые задания каталога, заказов, поставок, продаж, финансов и рекламы |
 | Документы Ozon | `python -m ozon --task documents` | `wbozon-ozon-documents.timer` | асинхронные бухгалтерские отчёты, локальные файлы и JSON-снимки |
@@ -20,7 +21,7 @@
 | Остатки WB | `python -m inventory_sync --marketplace wb` | `wbozon-inventory@wb.service` | WB FBS/FBO и дневные срезы |
 | Остатки Ozon | `python -m inventory_sync --marketplace ozon` | `wbozon-inventory@ozon.service` | агрегатные и складские остатки Ozon и дневные срезы |
 | Остатки Яндекс Маркета | `python -m inventory_sync --marketplace yandex_market` | `wbozon-inventory@yandex_market.service` | остатки кампаний и дневные срезы |
-| Telegram-тексты | `python -m telegram_bot` | `wbozon-telegram.service` | утренние и оперативные отчёты |
+| Telegram-тексты | `python -m telegram_bot` | `wbozon-telegram.service` | утренний и почасовые оперативные отчёты |
 | Telegram Excel | `python -m telegram_bot --once stock-files` | `wbozon-telegram-stock.timer` | три складских файла в 09:00 МСК |
 | Личный журнал | `python -m operations_bot` | `wbozon-operations.timer` | дайджест успешных и ошибочных действий программы |
 | Healthcheck | `python -m healthcheck` | `wbozon-healthcheck.timer` | процессы, свежесть БД, срезы и доставка Telegram |
@@ -31,6 +32,7 @@
 ## Изоляция отказов
 
 - WB, Ozon, Яндекс Маркет и Telegram работают в разных процессах.
+- Realtime Order Feed WB хранится отдельно от предварительного Statistics API; Telegram читает его из PostgreSQL и не вызывает WB API.
 - Три inventory worker используют разные PostgreSQL advisory locks и отдельные записи `inventory_sync_runs.marketplace`.
 - Ошибка API одного маркетплейса не откатывает текущие остатки и дневной срез другого маркетплейса.
 - Каждый Ozon task имеет собственный advisory lock и запись в `ozon_sync_runs`.

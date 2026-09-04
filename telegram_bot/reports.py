@@ -76,9 +76,17 @@ class TelegramReportService:
         buyouts = fulfillment.get("buyouts", {})
         accounting = "подтверждён фин. отчётом" if data.get("accounting_covers_period") else f"оперативный, фин. отчёт по {data.get('accounting_report_through') or 'ещё не загружен'}"
         warning = data.get("operations_without_order_row", 0) + data.get("unknown_operations", 0)
+        order_source = data.get("orders_source")
+        source_text = (
+            "WB Order Feed (реальное время)"
+            if order_source == "order_feed"
+            else "Statistics API — резервный источник"
+        )
+        updated_at = data.get("orders_last_updated_at")
         lines = [
             title,
             f"Заказы: {data['orders_placed']} на {_money(data['orders_amount'])} (FBS {orders.get('fbs', 0)} / FBO {orders.get('fbo', 0)})",
+            f"Источник заказов: {source_text}; обновлено {updated_at or 'нет данных'}.",
             f"Из заказов периода сейчас отменено: {data['orders_from_period_now_cancelled']}",
             f"Отмен зарегистрировано в периоде: {data['cancellations_registered']}",
             f"Выкупы: {data['buyouts']} на {_money(data['buyouts_amount'])} (FBS {buyouts.get('fbs', 0)} / FBO {buyouts.get('fbo', 0)})",

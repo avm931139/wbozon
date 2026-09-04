@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize the realtime Wildberries Order Feed every ten minutes
+
+[Timer]
+OnCalendar=*-*-* *:01/10:00 Europe/Moscow
+RandomizedDelaySec=30
+Persistent=true
+Unit=wbozon-wb-order-feed.service
+
+[Install]
+WantedBy=timers.target

@@ -97,6 +97,7 @@ def test_collect_checks_targets_independent_workers_instead_of_cron(monkeypatch)
         "wbozon-inventory@wb.service",
         "wbozon-inventory@ozon.service",
         "wbozon-wb.service",
+        "wbozon-wb-order-feed.timer",
     ]
 
 

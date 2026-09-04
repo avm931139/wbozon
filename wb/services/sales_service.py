@@ -8,7 +8,14 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func
 
 from app.db import SessionLocal
-from app.models import WBFinancialSalesReport, WBOperationalOrder, WBOperationalSale, WBProduct
+from app.models import (
+    WBFinancialSalesReport,
+    WBOperationalOrder,
+    WBOperationalSale,
+    WBOrderFeedOrder,
+    WBOrderFeedSyncRun,
+    WBProduct,
+)
 from wb.sales import SalesOperationsAPI
 
 MOSCOW = ZoneInfo("Europe/Moscow")
@@ -117,16 +124,40 @@ class SalesService:
         start = datetime.combine(date_from, time.min, tzinfo=MOSCOW)
         end = datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=MOSCOW)
         with SessionLocal() as session:
-            orders = session.query(WBOperationalOrder).filter(WBOperationalOrder.order_date >= start, WBOperationalOrder.order_date < end).all()
+            latest_feed_run = session.query(WBOrderFeedSyncRun).filter_by(status="completed").order_by(
+                WBOrderFeedSyncRun.finished_at.desc()
+            ).first()
+            if latest_feed_run is not None:
+                orders = session.query(WBOrderFeedOrder).filter(
+                    WBOrderFeedOrder.order_date >= start,
+                    WBOrderFeedOrder.order_date < end,
+                ).all()
+                cancellations = session.query(func.count(WBOrderFeedOrder.id)).filter(
+                    WBOrderFeedOrder.status == "cancel",
+                    WBOrderFeedOrder.status_updated_at >= start,
+                    WBOrderFeedOrder.status_updated_at < end,
+                ).scalar() or 0
+                last_order_update = latest_feed_run.finished_at
+                order_source = "order_feed"
+            else:
+                orders = session.query(WBOperationalOrder).filter(
+                    WBOperationalOrder.order_date >= start,
+                    WBOperationalOrder.order_date < end,
+                ).all()
+                cancellations = session.query(func.count(WBOperationalOrder.id)).filter(
+                    WBOperationalOrder.cancel_date >= start,
+                    WBOperationalOrder.cancel_date < end,
+                ).scalar() or 0
+                last_order_update = session.query(func.max(WBOperationalOrder.last_change_date)).scalar()
+                order_source = "statistics_fallback"
             operations = session.query(WBOperationalSale).filter(WBOperationalSale.event_date >= start, WBOperationalSale.event_date < end).all()
-            cancellations = session.query(func.count(WBOperationalOrder.id)).filter(WBOperationalOrder.cancel_date >= start, WBOperationalOrder.cancel_date < end).scalar() or 0
-            last_order_update = session.query(func.max(WBOperationalOrder.last_change_date)).scalar()
             last_sale_update = session.query(func.max(WBOperationalSale.last_change_date)).scalar()
             accounting_through = session.query(func.max(WBFinancialSalesReport.date_to)).filter(WBFinancialSalesReport.details_synced_at.isnot(None)).scalar()
             operation_srids = {row.srid for row in operations}
+            order_model = WBOrderFeedOrder if latest_feed_run is not None else WBOperationalOrder
             matched_srids = {
                 row[0]
-                for row in session.query(WBOperationalOrder.srid).filter(WBOperationalOrder.srid.in_(operation_srids)).all()
+                for row in session.query(order_model.srid).filter(order_model.srid.in_(operation_srids)).all()
             } if operation_srids else set()
         sales = [row for row in operations if row.operation_type == "sale"]
         returns = [row for row in operations if row.operation_type == "return"]
@@ -138,17 +169,26 @@ class SalesService:
         def fulfillment(rows: list[Any]) -> dict[str, int]:
             result = {"fbs": 0, "fbo": 0, "unknown": 0}
             for row in rows:
-                warehouse_type = str(row.warehouse_type or "").casefold()
-                key = "fbs" if "продав" in warehouse_type else "fbo" if warehouse_type else "unknown"
+                if isinstance(row, WBOrderFeedOrder):
+                    key = "fbs" if row.is_mp else "fbo"
+                else:
+                    warehouse_type = str(row.warehouse_type or "").casefold()
+                    key = "fbs" if "продав" in warehouse_type else "fbo" if warehouse_type else "unknown"
                 result[key] += 1
             return result
+
+        def order_amount(row: Any) -> Decimal:
+            return row.seller_price if isinstance(row, WBOrderFeedOrder) else row.price_with_discount
+
+        def order_cancelled(row: Any) -> bool:
+            return row.status == "cancel" if isinstance(row, WBOrderFeedOrder) else row.is_cancel
 
         return {
             "period": {"from": date_from.isoformat(), "to": date_to.isoformat(), "timezone": "Europe/Moscow"},
             "status": "operational_preliminary",
             "orders_placed": len(orders),
-            "orders_amount": str(sum((row.price_with_discount for row in orders), Decimal(0))),
-            "orders_from_period_now_cancelled": sum(row.is_cancel for row in orders),
+            "orders_amount": str(sum((order_amount(row) for row in orders), Decimal(0))),
+            "orders_from_period_now_cancelled": sum(order_cancelled(row) for row in orders),
             "cancellations_registered": int(cancellations),
             "buyouts": len(sales),
             "buyouts_amount": str(sale_amount),
@@ -160,6 +200,7 @@ class SalesService:
             "operations_without_order_row": sum(row.srid not in matched_srids for row in operations),
             "fulfillment": {"orders": fulfillment(orders), "buyouts": fulfillment(sales), "returns": fulfillment(returns)},
             "orders_last_updated_at": last_order_update.isoformat() if last_order_update else None,
+            "orders_source": order_source,
             "sales_last_updated_at": last_sale_update.isoformat() if last_sale_update else None,
             "accounting_report_through": accounting_through.date().isoformat() if accounting_through else None,
             "accounting_covers_period": bool(accounting_through and accounting_through.date() >= date_to),

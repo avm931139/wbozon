@@ -37,11 +37,18 @@ sudo systemctl enable --now \
 ```bash
 sudo systemctl enable --now \
   wbozon-wb.service \
+  wbozon-wb-order-feed.timer \
   wbozon-telegram-relay.service \
   wbozon-telegram.service \
   wbozon-telegram-stock.timer \
   wbozon-healthcheck.timer
 ```
+
+`wbozon-wb-order-feed.timer` обновляет полную realtime-ленту заказов WB каждые
+10 минут. Она отделена от шестичасового общего WB-цикла и является источником
+заказов для группового Telegram-отчёта. В `.env` установите
+`WB_TG_OPERATIONAL_INTERVAL_SECONDS=3600`, затем перезапустите
+`wbozon-telegram.service`.
 
 После настройки `OPERATIONS_TG_CHAT_ID` включите личный операционный дайджест:
 
@@ -139,6 +146,7 @@ sudo systemctl enable --now wbozon-ozon-communications.timer
 ```bash
 systemctl --no-pager --full status \
   wbozon-wb.service \
+  wbozon-wb-order-feed.timer \
   wbozon-inventory@wb.service \
   wbozon-inventory@ozon.service \
   wbozon-inventory@yandex_market.service \

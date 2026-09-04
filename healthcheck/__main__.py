@@ -33,6 +33,7 @@ from app.config import (
     WB_TG_REQUEST_TIMEOUT_SECONDS,
     WB_DOCUMENT_MAX_AGE_SECONDS,
     WB_DOCUMENT_SYNC_REQUIRED,
+    WB_ORDER_FEED_MAX_AGE_SECONDS,
     YANDEX_MARKET_CAMPAIGN_IDS,
 )
 from app.db import SessionLocal
@@ -47,6 +48,7 @@ from app.models import (
     WBFboStockSnapshot,
     WBFBSStockSnapshot,
     WBDocumentSyncRun,
+    WBOrderFeedSyncRun,
     WBTelegramDelivery,
     YandexMarketStockSnapshot,
 )
@@ -178,6 +180,8 @@ def collect_checks(
 
     wb_ok, wb_status = systemctl("wbozon-wb.service")
     checks.append(Check(wb_ok, "WB synchronization service", wb_status))
+    order_feed_ok, order_feed_status = systemctl("wbozon-wb-order-feed.timer")
+    checks.append(Check(order_feed_ok, "WB Order Feed timer", order_feed_status))
     if WB_DOCUMENT_SYNC_REQUIRED:
         documents_ok, documents_status = systemctl("wbozon-wb-documents.timer")
         checks.append(Check(documents_ok, "WB documents timer", documents_status))
@@ -195,6 +199,29 @@ def collect_checks(
         checks.append(Check(operations_ok, "private operations timer", operations_status))
 
     with SessionLocal() as session:
+        latest_order_feed = session.query(WBOrderFeedSyncRun).order_by(
+            WBOrderFeedSyncRun.started_at.desc()
+        ).first()
+        if latest_order_feed is None:
+            checks.append(Check(False, "WB Order Feed sync", "no runs recorded"))
+        else:
+            timestamp = latest_order_feed.finished_at or latest_order_feed.started_at
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
+            age = current - timestamp.astimezone(timezone)
+            detail = (
+                f"{latest_order_feed.status}, age {age}, "
+                f"received={latest_order_feed.rows_received}, upserted={latest_order_feed.rows_upserted}"
+            )
+            if latest_order_feed.error:
+                detail += f", error={latest_order_feed.error[:300]}"
+            checks.append(Check(
+                latest_order_feed.status in {"completed", "running"}
+                and age <= timedelta(seconds=WB_ORDER_FEED_MAX_AGE_SECONDS),
+                "WB Order Feed sync",
+                detail,
+            ))
+
         for marketplace in inventory_marketplaces:
             latest = session.query(InventorySyncRun).filter_by(marketplace=marketplace).order_by(
                 InventorySyncRun.started_at.desc()

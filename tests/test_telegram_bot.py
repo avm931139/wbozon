@@ -204,6 +204,17 @@ def test_sales_block_keeps_event_definitions_separate():
         assert text in block
 
 
+def test_sales_block_identifies_realtime_order_source():
+    data = sales_data()
+    data["orders_source"] = "order_feed"
+    data["orders_last_updated_at"] = "2026-09-04T12:50:00+03:00"
+
+    block = TelegramReportService._sales_block("СЕГОДНЯ", data)
+
+    assert "WB Order Feed (реальное время)" in block
+    assert "2026-09-04T12:50:00+03:00" in block
+
+
 class FakeDispatcher:
     def __init__(self): self.calls = []
     def send(self, report_type, report_key, **kwargs):
@@ -223,3 +234,19 @@ def test_scheduler_before_morning_sends_only_operational():
     scheduler = TelegramReportScheduler(dispatcher, timezone_name="Europe/Moscow", morning_time="09:00", operational_interval_seconds=10800)
     scheduler.run_pending(datetime(2026, 8, 9, 8, 59, tzinfo=ZoneInfo("Europe/Moscow")))
     assert [call[0] for call in dispatcher.calls] == ["operational"]
+
+
+def test_hourly_scheduler_uses_a_new_delivery_key_each_hour():
+    dispatcher = FakeDispatcher()
+    scheduler = TelegramReportScheduler(
+        dispatcher,
+        timezone_name="Europe/Moscow",
+        morning_time="09:00",
+        operational_interval_seconds=3600,
+    )
+    scheduler.run_pending(datetime(2026, 9, 4, 10, 5, tzinfo=ZoneInfo("Europe/Moscow")))
+    scheduler.run_pending(datetime(2026, 9, 4, 11, 5, tzinfo=ZoneInfo("Europe/Moscow")))
+
+    operational_keys = [key for report_type, key in dispatcher.calls if report_type == "operational"]
+    assert len(operational_keys) == 2
+    assert operational_keys[0] != operational_keys[1]

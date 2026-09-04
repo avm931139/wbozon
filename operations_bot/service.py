@@ -29,6 +29,7 @@ from app.models import (
     OperationsMonitorState,
     OzonSyncRun,
     WBDocumentSyncRun,
+    WBOrderFeedSyncRun,
     WBSyncRun,
     WBTelegramDelivery,
 )
@@ -219,6 +220,13 @@ class OperationsNotificationService:
         ).all()
         events.extend(self._wb_event(row) for row in wb_rows)
 
+        order_feed_rows = session.query(WBOrderFeedSyncRun).filter(
+            WBOrderFeedSyncRun.finished_at.is_not(None),
+            WBOrderFeedSyncRun.finished_at >= since,
+            WBOrderFeedSyncRun.finished_at <= until,
+        ).all()
+        events.extend(self._wb_order_feed_event(row) for row in order_feed_rows)
+
         document_rows = session.query(WBDocumentSyncRun).filter(
             WBDocumentSyncRun.finished_at.is_not(None),
             WBDocumentSyncRun.finished_at >= since,
@@ -282,6 +290,29 @@ class OperationsNotificationService:
             occurred_at=self._as_utc(row.finished_at),
             severity=severity,
             title="Wildberries · полный цикл",
+            detail=self._trim(detail),
+        )
+
+    def _wb_order_feed_event(self, row: WBOrderFeedSyncRun) -> OperationEvent:
+        if row.status == "completed":
+            severity = "success"
+            detail = (
+                f"Получено {row.rows_received}, записано {row.rows_upserted} заказов. "
+                "Telegram-отчёт использует обновлённую ленту."
+            )
+        else:
+            severity = "error"
+            detail = (
+                f"{row.error or 'неизвестная ошибка'}. Проверить: "
+                "journalctl -u wbozon-wb-order-feed.service"
+            )
+        return OperationEvent(
+            key=f"wb_order_feed:{row.id}:{row.status}",
+            source_type="wb_order_feed",
+            source_id=str(row.id),
+            occurred_at=self._as_utc(row.finished_at),
+            severity=severity,
+            title="Wildberries · лента заказов",
             detail=self._trim(detail),
         )
 

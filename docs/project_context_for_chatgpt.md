@@ -12,6 +12,7 @@
 - `yandex_market/` — Partner API Яндекс Маркета;
 - `inventory_sync/` — отдельные workers `wb`, `ozon`, `yandex_market` для текущих остатков и ежедневных срезов в 00:00 `Europe/Moscow`;
 - `telegram_bot/` — корневой пакет Telegram-отчётов;
+- `wb.order_feed_sync` — независимая realtime-синхронизация полной ленты заказов WB для почасового группового отчёта;
 - `operations_bot/` — независимый личный дайджест событий из журналов PostgreSQL с долговечной очередью;
 - `healthcheck/` — проверка systemd workers, свежести inventory и обязательных Ozon jobs, дневных срезов и доставки Telegram с дедуплицированными оповещениями;
 - `main.py` — совместимый alias для `python -m wb`; он не запускает Telegram;
@@ -65,6 +66,7 @@ PostgreSQL advisory lock для защиты от пересечения и за
 - документы Ozon являются отдельным task `python -m ozon --task documents`; не смешивать его с начислениями `finances`.
 - сверка FBO Ozon является отдельным ежедневным task `python -m ozon --task supply_reconciliation`; не встраивать запросы актов в почасовой `supplies`.
 - `operations_bot` не импортировать и не вызывать из marketplace workers: Telegram не должен влиять на их транзакции или exit code.
+- групповой Telegram-отчёт считает заказы по `wb_order_feed_orders`; worker Order Feed обновляет их отдельно каждые 10 минут, а `Statistics API` остаётся источником выкупов и возвратов.
 - не восстанавливать удалённый `mantra_sync`: он не относится к рабочей архитектуре.
 
 ## Проверки перед завершением изменений

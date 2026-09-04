@@ -734,6 +734,8 @@ WB_SYNC_HISTORY_START=2019-01-01
 WB_SYNC_PROMOTION_LOOKBACK_DAYS=31
 WB_SYNC_FBS_ORDER_OVERLAP_DAYS=2
 WB_SYNC_FINANCE_OVERLAP_DAYS=7
+WB_ORDER_FEED_LOOKBACK_DAYS=31
+WB_ORDER_FEED_MAX_AGE_SECONDS=1200
 WB_LOG_DIR=logs/wb
 WB_LOG_LEVEL=INFO
 WB_LOG_MAX_BYTES=10485760
@@ -754,6 +756,17 @@ WB worker не запускает Telegram и остатки. Запустить
 
 Интервал отсчитывается после завершения предыдущего полного цикла. Для остановки нажмите `Ctrl+C`.
 В production процесс работает как `wbozon-wb.service`. Корневой `main.py` оставлен только как совместимый alias этой же точки запуска.
+
+Полная realtime-лента заказов работает независимо от общего цикла:
+
+```powershell
+.\.venv\Scripts\python.exe -m wb.order_feed_sync
+```
+
+В production её запускает `wbozon-wb-order-feed.timer` каждые 10 минут. Данные
+сохраняются по уникальному `srid` в `wb_order_feed_orders`, а результаты запусков
+— в `wb_order_feed_sync_runs`. Именно эта таблица используется для количества и
+суммы заказов в групповом Telegram-отчёте.
 
 ## 10. Транзакции и идемпотентность
 

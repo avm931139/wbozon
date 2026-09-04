@@ -904,6 +904,43 @@ class WBOperationalOrder(Base):
     fetched_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class WBOrderFeedOrder(Base):
+    """Complete realtime WB order feed used for order reporting."""
+
+    __tablename__ = "wb_order_feed_orders"
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    srid = Column(String, nullable=False, unique=True, index=True)
+    product_id = Column(Integer, ForeignKey("wb_products.id"), nullable=True, index=True)
+    nm_id = Column(BigInteger, nullable=True, index=True)
+    chrt_id = Column(BigInteger, nullable=True, index=True)
+    order_date = Column(DateTime(timezone=True), nullable=False, index=True)
+    status_updated_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    status = Column(String(30), nullable=False, index=True)
+    cancel_type = Column(String(30), nullable=True, index=True)
+    is_b2b = Column(Boolean, nullable=False, default=False, index=True)
+    is_mp = Column(Boolean, nullable=False, index=True)
+    seller_price = Column(Numeric(20, 6), nullable=False, default=0)
+    warehouse_name = Column(String, nullable=True)
+    warehouse_region = Column(String, nullable=True)
+    destination_city = Column(String, nullable=True)
+    destination_district = Column(String, nullable=True)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class WBOrderFeedSyncRun(Base):
+    __tablename__ = "wb_order_feed_sync_runs"
+
+    id = Column(String(32), primary_key=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    status = Column(String(20), nullable=False, index=True)
+    rows_received = Column(Integer, nullable=False, default=0)
+    rows_upserted = Column(Integer, nullable=False, default=0)
+    error = Column(Text, nullable=True)
+
+
 class WBOperationalSale(Base):
     __tablename__ = "wb_operational_sales"
 

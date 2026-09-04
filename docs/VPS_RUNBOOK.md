@@ -345,6 +345,7 @@ git status --short
 systemctl list-timers 'wbozon-*' --all
 systemctl --no-pager --full status \
   wbozon-wb.service \
+  wbozon-wb-order-feed.timer \
   wbozon-inventory@wb.service \
   wbozon-inventory@ozon.service \
   wbozon-inventory@yandex_market.service \
@@ -355,7 +356,7 @@ sudo systemctl start wbozon-healthcheck.service
 sudo journalctl -u wbozon-healthcheck.service -n 100 --no-pager
 ```
 
-`inactive (dead)` нормально для успешно завершившегося `Type=oneshot`. Постоянные WB, inventory, Telegram scheduler и relay должны быть `active (running)`; timers — `active (waiting)`.
+`inactive (dead)` нормально для успешно завершившегося `Type=oneshot`, включая `wbozon-wb-order-feed.service`. Постоянные WB, inventory, Telegram scheduler и relay должны быть `active (running)`; timers — `active (waiting)`.
 
 ## Аварийные сценарии
 
