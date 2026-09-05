@@ -1,0 +1,17 @@
+[Unit]
+Description=wbozon Yandex Market synchronization task %i
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wbozon
+Group=wbozon
+WorkingDirectory=/home/wbozon/wbozon
+EnvironmentFile=/home/wbozon/wbozon/.env
+ExecStart=/home/wbozon/wbozon/.venv/bin/python -m yandex_market --task %i
+TimeoutStartSec=45min
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

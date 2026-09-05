@@ -136,6 +136,24 @@ YANDEX_MARKET_CAMPAIGN_IDS = tuple(
     for value in os.getenv("YANDEX_MARKET_CAMPAIGN_IDS", "").split(",")
     if value.strip()
 )
+YANDEX_MARKET_BUSINESS_ID = int(os.getenv("YANDEX_MARKET_BUSINESS_ID", "0")) or None
+YANDEX_MARKET_HISTORY_FROM = os.getenv("YANDEX_MARKET_HISTORY_FROM", "2026-01-01")
+YANDEX_MARKET_ORDER_LOOKBACK_DAYS = int(os.getenv("YANDEX_MARKET_ORDER_LOOKBACK_DAYS", "30"))
+YANDEX_MARKET_TIMEZONE = os.getenv("YANDEX_MARKET_TIMEZONE", "Europe/Moscow")
+YANDEX_MARKET_REQUIRED_TASKS = tuple(
+    value.strip()
+    for value in os.getenv("YANDEX_MARKET_REQUIRED_TASKS", "identity,catalog,orders").split(",")
+    if value.strip()
+)
+YANDEX_MARKET_IDENTITY_MAX_AGE_SECONDS = int(
+    os.getenv("YANDEX_MARKET_IDENTITY_MAX_AGE_SECONDS", "129600")
+)
+YANDEX_MARKET_CATALOG_MAX_AGE_SECONDS = int(
+    os.getenv("YANDEX_MARKET_CATALOG_MAX_AGE_SECONDS", "28800")
+)
+YANDEX_MARKET_ORDERS_MAX_AGE_SECONDS = int(
+    os.getenv("YANDEX_MARKET_ORDERS_MAX_AGE_SECONDS", "1800")
+)
 
 # Ozon inventory is realtime; 00:00 Moscow is our daily business cutoff.
 # Server timezone does not affect the snapshot schedule.

@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize Yandex Market catalog every six hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:10:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=120
+Unit=wbozon-yandex-market@catalog.service
+
+[Install]
+WantedBy=timers.target

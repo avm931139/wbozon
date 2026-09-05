@@ -51,7 +51,13 @@
   - scheduler.py — отдельное расписание Ozon.
 - yandex_market/
   - client.py — авторизация, повторы и обработка ошибок Partner API.
+  - endpoints.py — централизованные пути реализованных методов.
   - stocks.py — получение полных остатков кампаний с пагинацией.
+  - identity.py — кабинеты и магазины, доступные API-ключу.
+  - catalog.py — каталог кабинета и ассортимент магазинов.
+  - orders.py — актуальная бизнес-выборка заказов.
+  - services/ — независимое сохранение справочников, каталога и заказов.
+  - task_runner.py и `__main__.py` — блокировки, журнал запусков и CLI задач.
 - inventory_sync/
   - service.py — изолированная по маркетплейсам загрузка и атомарное сохранение остатков.
   - scheduler.py — почасовое обновление и срез в 00:00 по Москве.
@@ -184,6 +190,19 @@ python -m ozon --sync-ads
 первого исторического запуска.
 Задание `communications` доступно вручную, но не включено из-за HTTP 403 от Ozon
 Reviews API текущего кабинета.
+
+Яндекс Маркет, кроме отдельного inventory-worker, имеет независимые задания:
+
+```bash
+python -m yandex_market --task identity
+python -m yandex_market --task catalog
+python -m yandex_market --task orders
+```
+
+Их результаты записываются в `yandex_market_sync_runs`. При первом запуске
+`orders` загружает историю с `YANDEX_MARKET_HISTORY_FROM`, после чего обновляет
+последние `YANDEX_MARKET_ORDER_LOOKBACK_DAYS`. Ошибка одной задачи не влияет на
+остальные задачи и на worker остатков.
 
 Остатки запускаются тремя независимыми процессами:
 

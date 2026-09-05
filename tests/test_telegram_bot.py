@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from zoneinfo import ZoneInfo
 
 from app.db import Base
-from app.models import YandexMarketStockSnapshot
+from app.models import YandexMarketOrder, YandexMarketStockSnapshot
 from telegram_bot.client import TelegramClient, TelegramError, split_text
 from telegram_bot.__main__ import send_stock_files
 from telegram_bot.reports import TelegramReportService
@@ -213,6 +213,36 @@ def test_sales_block_identifies_realtime_order_source():
 
     assert "WB Order Feed (реальное время)" in block
     assert "2026-09-04T12:50:00+03:00" in block
+
+
+def test_yandex_market_orders_block_uses_saved_orders():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    with session_factory() as session:
+        session.add(YandexMarketOrder(
+            business_id=777,
+            order_id=123,
+            campaign_id=149010920,
+            program_type="FBS",
+            status="PROCESSING",
+            created_at=datetime(2026, 9, 5, 8, 30, tzinfo=ZoneInfo("Europe/Moscow")),
+            items_count=2,
+            total_amount="1990",
+            items=[],
+            raw_data={},
+            fetched_at=datetime(2026, 9, 5, 5, 31, tzinfo=ZoneInfo("UTC")),
+        ))
+        session.commit()
+
+    report = TelegramReportService(session_factory=session_factory)
+    block = report._yandex_market_orders_block(
+        datetime(2026, 9, 5, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    )
+    assert "Заказы: 1" in block
+    assert "товаров: 2" in block
+    assert "FBS 2" in block
+    assert "1 990.00" in block
 
 
 class FakeDispatcher:

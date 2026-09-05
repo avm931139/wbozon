@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
-from app.models import HealthcheckRun, OzonSyncRun, WBDocumentSyncRun
+from app.models import HealthcheckRun, OzonSyncRun, WBDocumentSyncRun, YandexMarketSyncRun
 from healthcheck.__main__ import (
     Check,
     OZON_TASK_MAX_AGES,
@@ -13,6 +13,7 @@ from healthcheck.__main__ import (
     _failure_signature,
     _ozon_task_checks,
     _systemctl_active,
+    _yandex_market_task_checks,
     collect_checks,
     record_healthcheck,
 )
@@ -71,6 +72,27 @@ def test_ozon_task_health_uses_latest_status_and_freshness(monkeypatch):
 
     assert checks[0].ok is True
     assert checks[1] == Check(False, "Ozon products sync", "no runs recorded")
+
+
+def test_yandex_market_task_health_uses_independent_journal(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    now = datetime(2026, 9, 5, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    with session_factory() as session:
+        session.add(YandexMarketSyncRun(
+            id="run-1",
+            task="orders",
+            started_at=datetime(2026, 9, 5, 8, 55, tzinfo=ZoneInfo("UTC")),
+            finished_at=datetime(2026, 9, 5, 8, 56, tzinfo=ZoneInfo("UTC")),
+            status="completed",
+        ))
+        session.commit()
+        monkeypatch.setattr("healthcheck.__main__.YANDEX_MARKET_REQUIRED_TASKS", ("orders", "catalog"))
+        checks = _yandex_market_task_checks(session, now)
+
+    assert checks[0].ok is True
+    assert checks[1] == Check(False, "Yandex Market catalog sync", "no runs recorded")
 
 
 def test_collect_checks_targets_independent_workers_instead_of_cron(monkeypatch):

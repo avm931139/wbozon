@@ -493,6 +493,7 @@ class InventorySyncService:
             warehouse_id = int(item["warehouseId"])
             offer_id = str(item["offerId"])
             source_updated_at = InventorySyncService._parse_source_datetime(item.get("updatedAt"))
+            turnover = item.get("turnoverSummary") or {}
             for stock in item.get("stocks") or []:
                 if not isinstance(stock, dict):
                     continue
@@ -512,6 +513,8 @@ class InventorySyncService:
                     session.add(row)
                     existing[key] = row
                 row.count = int(stock.get("count") or 0)
+                row.turnover = turnover.get("turnover") if isinstance(turnover, dict) else None
+                row.turnover_days = turnover.get("turnoverDays") if isinstance(turnover, dict) else None
                 row.source_updated_at = source_updated_at
                 row.raw_data = item
                 row.fetched_at = captured_at
@@ -576,6 +579,8 @@ class InventorySyncService:
                     offer_id=row.offer_id,
                     stock_type=row.stock_type,
                     count=row.count,
+                    turnover=row.turnover,
+                    turnover_days=row.turnover_days,
                     source_updated_at=row.source_updated_at,
                     raw_data=row.raw_data,
                 ))

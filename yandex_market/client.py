@@ -55,6 +55,32 @@ class YandexMarketClient:
         json_body: dict[str, Any] | None = None,
         retries: int = 3,
     ) -> dict[str, Any]:
+        return self._request(
+            "post",
+            path,
+            params=params,
+            json_body=json_body,
+            retries=retries,
+        )
+
+    def get(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        retries: int = 3,
+    ) -> dict[str, Any]:
+        return self._request("get", path, params=params, retries=retries)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        retries: int = 3,
+    ) -> dict[str, Any]:
         if not self.api_key:
             raise YandexMarketAuthError("YANDEX_MARKET_API_KEY must be configured")
         if retries < 1:
@@ -63,12 +89,17 @@ class YandexMarketClient:
         url = f"{self.base_url}/{path.lstrip('/')}"
         for attempt in range(retries):
             try:
-                response = self.session.post(
+                request = getattr(self.session, method)
+                kwargs: dict[str, Any] = {
+                    "headers": self._headers(),
+                    "params": params,
+                    "timeout": self.timeout,
+                }
+                if method != "get":
+                    kwargs["json"] = json_body or {}
+                response = request(
                     url,
-                    headers=self._headers(),
-                    params=params,
-                    json=json_body or {},
-                    timeout=self.timeout,
+                    **kwargs,
                 )
             except requests.RequestException as exc:
                 if attempt < retries - 1:

@@ -32,6 +32,33 @@ sudo systemctl enable --now \
 
 Если Яндекс Маркет не настроен, не включайте `wbozon-inventory@yandex_market.service`; healthcheck также не требует его без `YANDEX_MARKET_CAMPAIGN_IDS`.
 
+## Яндекс Маркет: кабинет, каталог и заказы
+
+После миграции сначала проверьте задачи вручную именно в таком порядке:
+
+```bash
+./.venv/bin/python -m alembic upgrade head
+./.venv/bin/python -m yandex_market --task identity
+./.venv/bin/python -m yandex_market --task catalog
+./.venv/bin/python -m yandex_market --task orders
+```
+
+Первый запуск `orders` загружает историю с `YANDEX_MARKET_HISTORY_FROM` блоками
+не более 30 дней. Он может быть заметно дольше последующих запусков. После
+успешной проверки включите расписания:
+
+```bash
+sudo systemctl enable --now \
+  wbozon-yandex-market-identity.timer \
+  wbozon-yandex-market-catalog.timer \
+  wbozon-yandex-market-orders.timer
+```
+
+Кабинет и магазины обновляются ежедневно, каталог — каждые шесть часов, заказы —
+каждые 15 минут. Каждый запуск использует отдельный advisory lock и строку в
+`yandex_market_sync_runs`. Почасовой групповой Telegram-отчёт читает сохранённые
+заказы и не обращается к API Маркета.
+
 ## Основные сервисы и Telegram
 
 ```bash
@@ -150,6 +177,9 @@ systemctl --no-pager --full status \
   wbozon-inventory@wb.service \
   wbozon-inventory@ozon.service \
   wbozon-inventory@yandex_market.service \
+  wbozon-yandex-market-identity.timer \
+  wbozon-yandex-market-catalog.timer \
+  wbozon-yandex-market-orders.timer \
   wbozon-wb-documents.timer \
   wbozon-telegram.service \
   wbozon-telegram-relay.service \

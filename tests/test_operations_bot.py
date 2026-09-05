@@ -14,6 +14,7 @@ from app.models import (
     WBSyncRun,
     WBTelegramDelivery,
     WBDocumentSyncRun,
+    YandexMarketSyncRun,
 )
 from operations_bot.service import OperationsNotificationService, OperationsSettings
 from operations_bot.__main__ import private_chats
@@ -82,6 +83,14 @@ def test_operations_digest_reports_successes_and_explains_failures(operations_db
                 status="completed",
                 yandex_market_rows=158,
             ),
+            YandexMarketSyncRun(
+                id="yandex-orders",
+                task="orders",
+                started_at=now - timedelta(minutes=6),
+                finished_at=now - timedelta(minutes=5),
+                status="completed",
+                result={"received": 10, "saved": 10},
+            ),
             WBTelegramDelivery(
                 id=99,
                 report_key="stock_excel:wb:2026-08-31",
@@ -102,19 +111,20 @@ def test_operations_digest_reports_successes_and_explains_failures(operations_db
         session_factory=operations_db,
     ).run(now=now)
 
-    assert result["discovered"] == 4
-    assert result["sent_events"] == 4
+    assert result["discovered"] == 5
+    assert result["sent_events"] == 5
     assert len(client.messages) == 1
     message = client.messages[0]
     assert "Wildberries · полный цикл" in message
     assert "Ozon · вопросы и отзывы" in message
     assert "у API-ключа нет нужного разрешения" in message
     assert "Остатки · Яндекс Маркет" in message
+    assert "Яндекс Маркет · заказы" in message
     assert "строк=158" in message
     assert "Telegram · stock_excel_wb" in message
     assert "сеть, внешний API или proxy" in message
     with operations_db() as session:
-        assert session.query(OperationsEventDelivery).filter_by(status="sent").count() == 4
+        assert session.query(OperationsEventDelivery).filter_by(status="sent").count() == 5
         assert session.get(OperationsMonitorState, "main") is not None
 
     second = OperationsNotificationService(

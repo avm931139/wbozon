@@ -21,6 +21,9 @@
 | Остатки WB | `python -m inventory_sync --marketplace wb` | `wbozon-inventory@wb.service` | WB FBS/FBO и дневные срезы |
 | Остатки Ozon | `python -m inventory_sync --marketplace ozon` | `wbozon-inventory@ozon.service` | агрегатные и складские остатки Ozon и дневные срезы |
 | Остатки Яндекс Маркета | `python -m inventory_sync --marketplace yandex_market` | `wbozon-inventory@yandex_market.service` | остатки кампаний и дневные срезы |
+| Справочники Яндекс Маркета | `python -m yandex_market --task identity` | `wbozon-yandex-market@identity.service` | кабинеты и магазины |
+| Каталог Яндекс Маркета | `python -m yandex_market --task catalog` | `wbozon-yandex-market@catalog.service` | товары кабинета и ассортимент кампаний |
+| Заказы Яндекс Маркета | `python -m yandex_market --task orders` | `wbozon-yandex-market@orders.service` | заказы и товарные позиции |
 | Telegram-тексты | `python -m telegram_bot` | `wbozon-telegram.service` | утренний и почасовые оперативные отчёты |
 | Telegram Excel | `python -m telegram_bot --once stock-files` | `wbozon-telegram-stock.timer` | три складских файла в 09:00 МСК |
 | Личный журнал | `python -m operations_bot` | `wbozon-operations.timer` | дайджест успешных и ошибочных действий программы |

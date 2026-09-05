@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func
 
 from app.db import SessionLocal
-from app.models import WBFBSStock, WBFboStock, WBSyncRun
+from app.models import WBFBSStock, WBFboStock, WBSyncRun, YandexMarketOrder
 from wb.services.customer_communication_service import CustomerCommunicationService
 from wb.services.promotion_service import PromotionService
 from wb.services.sales_service import SalesService
@@ -58,11 +58,36 @@ class TelegramReportService:
         now = self._local(now)
         today = now.date()
         return "\n\n".join([
-            f"WB — текущая обстановка {now:%d.%m.%Y %H:%M}",
+            f"МАРКЕТПЛЕЙСЫ — текущая обстановка {now:%d.%m.%Y %H:%M}",
             self._sales_block("СЕГОДНЯ", self.sales_summary(today, today)),
+            self._yandex_market_orders_block(now),
             self._ads_block("РЕКЛАМА: СЕГОДНЯ", today, today),
             self._stock_block(),
             self._sync_block(),
+        ])
+
+    def _yandex_market_orders_block(self, now: datetime) -> str:
+        start_local = datetime.combine(now.date(), datetime.min.time(), tzinfo=self.timezone)
+        end_local = start_local + timedelta(days=1)
+        with self.session_factory() as session:
+            rows = session.query(YandexMarketOrder).filter(
+                YandexMarketOrder.created_at >= start_local,
+                YandexMarketOrder.created_at < end_local,
+            ).all()
+        if not rows:
+            return "ЯНДЕКС МАРКЕТ · СЕГОДНЯ\nЗаказы: 0; сумма: 0.00 ₽."
+        cancelled = sum(row.status == "CANCELLED" for row in rows)
+        delivered = sum(row.status == "DELIVERED" for row in rows)
+        returned = sum(row.status in {"RETURNED", "PARTIALLY_RETURNED"} for row in rows)
+        fby = sum(row.items_count or 0 for row in rows if row.program_type == "FBY")
+        fbs = sum(row.items_count or 0 for row in rows if row.program_type == "FBS")
+        units = sum(row.items_count or 0 for row in rows)
+        amount = sum((Decimal(row.total_amount or 0) for row in rows), Decimal("0"))
+        return "\n".join([
+            "ЯНДЕКС МАРКЕТ · СЕГОДНЯ",
+            f"Заказы: {len(rows)}; товаров: {units}; сумма: {_money(amount)}.",
+            f"Товары по модели: FBY {fby} / FBS {fbs}.",
+            f"Статусы: доставлено {delivered}, отменено {cancelled}, возвратов {returned}.",
         ])
 
     def _local(self, value: datetime | None) -> datetime:

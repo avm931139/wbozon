@@ -43,6 +43,22 @@ def test_client_uses_api_key_and_closes_connection():
     assert calls[0][1]["params"] == {"limit": 100}
 
 
+def test_client_get_does_not_send_json_body():
+    calls = []
+    session = type(
+        "Session",
+        (),
+        {"get": lambda self, *args, **kwargs: calls.append((args, kwargs)) or StubResponse(payload={"campaigns": []})},
+    )()
+
+    result = YandexMarketClient("secret", session=session).get(
+        "/v2/campaigns", params={"limit": 100}
+    )
+
+    assert result == {"campaigns": []}
+    assert "json" not in calls[0][1]
+
+
 def test_client_requires_api_key(monkeypatch):
     monkeypatch.setattr("yandex_market.client.YANDEX_MARKET_API_KEY", None)
     with pytest.raises(YandexMarketAuthError):

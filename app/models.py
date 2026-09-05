@@ -1266,6 +1266,8 @@ class YandexMarketStock(Base):
     offer_id = Column(String, nullable=False, index=True)
     stock_type = Column(String, nullable=False, index=True)
     count = Column(Integer, nullable=False, default=0)
+    turnover = Column(String(20), nullable=True, index=True)
+    turnover_days = Column(Float, nullable=True)
     source_updated_at = Column(DateTime(timezone=True), nullable=True)
     raw_data = Column(JSON, nullable=False)
     fetched_at = Column(DateTime(timezone=True), nullable=False)
@@ -1293,8 +1295,152 @@ class YandexMarketStockSnapshot(Base):
     offer_id = Column(String, nullable=False, index=True)
     stock_type = Column(String, nullable=False, index=True)
     count = Column(Integer, nullable=False, default=0)
+    turnover = Column(String(20), nullable=True, index=True)
+    turnover_days = Column(Float, nullable=True)
     source_updated_at = Column(DateTime(timezone=True), nullable=True)
     raw_data = Column(JSON, nullable=False)
+
+
+class YandexMarketBusiness(Base):
+    __tablename__ = "yandex_market_businesses"
+
+    business_id = Column(BigInteger, primary_key=True)
+    name = Column(String, nullable=True)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class YandexMarketCampaign(Base):
+    __tablename__ = "yandex_market_campaigns"
+
+    campaign_id = Column(BigInteger, primary_key=True)
+    business_id = Column(BigInteger, nullable=False, index=True)
+    name = Column(String, nullable=True)
+    domain = Column(String, nullable=True)
+    placement_type = Column(String(20), nullable=True, index=True)
+    api_availability = Column(String, nullable=True, index=True)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class YandexMarketWarehouse(Base):
+    __tablename__ = "yandex_market_warehouses"
+    __table_args__ = (
+        UniqueConstraint(
+            "business_id", "warehouse_id", "warehouse_type", name="uq_yandex_market_warehouse"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    business_id = Column(BigInteger, nullable=False, index=True)
+    warehouse_id = Column(BigInteger, nullable=False, index=True)
+    campaign_id = Column(BigInteger, nullable=True, index=True)
+    warehouse_type = Column(String(20), nullable=False, index=True)
+    name = Column(String, nullable=True)
+    models = Column(JSON, nullable=False, default=list)
+    address = Column(JSON, nullable=False, default=dict)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class YandexMarketOffer(Base):
+    __tablename__ = "yandex_market_offers"
+    __table_args__ = (
+        UniqueConstraint("business_id", "offer_id", name="uq_yandex_market_offer"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    business_id = Column(BigInteger, nullable=False, index=True)
+    offer_id = Column(String, nullable=False, index=True)
+    market_sku = Column(BigInteger, nullable=True, index=True)
+    name = Column(String, nullable=True)
+    vendor = Column(String, nullable=True)
+    category_name = Column(String, nullable=True, index=True)
+    barcodes = Column(JSON, nullable=False, default=list)
+    pictures = Column(JSON, nullable=False, default=list)
+    status = Column(String, nullable=True, index=True)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class YandexMarketCampaignOffer(Base):
+    __tablename__ = "yandex_market_campaign_offers"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "offer_id", name="uq_yandex_market_campaign_offer"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(BigInteger, nullable=False, index=True)
+    offer_id = Column(String, nullable=False, index=True)
+    status = Column(String, nullable=True, index=True)
+    availability = Column(Boolean, nullable=True, index=True)
+    price = Column(Numeric(20, 6), nullable=True)
+    old_price = Column(Numeric(20, 6), nullable=True)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class YandexMarketOrder(Base):
+    __tablename__ = "yandex_market_orders"
+    __table_args__ = (
+        UniqueConstraint("business_id", "order_id", name="uq_yandex_market_order"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    business_id = Column(BigInteger, nullable=False, index=True)
+    order_id = Column(BigInteger, nullable=False, index=True)
+    external_order_id = Column(String, nullable=True, index=True)
+    campaign_id = Column(BigInteger, nullable=True, index=True)
+    program_type = Column(String(20), nullable=True, index=True)
+    status = Column(String, nullable=True, index=True)
+    substatus = Column(String, nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    shipment_date = Column(DateTime(timezone=True), nullable=True, index=True)
+    delivery_date = Column(DateTime(timezone=True), nullable=True, index=True)
+    payment_type = Column(String, nullable=True)
+    payment_method = Column(String, nullable=True)
+    items_count = Column(Integer, nullable=False, default=0)
+    total_amount = Column(Numeric(20, 6), nullable=False, default=0)
+    currency = Column(String(10), nullable=True)
+    items = Column(JSON, nullable=False, default=list)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class YandexMarketOrderItem(Base):
+    __tablename__ = "yandex_market_order_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "business_id", "order_id", "item_key", name="uq_yandex_market_order_item"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    business_id = Column(BigInteger, nullable=False, index=True)
+    order_id = Column(BigInteger, nullable=False, index=True)
+    item_key = Column(String, nullable=False)
+    offer_id = Column(String, nullable=True, index=True)
+    market_sku = Column(BigInteger, nullable=True, index=True)
+    name = Column(String, nullable=True)
+    count = Column(Integer, nullable=False, default=0)
+    price = Column(Numeric(20, 6), nullable=False, default=0)
+    subsidy = Column(Numeric(20, 6), nullable=False, default=0)
+    statuses = Column(JSON, nullable=False, default=list)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class YandexMarketSyncRun(Base):
+    __tablename__ = "yandex_market_sync_runs"
+
+    id = Column(String, primary_key=True)
+    task = Column(String, nullable=False, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String, nullable=False, index=True)
+    result = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
 
 
 class InventorySyncRun(Base):

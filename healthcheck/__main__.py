@@ -35,6 +35,10 @@ from app.config import (
     WB_DOCUMENT_SYNC_REQUIRED,
     WB_ORDER_FEED_MAX_AGE_SECONDS,
     YANDEX_MARKET_CAMPAIGN_IDS,
+    YANDEX_MARKET_CATALOG_MAX_AGE_SECONDS,
+    YANDEX_MARKET_IDENTITY_MAX_AGE_SECONDS,
+    YANDEX_MARKET_ORDERS_MAX_AGE_SECONDS,
+    YANDEX_MARKET_REQUIRED_TASKS,
 )
 from app.db import SessionLocal
 from app.models import (
@@ -51,6 +55,7 @@ from app.models import (
     WBOrderFeedSyncRun,
     WBTelegramDelivery,
     YandexMarketStockSnapshot,
+    YandexMarketSyncRun,
 )
 from telegram_bot.client import TelegramClient
 from telegram_bot.dispatcher import TelegramReportDispatcher
@@ -75,6 +80,12 @@ OZON_TASK_MAX_AGES = {
     "ads": OZON_ADS_MAX_AGE_SECONDS,
 }
 
+YANDEX_MARKET_TASK_MAX_AGES = {
+    "identity": YANDEX_MARKET_IDENTITY_MAX_AGE_SECONDS,
+    "catalog": YANDEX_MARKET_CATALOG_MAX_AGE_SECONDS,
+    "orders": YANDEX_MARKET_ORDERS_MAX_AGE_SECONDS,
+}
+
 
 def _ozon_task_checks(session, current: datetime) -> list[Check]:
     checks: list[Check] = []
@@ -95,6 +106,31 @@ def _ozon_task_checks(session, current: datetime) -> list[Check]:
         if latest.error:
             detail += f", error={latest.error[:300]}"
         checks.append(Check(ok, f"Ozon {task} sync", detail))
+    return checks
+
+
+def _yandex_market_task_checks(session, current: datetime) -> list[Check]:
+    checks: list[Check] = []
+    for task in YANDEX_MARKET_REQUIRED_TASKS:
+        latest = session.query(YandexMarketSyncRun).filter_by(task=task).order_by(
+            YandexMarketSyncRun.started_at.desc()
+        ).first()
+        if latest is None:
+            checks.append(Check(False, f"Yandex Market {task} sync", "no runs recorded"))
+            continue
+        timestamp = latest.finished_at or latest.started_at
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
+        age = current - timestamp.astimezone(current.tzinfo)
+        max_age = timedelta(seconds=YANDEX_MARKET_TASK_MAX_AGES.get(task, 86400))
+        detail = f"{latest.status}, age {age}, started {latest.started_at}"
+        if latest.error:
+            detail += f", error={latest.error[:300]}"
+        checks.append(Check(
+            latest.status in {"completed", "running"} and age <= max_age,
+            f"Yandex Market {task} sync",
+            detail,
+        ))
     return checks
 
 
@@ -180,6 +216,11 @@ def collect_checks(
 
     wb_ok, wb_status = systemctl("wbozon-wb.service")
     checks.append(Check(wb_ok, "WB synchronization service", wb_status))
+    if YANDEX_MARKET_CAMPAIGN_IDS:
+        for task in YANDEX_MARKET_REQUIRED_TASKS:
+            unit = f"wbozon-yandex-market-{task}.timer"
+            ok, status = systemctl(unit)
+            checks.append(Check(ok, f"Yandex Market {task} timer", status))
     order_feed_ok, order_feed_status = systemctl("wbozon-wb-order-feed.timer")
     checks.append(Check(order_feed_ok, "WB Order Feed timer", order_feed_status))
     if WB_DOCUMENT_SYNC_REQUIRED:
@@ -256,6 +297,8 @@ def collect_checks(
                 ))
 
         checks.extend(_ozon_task_checks(session, current))
+        if YANDEX_MARKET_CAMPAIGN_IDS:
+            checks.extend(_yandex_market_task_checks(session, current))
 
         if WB_DOCUMENT_SYNC_REQUIRED:
             latest_documents = session.query(WBDocumentSyncRun).order_by(

@@ -50,6 +50,7 @@ def test_stocks_follow_page_tokens_and_flatten_warehouses():
     ]
     assert client.calls[0][0] == "/v2/campaigns/123/offers/stocks"
     assert client.calls[0][1]["params"] == {"limit": 100}
+    assert client.calls[0][1]["json_body"] == {"withTurnover": True}
     assert client.calls[1][1]["params"] == {"limit": 100, "pageToken": "next"}
 
 

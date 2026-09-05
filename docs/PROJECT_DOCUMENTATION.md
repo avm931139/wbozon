@@ -14,7 +14,7 @@
 - [`app/models.py`](../app/models.py) — модели каталога, остатков, заказов, финансов, рекламы, обращений, журналов и доставок Telegram;
 - [`wb/`](../wb) — API-клиенты, сервисы, репозитории, периодическая синхронизация WB и отдельная задача документов/баланса;
 - [`ozon/`](../ozon) — каталог, остатки, отправления, поставки, обращения, продажи, документы и бухгалтерия Ozon Seller API, а также реклама Ozon Performance API;
-- [`yandex_market/`](../yandex_market) — клиент Partner API и нормализация складских остатков;
+- [`yandex_market/`](../yandex_market) — клиент Partner API, справочники кабинета, каталог, заказы и складские остатки;
 - [`inventory_sync/`](../inventory_sync) — отдельные workers текущих остатков WB/Ozon/Яндекс Маркета и ежедневных срезов на 00:00 по Москве;
 - [`telegram_bot/`](../telegram_bot) — формирование, планирование и отправка отчётов;
 - [`operations_bot/`](../operations_bot) — личный дайджест успешных и ошибочных действий из журналов PostgreSQL;
@@ -82,6 +82,9 @@ git pull --ff-only origin master
 ./.venv/bin/python -m inventory_sync --marketplace wb --once
 ./.venv/bin/python -m inventory_sync --marketplace ozon --once
 ./.venv/bin/python -m inventory_sync --marketplace yandex_market --once
+./.venv/bin/python -m yandex_market --task identity
+./.venv/bin/python -m yandex_market --task catalog
+./.venv/bin/python -m yandex_market --task orders
 sudo systemctl restart 'wbozon-inventory@*.service'
 sudo systemctl enable --now wbozon-operations.timer
 systemctl --no-pager status 'wbozon-inventory@*.service'

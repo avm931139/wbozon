@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
-from sqlalchemy import func
+from sqlalchemy import and_, func
 
 from app.db import SessionLocal
 from app.models import (
@@ -22,6 +22,8 @@ from app.models import (
     WBFBSWarehouse,
     WBProduct,
     WBProductSize,
+    YandexMarketCampaign,
+    YandexMarketOffer,
     YandexMarketStockSnapshot,
 )
 
@@ -191,6 +193,21 @@ class StockExcelReportService:
                 YandexMarketStockSnapshot.stock_type,
                 YandexMarketStockSnapshot.count,
                 YandexMarketStockSnapshot.source_updated_at,
+                YandexMarketStockSnapshot.turnover,
+                YandexMarketStockSnapshot.turnover_days,
+                YandexMarketCampaign.name,
+                YandexMarketCampaign.placement_type,
+                YandexMarketOffer.market_sku,
+                YandexMarketOffer.name,
+            ).outerjoin(
+                YandexMarketCampaign,
+                YandexMarketCampaign.campaign_id == YandexMarketStockSnapshot.campaign_id,
+            ).outerjoin(
+                YandexMarketOffer,
+                and_(
+                    YandexMarketOffer.business_id == YandexMarketCampaign.business_id,
+                    YandexMarketOffer.offer_id == YandexMarketStockSnapshot.offer_id,
+                ),
             ).filter(
                 YandexMarketStockSnapshot.snapshot_date == snapshot_date,
                 YandexMarketStockSnapshot.count > 0,
@@ -221,6 +238,12 @@ class StockExcelReportService:
                     "Тип остатка",
                     "Количество",
                     "Обновлено в Маркете",
+                    "Оборачиваемость",
+                    "Дней запаса",
+                    "Магазин",
+                    "Модель",
+                    "Market SKU",
+                    "Товар",
                 ),
                 warehouses,
             ),

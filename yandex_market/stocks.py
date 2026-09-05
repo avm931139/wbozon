@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from yandex_market.client import YandexMarketClient
+from yandex_market.endpoints import campaign_stocks
 from yandex_market.exceptions import YandexMarketParseError
 
 
@@ -17,7 +18,7 @@ class YandexMarketStocksAPI:
         *,
         campaign_id: int,
         limit: int = 100,
-        with_turnover: bool = False,
+        with_turnover: bool = True,
     ) -> list[dict[str, Any]]:
         if campaign_id < 1:
             raise ValueError("campaign_id must be positive")
@@ -32,7 +33,7 @@ class YandexMarketStocksAPI:
             if page_token:
                 params["pageToken"] = page_token
             payload = self.client.post(
-                f"/v2/campaigns/{campaign_id}/offers/stocks",
+                campaign_stocks(campaign_id),
                 params=params,
                 json_body={"withTurnover": with_turnover},
             )

@@ -32,6 +32,7 @@ from app.models import (
     WBOrderFeedSyncRun,
     WBSyncRun,
     WBTelegramDelivery,
+    YandexMarketSyncRun,
 )
 from telegram_bot.client import TelegramClient
 
@@ -241,6 +242,13 @@ class OperationsNotificationService:
         ).all()
         events.extend(self._ozon_event(row) for row in ozon_rows)
 
+        yandex_rows = session.query(YandexMarketSyncRun).filter(
+            YandexMarketSyncRun.finished_at.is_not(None),
+            YandexMarketSyncRun.finished_at >= since,
+            YandexMarketSyncRun.finished_at <= until,
+        ).all()
+        events.extend(self._yandex_market_event(row) for row in yandex_rows)
+
         inventory_rows = session.query(InventorySyncRun).filter(
             InventorySyncRun.finished_at.is_not(None),
             InventorySyncRun.finished_at >= since,
@@ -348,6 +356,32 @@ class OperationsNotificationService:
             occurred_at=self._as_utc(row.finished_at),
             severity=severity,
             title=f"Ozon · {titles.get(row.task, row.task)}",
+            detail=self._trim(detail),
+        )
+
+    def _yandex_market_event(self, row: YandexMarketSyncRun) -> OperationEvent:
+        titles = {
+            "identity": "кабинет и магазины",
+            "catalog": "каталог товаров",
+            "orders": "заказы",
+        }
+        if row.status == "completed":
+            severity = "success"
+            detail = f"Выполнено успешно. Результат: {self._compact(row.result)}."
+        else:
+            severity = "error"
+            error = row.error or "причина не записана"
+            detail = (
+                f"Статус {row.status}. Ошибка: {error}. {self._problem_hint(error)} "
+                f"Проверить: journalctl -u wbozon-yandex-market@{row.task}.service."
+            )
+        return OperationEvent(
+            key=f"yandex_market:{row.id}:{row.status}",
+            source_type="yandex_market",
+            source_id=str(row.id),
+            occurred_at=self._as_utc(row.finished_at),
+            severity=severity,
+            title=f"Яндекс Маркет · {titles.get(row.task, row.task)}",
             detail=self._trim(detail),
         )
 
