@@ -31,7 +31,13 @@ def _money(value: Any) -> str:
 
 
 def _metric(value: Any, suffix: str = "") -> str:
-    return "—" if value is None else f"{value}{suffix}"
+    if value is None:
+        return "—"
+    try:
+        normalized = Decimal(str(value)).quantize(Decimal("0.01"))
+    except (ArithmeticError, TypeError, ValueError):
+        return f"{value}{suffix}"
+    return f"{normalized}{suffix}"
 
 
 def _ozon_order_amount(products: Any) -> Decimal:

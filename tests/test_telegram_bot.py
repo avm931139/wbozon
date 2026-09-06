@@ -62,6 +62,13 @@ def test_split_text_and_client_send_every_chunk():
     assert all("secret" not in str(call[1]) for call in session.calls)
 
 
+def test_report_metrics_are_rounded_for_telegram():
+    from telegram_bot.reports import _metric
+
+    assert _metric("8.969671361839999712", "%") == "8.97%"
+    assert _metric(None) == "—"
+
+
 def test_client_sends_document_as_multipart_without_disk_file():
     session = FakeHTTPSession(); client = TelegramClient("secret", "-1001", session=session)
     assert client.send_document("stocks.xlsx", b"xlsx", caption="Stocks") == 1
