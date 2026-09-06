@@ -64,7 +64,7 @@ class YandexMarketOrderService:
         self.identity_api = identity_api or YandexMarketIdentityAPI()
         self.session_factory = session_factory
 
-    def sync(self, *, today: date | None = None) -> dict[str, int]:
+    def sync(self, *, today: date | None = None) -> dict[str, Any]:
         today = today or datetime.now(ZoneInfo(YANDEX_MARKET_TIMEZONE)).date()
         campaigns, discovered_business_ids = self.identity_api.contexts()
         business_ids = {YANDEX_MARKET_BUSINESS_ID} if YANDEX_MARKET_BUSINESS_ID else discovered_business_ids
@@ -92,26 +92,45 @@ class YandexMarketOrderService:
                 )
                 received += len(orders)
                 saved += self._save(business_id, orders)
-        return {"businesses": len(business_ids), "received": received, "saved": saved}
+        return {
+            "businesses": len(business_ids),
+            "business_ids": sorted(business_ids),
+            "received": received,
+            "saved": saved,
+            "history_complete": True,
+            "history_from": YANDEX_MARKET_HISTORY_FROM,
+        }
 
     def _start_date(self, business_id: int, today: date) -> date:
         with self.session_factory() as session:
-            completed_run = session.query(YandexMarketSyncRun.id).filter_by(
+            completed_run = session.query(YandexMarketSyncRun).filter_by(
                 task="orders", status="completed"
-            ).first()
-        if completed_run:
-            return today - timedelta(days=max(YANDEX_MARKET_ORDER_LOOKBACK_DAYS - 1, 0))
+            ).order_by(YandexMarketSyncRun.finished_at.desc()).first()
+        result = completed_run.result if completed_run and isinstance(completed_run.result, dict) else {}
+        completed_businesses = result.get("business_ids") or []
+        completed_from = result.get("history_from")
         configured = date.fromisoformat(YANDEX_MARKET_HISTORY_FROM)
+        history_is_complete = (
+            result.get("history_complete") is True
+            and business_id in completed_businesses
+            and isinstance(completed_from, str)
+            and date.fromisoformat(completed_from) <= configured
+        )
+        if history_is_complete:
+            return today - timedelta(days=max(YANDEX_MARKET_ORDER_LOOKBACK_DAYS - 1, 0))
         return min(configured, today)
 
     @staticmethod
     def _ranges(start: date, end: date):
         cursor = start
-        while cursor <= end:
-            # Both bounds are inclusive, therefore +29 is a 30-day request.
-            chunk_end = min(cursor + timedelta(days=29), end)
+        while cursor < end:
+            # The business orders endpoint omits date_to in a multi-day request.
+            # Reuse that boundary as the next date_from so no day is skipped.
+            chunk_end = min(cursor + timedelta(days=30), end)
             yield cursor, chunk_end
-            cursor = chunk_end + timedelta(days=1)
+            cursor = chunk_end
+        # A one-day request includes the requested day, including today.
+        yield end, end
 
     def _save(self, business_id: int, orders: list[dict[str, Any]]) -> int:
         now = datetime.now(timezone.utc)

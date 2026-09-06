@@ -152,7 +152,14 @@ def test_identity_catalog_and_orders_are_persisted(monkeypatch):
         session_factory=factory,
     ).sync(today=date(2026, 1, 2))
 
-    assert result == {"businesses": 1, "received": 1, "saved": 1}
+    assert result == {
+        "businesses": 1,
+        "business_ids": [777],
+        "received": 2,
+        "saved": 2,
+        "history_complete": True,
+        "history_from": "2026-01-01",
+    }
     with factory() as session:
         assert session.get(YandexMarketBusiness, 777).name == "Cabinet"
         assert session.get(YandexMarketCampaign, 149010920).placement_type == "FBS"
@@ -240,8 +247,6 @@ def test_order_history_is_retried_until_a_full_run_completes(monkeypatch):
     service = YandexMarketOrderService(
         api=object(), identity_api=FakeIdentity(), session_factory=factory
     )
-    assert service._start_date(777, date(2026, 9, 6)) == date(2026, 1, 1)
-
     with factory() as session:
         session.add(YandexMarketSyncRun(
             id="completed-orders",
@@ -253,16 +258,53 @@ def test_order_history_is_retried_until_a_full_run_completes(monkeypatch):
         ))
         session.commit()
 
+    assert service._start_date(777, date(2026, 9, 6)) == date(2026, 1, 1)
+
+    with factory() as session:
+        run = session.get(YandexMarketSyncRun, "completed-orders")
+        run.result = {
+            "saved": 1,
+            "history_complete": True,
+            "history_from": "2026-01-01",
+            "business_ids": [777],
+        }
+        session.commit()
+
     assert service._start_date(777, date(2026, 9, 6)) == date(2026, 8, 8)
 
 
-def test_order_history_ranges_never_exceed_thirty_inclusive_days():
+def test_order_history_marker_is_scoped_to_business(monkeypatch):
+    factory = session_factory()
+    monkeypatch.setattr("yandex_market.services.order_service.YANDEX_MARKET_HISTORY_FROM", "2026-01-01")
+    with factory() as session:
+        session.add(YandexMarketSyncRun(
+            id="completed-other-business",
+            task="orders",
+            started_at=datetime(2026, 9, 5, tzinfo=timezone.utc),
+            finished_at=datetime(2026, 9, 5, 0, 1, tzinfo=timezone.utc),
+            status="completed",
+            result={
+                "saved": 1,
+                "history_complete": True,
+                "history_from": "2026-01-01",
+                "business_ids": [999],
+            },
+        ))
+        session.commit()
+
+    service = YandexMarketOrderService(
+        api=object(), identity_api=FakeIdentity(), session_factory=factory
+    )
+    assert service._start_date(777, date(2026, 9, 6)) == date(2026, 1, 1)
+
+
+def test_order_history_ranges_overlap_exclusive_end_and_repeat_final_day():
     ranges = list(YandexMarketOrderService._ranges(
         date(2026, 1, 1), date(2026, 3, 2)
     ))
 
     assert ranges == [
-        (date(2026, 1, 1), date(2026, 1, 30)),
-        (date(2026, 1, 31), date(2026, 3, 1)),
+        (date(2026, 1, 1), date(2026, 1, 31)),
+        (date(2026, 1, 31), date(2026, 3, 2)),
         (date(2026, 3, 2), date(2026, 3, 2)),
     ]
