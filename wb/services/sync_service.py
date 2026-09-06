@@ -72,7 +72,7 @@ class WBSyncService:
     def sales_summary(self, **kwargs: Any) -> dict[str, Any]:
         return self.sales_service.summary(**kwargs)
 
-    def sync_fbw_supplies_max_history(self) -> dict[str, int]:
+    def sync_fbw_supplies_max_history(self) -> dict[str, Any]:
         return self.fbw_supply_service.sync_max_history()
 
     def sync_financial_sales_reports(self, **kwargs: Any) -> int:

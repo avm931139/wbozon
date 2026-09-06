@@ -1,3 +1,4 @@
+import logging
 import time
 from datetime import date, datetime
 from typing import Any
@@ -15,6 +16,10 @@ from app.models import (
     WBSizeBarcode,
 )
 from wb.fbw_supplies import FBWSuppliesAPI
+from wb.exceptions import WBError
+
+
+logger = logging.getLogger(__name__)
 
 
 def _dt(value: Any) -> datetime | None:
@@ -32,9 +37,23 @@ class FBWSupplyService:
     def __init__(self):
         self.api = FBWSuppliesAPI()
 
-    def sync_max_history(self) -> dict[str, int]:
-        warehouse_rows = self.api.warehouses()
-        self._persist_warehouses(warehouse_rows)
+    def sync_max_history(self) -> dict[str, Any]:
+        warehouse_rows: list[dict[str, Any]] = []
+        warehouse_status = "completed"
+        warehouse_error: str | None = None
+        try:
+            warehouse_rows = self.api.warehouses()
+            self._persist_warehouses(warehouse_rows)
+        except WBError as exc:
+            # The warehouse directory is reference data and is independent of
+            # supply history. WB may temporarily disable this endpoint while
+            # the supply list and detail endpoints remain available.
+            warehouse_status = "unavailable"
+            warehouse_error = f"{type(exc).__name__}: {exc}"
+            logger.warning(
+                "WB FBW warehouses are unavailable; continuing with saved warehouse data: %s",
+                warehouse_error,
+            )
         supply_rows = self.api.supplies(date(2019, 1, 1), date.today())
         changed = self._persist_supply_list(supply_rows)
         goods_count = package_count = 0
@@ -55,7 +74,15 @@ class FBWSupplyService:
             self._persist_details(supply_id, details, goods, packages)
             goods_count += len(goods)
             package_count += len(packages)
-        return {"warehouses": len(warehouse_rows), "supplies": len(supply_rows), "changed": len(changed), "goods": goods_count, "packages": package_count}
+        return {
+            "warehouses": len(warehouse_rows),
+            "warehouse_status": warehouse_status,
+            "warehouse_error": warehouse_error,
+            "supplies": len(supply_rows),
+            "changed": len(changed),
+            "goods": goods_count,
+            "packages": package_count,
+        }
 
     @staticmethod
     def _persist_warehouses(rows: list[dict[str, Any]]) -> None:
