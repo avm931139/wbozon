@@ -178,6 +178,13 @@ def test_identity_persists_one_business_shared_by_multiple_campaigns():
                     "placementType": "FBY",
                     "apiAvailability": "AVAILABLE",
                 },
+                {
+                    "id": 149007826,
+                    "domain": "second-fby.example",
+                    "business": {"id": 777, "name": "Cabinet"},
+                    "placementType": "FBY",
+                    "apiAvailability": "AVAILABLE",
+                },
             ], {777}
 
         def fulfillment_warehouses(self, **kwargs):
@@ -187,10 +194,11 @@ def test_identity_persists_one_business_shared_by_multiple_campaigns():
         api=MultipleCampaignsIdentity(), session_factory=factory
     ).sync()
 
-    assert result == {"businesses": 1, "campaigns": 2, "warehouses": 2}
+    assert result == {"businesses": 1, "campaigns": 3, "warehouses": 3}
     with factory() as session:
         assert session.query(YandexMarketBusiness).count() == 1
-        assert session.query(YandexMarketCampaign).count() == 2
+        assert session.query(YandexMarketCampaign).count() == 3
+        assert session.query(YandexMarketWarehouse).count() == 2
 
 
 def test_task_runner_records_success_and_failure():

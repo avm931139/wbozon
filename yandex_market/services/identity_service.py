@@ -76,22 +76,27 @@ class YandexMarketIdentityService:
                 campaign_row.api_availability = item.get("apiAvailability")
                 campaign_row.raw_data = item
                 campaign_row.fetched_at = now
+            warehouse_rows: dict[tuple[int, int, str], YandexMarketWarehouse] = {}
             for business_id, campaign_id, warehouse_type, item in warehouses:
                 warehouse_id = item.get("id")
                 if warehouse_id is None:
                     continue
-                row = session.query(YandexMarketWarehouse).filter_by(
-                    business_id=business_id,
-                    warehouse_id=int(warehouse_id),
-                    warehouse_type=warehouse_type,
-                ).one_or_none()
+                key = (business_id, int(warehouse_id), warehouse_type)
+                row = warehouse_rows.get(key)
                 if row is None:
-                    row = YandexMarketWarehouse(
+                    row = session.query(YandexMarketWarehouse).filter_by(
                         business_id=business_id,
                         warehouse_id=int(warehouse_id),
                         warehouse_type=warehouse_type,
-                    )
-                    session.add(row)
+                    ).one_or_none()
+                    if row is None:
+                        row = YandexMarketWarehouse(
+                            business_id=business_id,
+                            warehouse_id=int(warehouse_id),
+                            warehouse_type=warehouse_type,
+                        )
+                        session.add(row)
+                    warehouse_rows[key] = row
                 row.campaign_id = campaign_id or item.get("campaignId")
                 row.name = item.get("name")
                 row.models = item.get("models") or []
