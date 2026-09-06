@@ -74,7 +74,8 @@ sudo systemctl enable --now \
 `wbozon-wb-order-feed.timer` обновляет полную realtime-ленту заказов WB каждые
 10 минут. Она отделена от шестичасового общего WB-цикла и является источником
 заказов для группового Telegram-отчёта. В `.env` установите
-`WB_TG_OPERATIONAL_INTERVAL_SECONDS=3600`, затем перезапустите
+`WB_TG_OPERATIONAL_INTERVAL_SECONDS=3600` и
+`WB_TG_MESSAGE_DELAY_SECONDS=3`, затем перезапустите
 `wbozon-telegram.service`.
 
 После обновления кода проверьте, что долгоживущий Telegram-процесс перечитал его

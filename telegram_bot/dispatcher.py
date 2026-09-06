@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -14,15 +15,29 @@ from telegram_bot.reports import TelegramReportService
 
 
 class TelegramReportDispatcher:
-    def __init__(self, client: TelegramClient, reports: TelegramReportService | None, *, session_factory: Callable[..., Any] = SessionLocal) -> None:
+    def __init__(
+        self,
+        client: TelegramClient,
+        reports: TelegramReportService | None,
+        *,
+        session_factory: Callable[..., Any] = SessionLocal,
+        message_delay_seconds: float = 3,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
+        if message_delay_seconds < 0:
+            raise ValueError("message_delay_seconds must not be negative")
         self.client = client
         self.reports = reports
         self.session_factory = session_factory
+        self.message_delay_seconds = message_delay_seconds
+        self.sleeper = sleeper
 
     def send(self, report_type: str, report_key: str, *, now: datetime | None = None, force: bool = False) -> dict[str, Any]:
         with sync_context(cycle_id=None, task=f"telegram_{report_type}"):
             if self.reports is None:
                 raise RuntimeError("TelegramReportService is required for scheduled reports")
+            if report_type == "operational":
+                return self._send_operational_series(report_key, now=now, force=force)
             row_id = self._reserve(report_type, report_key, force)
             if row_id is None:
                 return {"status": "skipped", "report_key": report_key}
@@ -43,6 +58,38 @@ class TelegramReportDispatcher:
                     if row:
                         row.status = "error"; row.error_text = str(exc)[:4000]; session.commit()
                 raise
+
+    def _send_operational_series(
+        self,
+        report_key: str,
+        *,
+        now: datetime | None,
+        force: bool,
+    ) -> dict[str, Any]:
+        deliveries: list[dict[str, Any]] = []
+        sent_in_this_run = False
+        for section, content in self.reports.operational_messages(now):
+            if sent_in_this_run and self.message_delay_seconds:
+                self.sleeper(self.message_delay_seconds)
+            result = self.send_text_content(
+                f"operational_{section}",
+                f"{report_key}:{section}",
+                lambda content=content: content,
+                force=force,
+            )
+            deliveries.append(result)
+            sent_in_this_run = result.get("status") == "sent"
+        message_ids = [
+            message_id
+            for delivery in deliveries
+            for message_id in delivery.get("message_ids", [])
+        ]
+        return {
+            "status": "sent" if message_ids else "skipped",
+            "report_key": report_key,
+            "message_ids": message_ids,
+            "deliveries": deliveries,
+        }
 
     def send_document(
         self,

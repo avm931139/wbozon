@@ -61,6 +61,7 @@ WB_TG_OPERATIONAL_INTERVAL_SECONDS = int(os.getenv("WB_TG_OPERATIONAL_INTERVAL_S
 WB_TG_POLL_SECONDS = int(os.getenv("WB_TG_POLL_SECONDS", "30"))
 WB_TG_REQUEST_TIMEOUT_SECONDS = int(os.getenv("WB_TG_REQUEST_TIMEOUT_SECONDS", "30"))
 WB_TG_LOW_STOCK_THRESHOLD = int(os.getenv("WB_TG_LOW_STOCK_THRESHOLD", "5"))
+WB_TG_MESSAGE_DELAY_SECONDS = float(os.getenv("WB_TG_MESSAGE_DELAY_SECONDS", "3"))
 WB_TG_PROXY_URL = os.getenv("WB_TG_PROXY_URL")
 
 # Private operational notifications. The regular bot token and proxy are reused by default.

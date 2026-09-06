@@ -12,6 +12,7 @@ from app.db import Base
 from app.models import OzonPosting, OzonSyncRun, WBSyncRun, YandexMarketOrder, YandexMarketStockSnapshot
 from telegram_bot.client import TelegramClient, TelegramError, split_text
 from telegram_bot.__main__ import send_stock_files
+from telegram_bot.dispatcher import TelegramReportDispatcher
 from telegram_bot.reports import TelegramReportService
 from telegram_bot.scheduler import TelegramReportScheduler
 from telegram_bot.stock_reports import (
@@ -276,12 +277,99 @@ def test_ozon_orders_block_uses_saved_postings_and_shows_sync_status():
         datetime(2026, 9, 5, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
     )
 
-    assert "OZON · СЕГОДНЯ" in block
+    assert "ЗАКАЗЫ · СЕГОДНЯ" in block
     assert "Заказы: 1" in block
     assert "товаров: 2" in block
     assert "1 990.00" in block
     assert "FBO 1 / FBS 0" in block
     assert "Загрузка заказов: completed" in block
+
+
+class EmptyPromotionService:
+    def efficiency_summary(self, **kwargs):
+        return {
+            "spend": "0",
+            "orders": 0,
+            "attributed_revenue": "0",
+            "drr_percent": None,
+            "roas": None,
+            "cpo": None,
+        }
+
+
+def test_operational_report_is_four_ordered_marketplace_messages():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    report = TelegramReportService(
+        session_factory=session_factory,
+        sales_summary=lambda date_from, date_to: sales_data(),
+        promotion_service=EmptyPromotionService(),
+        quality_summary=lambda: {
+            "questions": {"total": 0, "answered": 0, "overdue": 0},
+            "feedbacks": {"total": 0, "answered": 0, "overdue": 0},
+        },
+    )
+
+    messages = report.operational_messages(
+        datetime(2026, 9, 5, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    )
+
+    assert [key for key, _ in messages] == ["wildberries", "ozon", "yandex_market", "summary"]
+    assert "РЕКЛАМА · СЕГОДНЯ" in messages[0][1]
+    assert "РЕКЛАМА" in messages[1][1]
+    assert "РЕКЛАМА" in messages[2][1]
+    assert "ИТОГО ПО МАРКЕТПЛЕЙСАМ" in messages[3][1]
+
+
+def test_dispatcher_sends_operational_sections_separately_with_delay():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+
+    class Client:
+        chat_id = "-1001"
+
+        def __init__(self):
+            self.texts = []
+
+        def send_text(self, content):
+            self.texts.append(content)
+            return [len(self.texts)]
+
+    class Reports:
+        def operational_messages(self, now):
+            return [("wb", "WB"), ("ozon", "Ozon"), ("yandex", "Yandex"), ("summary", "Total")]
+
+    client = Client()
+    delays = []
+    dispatcher = TelegramReportDispatcher(
+        client,
+        Reports(),
+        session_factory=session_factory,
+        message_delay_seconds=3,
+        sleeper=delays.append,
+    )
+    delivery_keys = []
+
+    def send_text_content(report_type, report_key, factory, **kwargs):
+        delivery_keys.append(report_key)
+        message_ids = client.send_text(factory())
+        return {"status": "sent", "report_key": report_key, "message_ids": message_ids}
+
+    dispatcher.send_text_content = send_text_content
+
+    result = dispatcher.send("operational", "operational:1")
+
+    assert client.texts == ["WB", "Ozon", "Yandex", "Total"]
+    assert delays == [3, 3, 3]
+    assert result["message_ids"] == [1, 2, 3, 4]
+    assert delivery_keys == [
+        "operational:1:wb",
+        "operational:1:ozon",
+        "operational:1:yandex",
+        "operational:1:summary",
+    ]
 
 
 def test_sync_block_explains_failed_wb_task():
