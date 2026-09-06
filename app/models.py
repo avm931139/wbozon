@@ -2044,3 +2044,47 @@ class OzonAdDailyStat(Base):
     spend = Column(Numeric(20, 6), nullable=False, default=0)
     raw_data = Column(JSON, nullable=False)
     fetched_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class ProductCostImportRun(Base):
+    __tablename__ = "product_cost_import_runs"
+
+    id = Column(String, primary_key=True)
+    source_file = Column(String, nullable=False)
+    source_sha256 = Column(String(64), nullable=False, unique=True, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(20), nullable=False, index=True)
+    rows_total = Column(Integer, nullable=False, default=0)
+    rows_imported = Column(Integer, nullable=False, default=0)
+    rows_skipped_blank = Column(Integer, nullable=False, default=0)
+    error = Column(Text, nullable=True)
+
+
+class ProductCostRecord(Base):
+    __tablename__ = "product_cost_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "import_run_id", "master_product_id", name="uq_product_cost_record_import_product"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    import_run_id = Column(
+        String,
+        ForeignKey("product_cost_import_runs.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    master_product_id = Column(
+        Integer, ForeignKey("master_products.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    article = Column(String, nullable=False, index=True)
+    product_name = Column(String, nullable=True)
+    unit_cost = Column(Numeric(20, 6), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    currency = Column(String(10), nullable=False, default="RUB")
+    effective_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    source_row = Column(Integer, nullable=False)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
