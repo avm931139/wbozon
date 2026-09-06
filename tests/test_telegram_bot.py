@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from zoneinfo import ZoneInfo
 
 from app.db import Base
-from app.models import OzonPosting, OzonSyncRun, YandexMarketOrder, YandexMarketStockSnapshot
+from app.models import OzonPosting, OzonSyncRun, WBSyncRun, YandexMarketOrder, YandexMarketStockSnapshot
 from telegram_bot.client import TelegramClient, TelegramError, split_text
 from telegram_bot.__main__ import send_stock_files
 from telegram_bot.reports import TelegramReportService
@@ -256,7 +256,7 @@ def test_ozon_orders_block_uses_saved_postings_and_shows_sync_status():
                 scheme="fbo",
                 status="delivered",
                 in_process_at=datetime(2026, 9, 5, 8, 30, tzinfo=ZoneInfo("Europe/Moscow")),
-                products=[{"price": "995", "quantity": 2}],
+                products=[{"price": {"amount": "995", "currency": "RUB"}, "quantity": 2}],
                 raw_data={},
                 created_at=datetime(2026, 9, 5, 5, 31, tzinfo=ZoneInfo("UTC")),
                 updated_at=datetime(2026, 9, 5, 5, 31, tzinfo=ZoneInfo("UTC")),
@@ -282,6 +282,32 @@ def test_ozon_orders_block_uses_saved_postings_and_shows_sync_status():
     assert "1 990.00" in block
     assert "FBO 1 / FBS 0" in block
     assert "Загрузка заказов: completed" in block
+
+
+def test_sync_block_explains_failed_wb_task():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    with session_factory() as session:
+        session.add(WBSyncRun(
+            id="wb-run",
+            status="partial",
+            started_at=datetime(2026, 9, 5, 7, 0, tzinfo=ZoneInfo("UTC")),
+            finished_at=datetime(2026, 9, 5, 7, 1, tzinfo=ZoneInfo("UTC")),
+            tasks_total=2,
+            tasks_succeeded=1,
+            tasks_failed=1,
+            results={
+                "products": {"status": "ok"},
+                "documents": {"status": "error", "error": "HTTP 429 rate limit"},
+            },
+        ))
+        session.commit()
+
+    block = TelegramReportService(session_factory=session_factory)._sync_block()
+
+    assert "ошибок 1" in block
+    assert "Ошибка documents: HTTP 429 rate limit" in block
 
 
 class FakeDispatcher:

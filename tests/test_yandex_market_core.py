@@ -164,6 +164,35 @@ def test_identity_catalog_and_orders_are_persisted(monkeypatch):
         assert session.query(YandexMarketOrderItem).one().offer_id == "sku-1"
 
 
+def test_identity_persists_one_business_shared_by_multiple_campaigns():
+    factory = session_factory()
+
+    class MultipleCampaignsIdentity(FakeIdentity):
+        def contexts(self):
+            return [
+                *campaigns(),
+                {
+                    "id": 149007825,
+                    "domain": "fby.example",
+                    "business": {"id": 777, "name": "Cabinet"},
+                    "placementType": "FBY",
+                    "apiAvailability": "AVAILABLE",
+                },
+            ], {777}
+
+        def fulfillment_warehouses(self, **kwargs):
+            return [{"id": 99, "name": "FBY warehouse"}]
+
+    result = YandexMarketIdentityService(
+        api=MultipleCampaignsIdentity(), session_factory=factory
+    ).sync()
+
+    assert result == {"businesses": 1, "campaigns": 2, "warehouses": 2}
+    with factory() as session:
+        assert session.query(YandexMarketBusiness).count() == 1
+        assert session.query(YandexMarketCampaign).count() == 2
+
+
 def test_task_runner_records_success_and_failure():
     factory = session_factory()
 

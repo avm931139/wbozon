@@ -37,7 +37,10 @@ def _ozon_order_amount(products: Any) -> Decimal:
         if not isinstance(product, dict):
             continue
         try:
-            price = Decimal(str(product.get("price") or 0))
+            raw_price = product.get("price") or 0
+            if isinstance(raw_price, dict):
+                raw_price = raw_price.get("amount") or raw_price.get("value") or 0
+            price = Decimal(str(raw_price))
             quantity = int(product.get("quantity") or 0)
         except (ArithmeticError, TypeError, ValueError):
             continue
@@ -224,4 +227,13 @@ class TelegramReportService:
         if not run:
             return "ЗАГРУЗКА ДАННЫХ\nЦиклы синхронизации ещё не записаны."
         finished = run.finished_at.astimezone(self.timezone).strftime("%d.%m %H:%M") if run.finished_at else "выполняется"
-        return f"ЗАГРУЗКА ДАННЫХ\nПоследний цикл: {run.status}, завершён {finished}; успешно {run.tasks_succeeded}/{run.tasks_total}, ошибок {run.tasks_failed}."
+        lines = [
+            "ЗАГРУЗКА ДАННЫХ",
+            f"Последний цикл: {run.status}, завершён {finished}; успешно {run.tasks_succeeded}/{run.tasks_total}, ошибок {run.tasks_failed}.",
+        ]
+        for task, result in (run.results or {}).items():
+            if not isinstance(result, dict) or result.get("status") != "error":
+                continue
+            error = " ".join(str(result.get("error") or "причина не записана").split())
+            lines.append(f"Ошибка {task}: {error[:180]}{'…' if len(error) > 180 else ''}")
+        return "\n".join(lines)

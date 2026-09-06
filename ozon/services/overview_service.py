@@ -9,12 +9,19 @@ from typing import Any, Callable
 
 from sqlalchemy import func
 
-from app.config import OZON_HISTORY_FROM, OZON_SUPPLY_REQUEST_PAUSE_SECONDS, OZON_SYNC_OVERLAP_DAYS
+from app.config import (
+    OZON_DAILY_SALES_RATE_LIMIT_BACKOFF_SECONDS,
+    OZON_DAILY_SALES_RATE_LIMIT_RETRIES,
+    OZON_HISTORY_FROM,
+    OZON_SUPPLY_REQUEST_PAUSE_SECONDS,
+    OZON_SYNC_OVERLAP_DAYS,
+)
 from app.db import SessionLocal
 from app.models import OzonDailySale, OzonFinanceAccrual, OzonQuestion, OzonReview, OzonSupply
 from ozon.analytics import OzonAnalyticsAPI
 from ozon.communications import OzonCommunicationsAPI
 from ozon.finances import OzonFinancesAPI
+from ozon.exceptions import OzonRateLimitError
 from ozon.supplies import OzonSuppliesAPI
 from ozon.business_time import ozon_today
 
@@ -80,13 +87,21 @@ class OzonOverviewService:
         history_from: date | None = None,
         today: Callable[[], date] = ozon_today,
         supply_request_pause_seconds: float = OZON_SUPPLY_REQUEST_PAUSE_SECONDS,
+        daily_sales_rate_limit_retries: int = OZON_DAILY_SALES_RATE_LIMIT_RETRIES,
+        daily_sales_rate_limit_backoff_seconds: float = OZON_DAILY_SALES_RATE_LIMIT_BACKOFF_SECONDS,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         if supply_request_pause_seconds < 0:
             raise ValueError("OZON_SUPPLY_REQUEST_PAUSE_SECONDS must not be negative")
+        if daily_sales_rate_limit_retries < 0:
+            raise ValueError("daily_sales_rate_limit_retries must not be negative")
+        if daily_sales_rate_limit_backoff_seconds < 0:
+            raise ValueError("daily_sales_rate_limit_backoff_seconds must not be negative")
         self.history_from = history_from or date.fromisoformat(OZON_HISTORY_FROM)
         self.today = today
         self.supply_request_pause_seconds = supply_request_pause_seconds
+        self.daily_sales_rate_limit_retries = daily_sales_rate_limit_retries
+        self.daily_sales_rate_limit_backoff_seconds = daily_sales_rate_limit_backoff_seconds
         self.sleeper = sleeper
         self.analytics = OzonAnalyticsAPI()
         self.communications = OzonCommunicationsAPI()
@@ -168,7 +183,7 @@ class OzonOverviewService:
         start = self._incremental_start(OzonDailySale.sale_date)
         end = self.today() - timedelta(days=1)
         if start > end: return 0
-        rows = self.analytics.daily_sales(start, end)
+        rows = self._daily_sales_with_rate_limit(start, end)
         now = datetime.now(timezone.utc)
         with SessionLocal() as session:
             for item in rows:
@@ -187,6 +202,16 @@ class OzonOverviewService:
                 row.cancellations = int(_metric(item, "cancellations") or 0); row.raw_data = item; row.fetched_at = now
             session.commit()
         return len(rows)
+
+    def _daily_sales_with_rate_limit(self, start: date, end: date) -> list[dict[str, Any]]:
+        for attempt in range(self.daily_sales_rate_limit_retries + 1):
+            try:
+                return self.analytics.daily_sales(start, end)
+            except OzonRateLimitError:
+                if attempt >= self.daily_sales_rate_limit_retries:
+                    raise
+                self.sleeper(self.daily_sales_rate_limit_backoff_seconds * (2**attempt))
+        return []
 
     def sync_finances(self) -> int:
         start = self._incremental_start(OzonFinanceAccrual.accrual_date)

@@ -1,9 +1,11 @@
+from datetime import date
+
 import requests
 import pytest
 
 from ozon.exceptions import OzonHTTPError, OzonParseError, OzonRateLimitError
 from ozon.performance.client import OzonPerformanceClient
-from ozon.services.overview_service import _finance_operation_id
+from ozon.services.overview_service import OzonOverviewService, _finance_operation_id
 from ozon.services.sync_service import OzonSyncService
 from ozon.supplies import OzonSuppliesAPI
 
@@ -85,3 +87,27 @@ def test_performance_client_rejects_invalid_json():
     client.token = "token"
     with pytest.raises(OzonParseError):
         client.request("GET", "/test")
+
+
+def test_daily_sales_retries_after_exhausted_short_client_rate_limit():
+    class Analytics:
+        def __init__(self):
+            self.calls = 0
+
+        def daily_sales(self, start, end):
+            self.calls += 1
+            if self.calls < 3:
+                raise OzonRateLimitError("Ozon API rate limit exceeded")
+            return [{"ok": True}]
+
+    sleeps = []
+    service = OzonOverviewService(
+        daily_sales_rate_limit_retries=2,
+        daily_sales_rate_limit_backoff_seconds=10,
+        sleeper=sleeps.append,
+    )
+    service.analytics = Analytics()
+
+    assert service._daily_sales_with_rate_limit(date(2026, 9, 1), date(2026, 9, 5)) == [{"ok": True}]
+    assert service.analytics.calls == 3
+    assert sleeps == [10, 20]

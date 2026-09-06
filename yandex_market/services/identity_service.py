@@ -47,16 +47,20 @@ class YandexMarketIdentityService:
             for item in self.api.fulfillment_warehouses(campaign_id=int(campaign["id"])):
                 warehouses.append((int(business["id"]), int(campaign["id"]), "FULFILLMENT", item))
         with self.session_factory() as session:
+            business_rows: dict[int, YandexMarketBusiness] = {}
             for item in campaigns:
                 campaign_id = item.get("id")
                 business = item.get("business") or {}
                 if campaign_id is None or not isinstance(business, dict) or business.get("id") is None:
                     continue
                 business_id = int(business["id"])
-                business_row = session.get(YandexMarketBusiness, business_id)
+                business_row = business_rows.get(business_id)
                 if business_row is None:
-                    business_row = YandexMarketBusiness(business_id=business_id)
-                    session.add(business_row)
+                    business_row = session.get(YandexMarketBusiness, business_id)
+                    if business_row is None:
+                        business_row = YandexMarketBusiness(business_id=business_id)
+                        session.add(business_row)
+                    business_rows[business_id] = business_row
                 business_row.name = business.get("name")
                 business_row.raw_data = business
                 business_row.fetched_at = now
