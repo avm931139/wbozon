@@ -77,6 +77,20 @@ sudo systemctl enable --now \
 `WB_TG_OPERATIONAL_INTERVAL_SECONDS=3600`, затем перезапустите
 `wbozon-telegram.service`.
 
+После обновления кода проверьте, что долгоживущий Telegram-процесс перечитал его
+и почасовой отчёт содержит все три секции:
+
+```bash
+sudo systemctl restart wbozon-telegram.service
+./.venv/bin/python -m telegram_bot --once operational --force
+sudo journalctl -u wbozon-telegram.service -n 50 --no-pager
+```
+
+Ожидаемые заголовки: `WILDBERRIES · СЕГОДНЯ`, `OZON · СЕГОДНЯ` и
+`ЯНДЕКС МАРКЕТ · СЕГОДНЯ`. Ozon и Яндекс Маркет показывают также статус
+последнего задания `orders`, поэтому пустая или ошибочная загрузка видна прямо в
+отчёте.
+
 После настройки `OPERATIONS_TG_CHAT_ID` включите личный операционный дайджест:
 
 ```bash

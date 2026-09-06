@@ -8,7 +8,15 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func
 
 from app.db import SessionLocal
-from app.models import WBFBSStock, WBFboStock, WBSyncRun, YandexMarketOrder
+from app.models import (
+    OzonPosting,
+    OzonSyncRun,
+    WBFBSStock,
+    WBFboStock,
+    WBSyncRun,
+    YandexMarketOrder,
+    YandexMarketSyncRun,
+)
 from wb.services.customer_communication_service import CustomerCommunicationService
 from wb.services.promotion_service import PromotionService
 from wb.services.sales_service import SalesService
@@ -21,6 +29,20 @@ def _money(value: Any) -> str:
 
 def _metric(value: Any, suffix: str = "") -> str:
     return "—" if value is None else f"{value}{suffix}"
+
+
+def _ozon_order_amount(products: Any) -> Decimal:
+    total = Decimal("0")
+    for product in products if isinstance(products, list) else []:
+        if not isinstance(product, dict):
+            continue
+        try:
+            price = Decimal(str(product.get("price") or 0))
+            quantity = int(product.get("quantity") or 0)
+        except (ArithmeticError, TypeError, ValueError):
+            continue
+        total += price * quantity
+    return total
 
 
 class TelegramReportService:
@@ -59,23 +81,53 @@ class TelegramReportService:
         today = now.date()
         return "\n\n".join([
             f"МАРКЕТПЛЕЙСЫ — текущая обстановка {now:%d.%m.%Y %H:%M}",
-            self._sales_block("СЕГОДНЯ", self.sales_summary(today, today)),
+            self._sales_block("WILDBERRIES · СЕГОДНЯ", self.sales_summary(today, today)),
+            self._ozon_orders_block(now),
             self._yandex_market_orders_block(now),
-            self._ads_block("РЕКЛАМА: СЕГОДНЯ", today, today),
+            self._ads_block("WILDBERRIES · РЕКЛАМА СЕГОДНЯ", today, today),
             self._stock_block(),
             self._sync_block(),
         ])
 
+    def _ozon_orders_block(self, now: datetime) -> str:
+        start_local, end_local = self._day_bounds(now)
+        with self.session_factory() as session:
+            rows = session.query(OzonPosting).filter(
+                OzonPosting.in_process_at >= start_local,
+                OzonPosting.in_process_at < end_local,
+            ).all()
+            run = session.query(OzonSyncRun).filter_by(task="orders").order_by(
+                OzonSyncRun.started_at.desc()
+            ).first()
+        units = sum(
+            int(product.get("quantity") or 0)
+            for row in rows
+            for product in (row.products if isinstance(row.products, list) else [])
+            if isinstance(product, dict)
+        )
+        amount = sum((_ozon_order_amount(row.products) for row in rows), Decimal("0"))
+        fbo = sum((row.scheme or "").lower() == "fbo" for row in rows)
+        fbs = sum((row.scheme or "").lower() == "fbs" for row in rows)
+        cancelled = sum((row.status or "").lower() in {"cancelled", "canceled"} for row in rows)
+        delivered = sum((row.status or "").lower() == "delivered" for row in rows)
+        return "\n".join([
+            "OZON · СЕГОДНЯ",
+            f"Заказы: {len(rows)}; товаров: {units}; сумма товаров: {_money(amount)}.",
+            f"Заказы по схеме: FBO {fbo} / FBS {fbs}.",
+            f"Текущий статус: доставлено {delivered}, отменено {cancelled}.",
+            self._task_run_line(run),
+        ])
+
     def _yandex_market_orders_block(self, now: datetime) -> str:
-        start_local = datetime.combine(now.date(), datetime.min.time(), tzinfo=self.timezone)
-        end_local = start_local + timedelta(days=1)
+        start_local, end_local = self._day_bounds(now)
         with self.session_factory() as session:
             rows = session.query(YandexMarketOrder).filter(
                 YandexMarketOrder.created_at >= start_local,
                 YandexMarketOrder.created_at < end_local,
             ).all()
-        if not rows:
-            return "ЯНДЕКС МАРКЕТ · СЕГОДНЯ\nЗаказы: 0; сумма: 0.00 ₽."
+            run = session.query(YandexMarketSyncRun).filter_by(task="orders").order_by(
+                YandexMarketSyncRun.started_at.desc()
+            ).first()
         cancelled = sum(row.status == "CANCELLED" for row in rows)
         delivered = sum(row.status == "DELIVERED" for row in rows)
         returned = sum(row.status in {"RETURNED", "PARTIALLY_RETURNED"} for row in rows)
@@ -88,7 +140,27 @@ class TelegramReportService:
             f"Заказы: {len(rows)}; товаров: {units}; сумма: {_money(amount)}.",
             f"Товары по модели: FBY {fby} / FBS {fbs}.",
             f"Статусы: доставлено {delivered}, отменено {cancelled}, возвратов {returned}.",
+            self._task_run_line(run),
         ])
+
+    def _day_bounds(self, now: datetime) -> tuple[datetime, datetime]:
+        start = datetime.combine(now.date(), datetime.min.time(), tzinfo=self.timezone)
+        return start, start + timedelta(days=1)
+
+    def _task_run_line(self, run: Any) -> str:
+        if run is None:
+            return "Загрузка заказов: ещё не запускалась."
+        timestamp = run.finished_at or run.started_at
+        if timestamp is not None:
+            timestamp = timestamp.replace(tzinfo=self.timezone) if timestamp.tzinfo is None else timestamp.astimezone(self.timezone)
+            finished = timestamp.strftime("%d.%m %H:%M")
+        else:
+            finished = "время неизвестно"
+        line = f"Загрузка заказов: {run.status}, {finished}."
+        if run.error:
+            error = " ".join(str(run.error).split())
+            line += f" Ошибка: {error[:180]}{'…' if len(error) > 180 else ''}"
+        return line
 
     def _local(self, value: datetime | None) -> datetime:
         value = value or datetime.now(self.timezone)

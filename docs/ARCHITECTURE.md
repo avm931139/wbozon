@@ -52,7 +52,8 @@ WB API ───────────────→ wb worker ────�
 WB stock APIs ────────→ inventory@wb ───────────┤
 Ozon APIs ────────────→ ozon tasks ─────────────┤
 Ozon stock APIs ──────→ inventory@ozon ─────────┤→ PostgreSQL
-Yandex Market API ────→ inventory@yandex_market ┤
+Yandex Market API ────→ yandex_market tasks ────┤
+Yandex stock API ─────→ inventory@yandex_market ┤
                                                    ├→ telegram workers → Telegram API
                                                    ├→ operations_bot → личный Telegram
                                                    └→ healthcheck → Telegram API

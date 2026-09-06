@@ -182,3 +182,50 @@ def test_task_runner_records_success_and_failure():
         row = session.query(YandexMarketSyncRun).one()
         assert row.status == "completed"
         assert row.result == {"saved": 3}
+
+
+def test_order_history_is_retried_until_a_full_run_completes(monkeypatch):
+    factory = session_factory()
+    monkeypatch.setattr("yandex_market.services.order_service.YANDEX_MARKET_HISTORY_FROM", "2026-01-01")
+    monkeypatch.setattr("yandex_market.services.order_service.YANDEX_MARKET_ORDER_LOOKBACK_DAYS", 30)
+    with factory() as session:
+        session.add(YandexMarketOrder(
+            business_id=777,
+            order_id=123,
+            items_count=1,
+            total_amount=100,
+            items=[],
+            raw_data={},
+            fetched_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        ))
+        session.commit()
+
+    service = YandexMarketOrderService(
+        api=object(), identity_api=FakeIdentity(), session_factory=factory
+    )
+    assert service._start_date(777, date(2026, 9, 6)) == date(2026, 1, 1)
+
+    with factory() as session:
+        session.add(YandexMarketSyncRun(
+            id="completed-orders",
+            task="orders",
+            started_at=datetime(2026, 9, 5, tzinfo=timezone.utc),
+            finished_at=datetime(2026, 9, 5, 0, 1, tzinfo=timezone.utc),
+            status="completed",
+            result={"saved": 1},
+        ))
+        session.commit()
+
+    assert service._start_date(777, date(2026, 9, 6)) == date(2026, 8, 8)
+
+
+def test_order_history_ranges_never_exceed_thirty_inclusive_days():
+    ranges = list(YandexMarketOrderService._ranges(
+        date(2026, 1, 1), date(2026, 3, 2)
+    ))
+
+    assert ranges == [
+        (date(2026, 1, 1), date(2026, 1, 30)),
+        (date(2026, 1, 31), date(2026, 3, 1)),
+        (date(2026, 3, 2), date(2026, 3, 2)),
+    ]

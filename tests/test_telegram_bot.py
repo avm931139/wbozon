@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from zoneinfo import ZoneInfo
 
 from app.db import Base
-from app.models import YandexMarketOrder, YandexMarketStockSnapshot
+from app.models import OzonPosting, OzonSyncRun, YandexMarketOrder, YandexMarketStockSnapshot
 from telegram_bot.client import TelegramClient, TelegramError, split_text
 from telegram_bot.__main__ import send_stock_files
 from telegram_bot.reports import TelegramReportService
@@ -243,6 +243,45 @@ def test_yandex_market_orders_block_uses_saved_orders():
     assert "товаров: 2" in block
     assert "FBS 2" in block
     assert "1 990.00" in block
+
+
+def test_ozon_orders_block_uses_saved_postings_and_shows_sync_status():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    with session_factory() as session:
+        session.add_all([
+            OzonPosting(
+                posting_number="100-1",
+                scheme="fbo",
+                status="delivered",
+                in_process_at=datetime(2026, 9, 5, 8, 30, tzinfo=ZoneInfo("Europe/Moscow")),
+                products=[{"price": "995", "quantity": 2}],
+                raw_data={},
+                created_at=datetime(2026, 9, 5, 5, 31, tzinfo=ZoneInfo("UTC")),
+                updated_at=datetime(2026, 9, 5, 5, 31, tzinfo=ZoneInfo("UTC")),
+            ),
+            OzonSyncRun(
+                id="run-1",
+                task="orders",
+                started_at=datetime(2026, 9, 5, 9, 0, tzinfo=ZoneInfo("Europe/Moscow")),
+                finished_at=datetime(2026, 9, 5, 9, 1, tzinfo=ZoneInfo("Europe/Moscow")),
+                status="completed",
+                result={"fbo": 1, "fbs": 0},
+            ),
+        ])
+        session.commit()
+
+    block = TelegramReportService(session_factory=session_factory)._ozon_orders_block(
+        datetime(2026, 9, 5, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    )
+
+    assert "OZON · СЕГОДНЯ" in block
+    assert "Заказы: 1" in block
+    assert "товаров: 2" in block
+    assert "1 990.00" in block
+    assert "FBO 1 / FBS 0" in block
+    assert "Загрузка заказов: completed" in block
 
 
 class FakeDispatcher:

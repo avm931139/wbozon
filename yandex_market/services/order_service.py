@@ -13,7 +13,7 @@ from app.config import (
     YANDEX_MARKET_TIMEZONE,
 )
 from app.db import SessionLocal
-from app.models import YandexMarketOrder, YandexMarketOrderItem
+from app.models import YandexMarketOrder, YandexMarketOrderItem, YandexMarketSyncRun
 from yandex_market.identity import YandexMarketIdentityAPI
 from yandex_market.orders import YandexMarketOrdersAPI
 
@@ -96,8 +96,10 @@ class YandexMarketOrderService:
 
     def _start_date(self, business_id: int, today: date) -> date:
         with self.session_factory() as session:
-            has_orders = session.query(YandexMarketOrder.id).filter_by(business_id=business_id).first()
-        if has_orders:
+            completed_run = session.query(YandexMarketSyncRun.id).filter_by(
+                task="orders", status="completed"
+            ).first()
+        if completed_run:
             return today - timedelta(days=max(YANDEX_MARKET_ORDER_LOOKBACK_DAYS - 1, 0))
         configured = date.fromisoformat(YANDEX_MARKET_HISTORY_FROM)
         return min(configured, today)
@@ -106,7 +108,8 @@ class YandexMarketOrderService:
     def _ranges(start: date, end: date):
         cursor = start
         while cursor <= end:
-            chunk_end = min(cursor + timedelta(days=30), end)
+            # Both bounds are inclusive, therefore +29 is a 30-day request.
+            chunk_end = min(cursor + timedelta(days=29), end)
             yield cursor, chunk_end
             cursor = chunk_end + timedelta(days=1)
 
