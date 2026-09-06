@@ -12,6 +12,10 @@
 - `POST /v2/campaigns/{campaignId}/offers` — ассортимент магазина;
 - `POST /v1/businesses/{businessId}/orders` — актуальная выборка заказов;
 - `POST /v2/campaigns/{campaignId}/offers/stocks` — остатки по складам.
+- `POST /v2/reports/boost-consolidated/generate` — буст продаж;
+- `POST /v2/reports/shows-boost/generate` — буст показов;
+- `POST /v2/reports/banners-statistics/generate` — охватное продвижение;
+- `GET /v2/reports/info/{reportId}` — готовность и загрузка отчёта.
 
 В production остатки запускаются постоянным процессом
 `inventory_sync --marketplace yandex_market`: текущие строки обновляются каждый
@@ -30,7 +34,10 @@ YANDEX_MARKET_TIMEOUT_SECONDS=10
 YANDEX_MARKET_HISTORY_FROM=2026-01-01
 YANDEX_MARKET_ORDER_LOOKBACK_DAYS=30
 YANDEX_MARKET_TIMEZONE=Europe/Moscow
-YANDEX_MARKET_REQUIRED_TASKS=identity,catalog,orders
+YANDEX_MARKET_REQUIRED_TASKS=identity,catalog,orders,advertising
+YANDEX_MARKET_AD_POLL_SECONDS=5
+YANDEX_MARKET_AD_POLL_ATTEMPTS=36
+YANDEX_MARKET_AD_MAX_AGE_SECONDS=7200
 ```
 
 Для нескольких магазинов перечислите campaign ID через запятую. `businessId`
@@ -46,8 +53,15 @@ python -m alembic upgrade head
 python -m yandex_market --task identity
 python -m yandex_market --task catalog
 python -m yandex_market --task orders
+python -m yandex_market --task advertising
 python -m inventory_sync --marketplace yandex_market --once
 ```
+
+`advertising` независимо получает статистику буста продаж, буста показов и
+охватного продвижения за текущую московскую дату. Для API-ключа нужен доступ
+`promotion:read-only`, `finance-and-accounting` либо полный read-only доступ.
+Асинхронные JSON-отчёты опрашиваются до готовности; ошибка задачи не откатывает
+заказы, каталог или остатки.
 
 Первый запуск заказов загружает данные с `YANDEX_MARKET_HISTORY_FROM` отрезками
 не более 30 дней между границами запроса. `date_to` бизнес-метода фактически не
@@ -72,6 +86,7 @@ python -m inventory_sync --marketplace yandex_market --once
 - `yandex_market_orders` — заголовки заказов и исходный ответ;
 - `yandex_market_order_items` — позиции заказов;
 - `yandex_market_sync_runs` — независимый журнал задач;
+- `yandex_market_ad_daily_stats` — дневные показатели рекламы по источнику и кампании;
 - `yandex_market_stocks` и `yandex_market_stock_snapshots` — остатки.
 
 Групповой почасовой Telegram-отчёт читает `yandex_market_orders` и показывает

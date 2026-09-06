@@ -1443,6 +1443,29 @@ class YandexMarketSyncRun(Base):
     error = Column(Text, nullable=True)
 
 
+class YandexMarketAdDailyStat(Base):
+    __tablename__ = "yandex_market_ad_daily_stats"
+    __table_args__ = (
+        UniqueConstraint(
+            "stat_date", "source", "campaign_id", name="uq_yandex_market_ad_daily_stat"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    stat_date = Column(Date, nullable=False, index=True)
+    source = Column(String(30), nullable=False, index=True)
+    business_id = Column(BigInteger, nullable=False, index=True)
+    campaign_id = Column(BigInteger, nullable=False, default=0, index=True)
+    campaign_name = Column(String, nullable=True)
+    views = Column(Integer, nullable=False, default=0)
+    clicks = Column(Integer, nullable=False, default=0)
+    orders = Column(Integer, nullable=False, default=0)
+    spend = Column(Numeric(20, 6), nullable=False, default=0)
+    attributed_revenue = Column(Numeric(20, 6), nullable=False, default=0)
+    raw_data = Column(JSON, nullable=False, default=dict)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class InventorySyncRun(Base):
     __tablename__ = "inventory_sync_runs"
     __table_args__ = {"comment": "Журнал периодических загрузок и ежедневных срезов остатков."}

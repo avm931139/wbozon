@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize Yandex Market advertising every hour
+
+[Timer]
+OnCalendar=*-*-* *:20:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=60
+Unit=wbozon-yandex-market@advertising.service
+
+[Install]
+WantedBy=timers.target

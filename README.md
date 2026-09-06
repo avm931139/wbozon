@@ -198,6 +198,7 @@ Reviews API текущего кабинета.
 python -m yandex_market --task identity
 python -m yandex_market --task catalog
 python -m yandex_market --task orders
+python -m yandex_market --task advertising
 ```
 
 Их результаты записываются в `yandex_market_sync_runs`. При первом запуске

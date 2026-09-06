@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from zoneinfo import ZoneInfo
 
 from app.db import Base
-from app.models import OzonPosting, OzonSyncRun, WBSyncRun, YandexMarketOrder, YandexMarketStockSnapshot
+from app.models import OzonPosting, OzonSyncRun, WBSyncRun, YandexMarketAdDailyStat, YandexMarketOrder, YandexMarketStockSnapshot
 from telegram_bot.client import TelegramClient, TelegramError, split_text
 from telegram_bot.__main__ import send_stock_files
 from telegram_bot.dispatcher import TelegramReportDispatcher
@@ -308,6 +308,14 @@ def test_operational_report_is_four_ordered_marketplace_messages():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, future=True)
+    with session_factory() as session:
+        session.add(YandexMarketAdDailyStat(
+            stat_date=date(2026, 9, 5), source="shows_boost", business_id=777,
+            campaign_id=1, views=100, clicks=10, orders=2, spend=500,
+            attributed_revenue=5000, raw_data={},
+            fetched_at=datetime(2026, 9, 5, 9, 0, tzinfo=ZoneInfo("UTC")),
+        ))
+        session.commit()
     report = TelegramReportService(
         session_factory=session_factory,
         sales_summary=lambda date_from, date_to: sales_data(),
@@ -326,6 +334,8 @@ def test_operational_report_is_four_ordered_marketplace_messages():
     assert "РЕКЛАМА · СЕГОДНЯ" in messages[0][1]
     assert "РЕКЛАМА" in messages[1][1]
     assert "РЕКЛАМА" in messages[2][1]
+    assert "Расход: 500.00 ₽" in messages[2][1]
+    assert "Яндекс Маркет" in messages[3][1]
     assert "ИТОГО ПО МАРКЕТПЛЕЙСАМ" in messages[3][1]
 
 

@@ -161,6 +161,11 @@ YANDEX_MARKET_CATALOG_MAX_AGE_SECONDS = int(
 YANDEX_MARKET_ORDERS_MAX_AGE_SECONDS = int(
     os.getenv("YANDEX_MARKET_ORDERS_MAX_AGE_SECONDS", "1800")
 )
+YANDEX_MARKET_AD_POLL_SECONDS = float(os.getenv("YANDEX_MARKET_AD_POLL_SECONDS", "5"))
+YANDEX_MARKET_AD_POLL_ATTEMPTS = int(os.getenv("YANDEX_MARKET_AD_POLL_ATTEMPTS", "36"))
+YANDEX_MARKET_AD_MAX_AGE_SECONDS = int(
+    os.getenv("YANDEX_MARKET_AD_MAX_AGE_SECONDS", "7200")
+)
 
 # Ozon inventory is realtime; 00:00 Moscow is our daily business cutoff.
 # Server timezone does not affect the snapshot schedule.

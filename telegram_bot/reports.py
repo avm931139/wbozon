@@ -17,6 +17,7 @@ from app.models import (
     WBFboStock,
     WBSyncRun,
     YandexMarketOrder,
+    YandexMarketAdDailyStat,
     YandexMarketStock,
     YandexMarketSyncRun,
 )
@@ -102,6 +103,7 @@ class TelegramReportService:
         ozon_ads = self._ozon_ads_data(today)
         ozon_stock = self._ozon_stock_data()
         yandex_orders = self._yandex_market_orders_data(now)
+        yandex_ads = self._yandex_market_ads_data(today)
         yandex_stock = self._yandex_market_stock_data()
         timestamp = f"{now:%d.%m.%Y %H:%M} МСК"
         return [
@@ -130,7 +132,7 @@ class TelegramReportService:
                 "\n\n".join([
                     f"🟡 ЯНДЕКС МАРКЕТ · {timestamp}",
                     self._yandex_market_orders_block(now, yandex_orders),
-                    "РЕКЛАМА\nСтатистика рекламы ещё не подключена к Partner API.",
+                    self._yandex_market_ads_block(yandex_ads),
                     self._yandex_market_stock_block(yandex_stock),
                 ]),
             ),
@@ -145,6 +147,7 @@ class TelegramReportService:
                     ozon_ads=ozon_ads,
                     ozon_stock=ozon_stock,
                     yandex_orders=yandex_orders,
+                    yandex_ads=yandex_ads,
                     yandex_stock=yandex_stock,
                 ),
             ),
@@ -340,6 +343,67 @@ class TelegramReportService:
             f"Показы: {data['views']}; клики: {data['clicks']}; ДРР: {_metric(data['drr_percent'], '%')}; ROAS: {_metric(data['roas'])}; CPO: {_money(data['cpo']) if data['cpo'] is not None else '—'}.",
         ])
 
+    def _yandex_market_ads_data(self, report_date: date) -> dict[str, Any]:
+        with self.session_factory() as session:
+            stats_date = session.query(func.max(YandexMarketAdDailyStat.stat_date)).filter(
+                YandexMarketAdDailyStat.stat_date <= report_date
+            ).scalar()
+            rows = (
+                session.query(YandexMarketAdDailyStat).filter_by(stat_date=stats_date).all()
+                if stats_date is not None
+                else []
+            )
+            run = session.query(YandexMarketSyncRun).filter_by(task="advertising").order_by(
+                YandexMarketSyncRun.started_at.desc()
+            ).first()
+        spend = sum((Decimal(row.spend or 0) for row in rows), Decimal("0"))
+        revenue = sum(
+            (Decimal(row.attributed_revenue or 0) for row in rows), Decimal("0")
+        )
+        orders = sum(int(row.orders or 0) for row in rows)
+        by_source: dict[str, Decimal] = {}
+        for row in rows:
+            by_source[row.source] = by_source.get(row.source, Decimal("0")) + Decimal(
+                row.spend or 0
+            )
+        return {
+            "date": stats_date,
+            "is_today": stats_date == report_date,
+            "views": sum(int(row.views or 0) for row in rows),
+            "clicks": sum(int(row.clicks or 0) for row in rows),
+            "orders": orders,
+            "spend": spend,
+            "attributed_revenue": revenue,
+            "drr_percent": spend / revenue * 100 if revenue else None,
+            "roas": revenue / spend if spend else None,
+            "cpo": spend / orders if orders else None,
+            "by_source": by_source,
+            "run": run,
+        }
+
+    def _yandex_market_ads_block(self, data: dict[str, Any]) -> str:
+        if data["date"] is None:
+            return "РЕКЛАМА\nСтатистика ещё не загружена."
+        period = "сегодня" if data["is_today"] else f"последние данные за {data['date']:%d.%m.%Y}"
+        names = {
+            "sales_boost": "буст продаж",
+            "shows_boost": "буст показов",
+            "banners": "охватные кампании",
+        }
+        sources = "; ".join(
+            f"{names.get(source, source)} {_money(spend)}"
+            for source, spend in sorted(data["by_source"].items())
+        ) or "нет расходов"
+        lines = [
+            f"РЕКЛАМА · {period.upper()}",
+            f"Расход: {_money(data['spend'])}; заказы: {data['orders']}; выручка: {_money(data['attributed_revenue'])}.",
+            f"Показы: {data['views']}; клики: {data['clicks']}; ДРР: {_metric(data['drr_percent'], '%')}; ROAS: {_metric(data['roas'])}; CPO: {_money(data['cpo']) if data['cpo'] is not None else '—'}.",
+            f"По продуктам: {sources}.",
+        ]
+        if data["run"] is not None and data["run"].status != "completed":
+            lines.append(f"Загрузка рекламы: {data['run'].status}.")
+        return "\n".join(lines)
+
     def _wb_stock_data(self) -> dict[str, int]:
         with self.session_factory() as session:
             fbs_units = session.query(func.coalesce(func.sum(WBFBSStock.quantity), 0)).scalar()
@@ -438,6 +502,7 @@ class TelegramReportService:
         ozon_ads: dict[str, Any],
         ozon_stock: dict[str, dict[str, int]],
         yandex_orders: dict[str, Any],
+        yandex_ads: dict[str, Any],
         yandex_stock: dict[str, dict[str, int]],
     ) -> str:
         total_orders = int(wb_sales.get("orders_placed") or 0) + ozon_orders["orders"] + yandex_orders["orders"]
@@ -459,6 +524,10 @@ class TelegramReportService:
             advertising_spend += Decimal(ozon_ads["spend"])
             advertising_revenue += Decimal(ozon_ads["attributed_revenue"])
             advertising_sources.append("Ozon")
+        if yandex_ads["is_today"]:
+            advertising_spend += Decimal(yandex_ads["spend"])
+            advertising_revenue += Decimal(yandex_ads["attributed_revenue"])
+            advertising_sources.append("Яндекс Маркет")
         ozon_available = sum(values["available"] for values in ozon_stock.values())
         yandex_available = yandex_stock.get("AVAILABLE", {}).get("units", 0)
         total_available = wb_stock["fbs"] + wb_stock["fbo"] + ozon_available + yandex_available
@@ -469,7 +538,6 @@ class TelegramReportService:
             f"Заказы: {total_orders}; товаров: {total_units}; сумма: {_money(total_amount)}.",
             f"Сейчас отменено: {total_cancelled}.",
             f"Реклама ({' + '.join(advertising_sources)}): расход {_money(advertising_spend)}; атрибутированная выручка {_money(advertising_revenue)}.",
-            "Реклама Яндекс Маркета в итог не включена: источник ещё не подключён.",
             f"Доступные остатки: {total_available} шт. — WB {wb_stock['fbs'] + wb_stock['fbo']}, Ozon {ozon_available}, Яндекс Маркет {yandex_available}.",
             f"Загрузка заказов: Ozon {ozon_status}; Яндекс Маркет {yandex_status}. Статус WB указан в сообщении площадки.",
         ])

@@ -2,6 +2,13 @@
 
 CAMPAIGNS = "/v2/campaigns"
 FULFILLMENT_WAREHOUSES = "/v2/warehouses"
+REPORT_INFO = "/v2/reports/info/{report_id}"
+
+AD_REPORT_PATHS = {
+    "sales_boost": "/v2/reports/boost-consolidated/generate",
+    "shows_boost": "/v2/reports/shows-boost/generate",
+    "banners": "/v2/reports/banners-statistics/generate",
+}
 
 
 def partner_warehouses(business_id: int) -> str:
