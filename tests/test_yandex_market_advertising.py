@@ -1,13 +1,13 @@
 import io
 import json
 import zipfile
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
-from app.models import YandexMarketAdDailyStat
+from app.models import YandexMarketAdDailyStat, YandexMarketBusiness
 from yandex_market.advertising import YandexMarketAdvertisingAPI
 from yandex_market.services.advertising_service import YandexMarketAdvertisingService
 
@@ -129,3 +129,22 @@ def test_no_data_report_is_saved_as_zero_day():
         row = session.query(YandexMarketAdDailyStat).one()
         assert row.source == "banners"
         assert row.spend == 0
+
+
+def test_business_id_is_discovered_from_identity_data():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    with factory() as session:
+        session.add(YandexMarketBusiness(
+            business_id=216673578,
+            name="Cabinet",
+            raw_data={},
+            fetched_at=datetime(2026, 9, 6, tzinfo=timezone.utc),
+        ))
+        session.commit()
+
+    service = YandexMarketAdvertisingService(
+        api=object(), session_factory=factory, business_id=None
+    )
+    assert service._business_id() == 216673578

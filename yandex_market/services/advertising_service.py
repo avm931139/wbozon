@@ -14,7 +14,7 @@ from app.config import (
     YANDEX_MARKET_TIMEZONE,
 )
 from app.db import SessionLocal
-from app.models import YandexMarketAdDailyStat
+from app.models import YandexMarketAdDailyStat, YandexMarketBusiness
 from yandex_market.advertising import YandexMarketAdvertisingAPI
 
 
@@ -40,15 +40,14 @@ class YandexMarketAdvertisingService:
         self.business_id = business_id
 
     def sync(self, *, stat_date: date | None = None) -> dict[str, Any]:
-        if not self.business_id:
-            raise ValueError("YANDEX_MARKET_BUSINESS_ID must be configured for advertising")
+        business_id = self._business_id()
         stat_date = stat_date or datetime.now(ZoneInfo(YANDEX_MARKET_TIMEZONE)).date()
         results: dict[str, Any] = {}
         errors: list[str] = []
         for source in self.SOURCES:
             try:
                 report_id = self.api.generate(
-                    source, business_id=self.business_id, stat_date=stat_date
+                    source, business_id=business_id, stat_date=stat_date
                 )
                 report = self.api.wait(
                     report_id,
@@ -56,7 +55,7 @@ class YandexMarketAdvertisingService:
                     pause_seconds=YANDEX_MARKET_AD_POLL_SECONDS,
                 )
                 rows = self._select_rows(source, report["rows"])
-                saved = self._replace(source, stat_date, rows)
+                saved = self._replace(source, stat_date, rows, business_id=business_id)
                 results[source] = {
                     "status": str(report["status"]).lower(),
                     "report_id": report_id,
@@ -70,6 +69,22 @@ class YandexMarketAdvertisingService:
         if errors:
             raise RuntimeError("; ".join(errors))
         return {"date": stat_date.isoformat(), "sources": results}
+
+    def _business_id(self) -> int:
+        if self.business_id:
+            return self.business_id
+        with self.session_factory() as session:
+            values = [value for value, in session.query(YandexMarketBusiness.business_id).all()]
+        if len(values) == 1:
+            return int(values[0])
+        if not values:
+            raise ValueError(
+                "Yandex Market business is unknown; run the identity task or configure "
+                "YANDEX_MARKET_BUSINESS_ID"
+            )
+        raise ValueError(
+            "multiple Yandex Market businesses found; configure YANDEX_MARKET_BUSINESS_ID"
+        )
 
     @staticmethod
     def _select_rows(
@@ -90,7 +105,15 @@ class YandexMarketAdvertisingService:
                 return rows
         raise ValueError(f"Yandex Market {source} report has no {expected} sheet")
 
-    def _replace(self, source: str, stat_date: date, rows: list[dict[str, Any]]) -> int:
+    def _replace(
+        self,
+        source: str,
+        stat_date: date,
+        rows: list[dict[str, Any]],
+        *,
+        business_id: int | None = None,
+    ) -> int:
+        business_id = business_id or self._business_id()
         grouped: dict[int, dict[str, Any]] = defaultdict(lambda: {
             "campaign_name": None,
             "views": 0,
@@ -135,7 +158,7 @@ class YandexMarketAdvertisingService:
                 session.add(YandexMarketAdDailyStat(
                     stat_date=stat_date,
                     source=source,
-                    business_id=self.business_id,
+                    business_id=business_id,
                     campaign_id=campaign_id,
                     campaign_name=item["campaign_name"],
                     views=item["views"],
