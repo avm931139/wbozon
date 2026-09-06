@@ -1466,6 +1466,83 @@ class YandexMarketAdDailyStat(Base):
     fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class MarketplacePriceSyncRun(Base):
+    __tablename__ = "marketplace_price_sync_runs"
+
+    id = Column(String, primary_key=True)
+    marketplace = Column(String(30), nullable=False, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(20), nullable=False, index=True)
+    rows_received = Column(Integer, nullable=False, default=0)
+    rows_saved = Column(Integer, nullable=False, default=0)
+    error = Column(Text, nullable=True)
+
+
+class MarketplaceCurrentPrice(Base):
+    __tablename__ = "marketplace_current_prices"
+    __table_args__ = (
+        UniqueConstraint("marketplace", "source_key", name="uq_marketplace_current_price"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    marketplace = Column(String(30), nullable=False, index=True)
+    source_key = Column(String, nullable=False)
+    account_id = Column(String, nullable=False, default="", index=True)
+    offer_id = Column(String, nullable=True, index=True)
+    product_id = Column(String, nullable=True, index=True)
+    variant_id = Column(String, nullable=True, index=True)
+    product_name = Column(String, nullable=True)
+    currency = Column(String(10), nullable=True)
+    list_price = Column(Numeric(20, 6), nullable=True)
+    seller_price = Column(Numeric(20, 6), nullable=True)
+    customer_price = Column(Numeric(20, 6), nullable=True)
+    club_price = Column(Numeric(20, 6), nullable=True)
+    min_price = Column(Numeric(20, 6), nullable=True)
+    discount_percent = Column(Numeric(12, 6), nullable=True)
+    club_discount_percent = Column(Numeric(12, 6), nullable=True)
+    in_promotion = Column(Boolean, nullable=True, index=True)
+    auto_action_enabled = Column(Boolean, nullable=True)
+    promotion_names = Column(JSON, nullable=False, default=list)
+    source_updated_at = Column(DateTime(timezone=True), nullable=True)
+    captured_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    raw_data = Column(JSON, nullable=False)
+
+
+class MarketplacePriceSnapshot(Base):
+    __tablename__ = "marketplace_price_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "marketplace", "source_key", "captured_at", name="uq_marketplace_price_snapshot"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String, ForeignKey("marketplace_price_sync_runs.id"), nullable=False, index=True)
+    marketplace = Column(String(30), nullable=False, index=True)
+    source_key = Column(String, nullable=False, index=True)
+    account_id = Column(String, nullable=False, default="", index=True)
+    offer_id = Column(String, nullable=True, index=True)
+    product_id = Column(String, nullable=True, index=True)
+    variant_id = Column(String, nullable=True, index=True)
+    product_name = Column(String, nullable=True)
+    currency = Column(String(10), nullable=True)
+    list_price = Column(Numeric(20, 6), nullable=True)
+    seller_price = Column(Numeric(20, 6), nullable=True)
+    customer_price = Column(Numeric(20, 6), nullable=True)
+    club_price = Column(Numeric(20, 6), nullable=True)
+    min_price = Column(Numeric(20, 6), nullable=True)
+    discount_percent = Column(Numeric(12, 6), nullable=True)
+    club_discount_percent = Column(Numeric(12, 6), nullable=True)
+    in_promotion = Column(Boolean, nullable=True, index=True)
+    auto_action_enabled = Column(Boolean, nullable=True)
+    promotion_names = Column(JSON, nullable=False, default=list)
+    source_updated_at = Column(DateTime(timezone=True), nullable=True)
+    captured_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    raw_data = Column(JSON, nullable=False)
+
+
 class InventorySyncRun(Base):
     __tablename__ = "inventory_sync_runs"
     __table_args__ = {"comment": "Журнал периодических загрузок и ежедневных срезов остатков."}

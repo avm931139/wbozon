@@ -46,6 +46,10 @@ class WBFinanceEndpoints:
     BALANCE = "/api/v1/account/balance"
 
 
+class WBPricesEndpoints:
+    LIST = "/api/v2/list/goods/filter"
+
+
 class WBEndpoints:
     """Compatibility facade for existing imports."""
 

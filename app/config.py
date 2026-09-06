@@ -17,6 +17,9 @@ WB_STATISTICS_BASE_URL = os.getenv("WB_STATISTICS_BASE_URL", "https://statistics
 WB_SUPPLIES_BASE_URL = os.getenv("WB_SUPPLIES_BASE_URL", "https://supplies-api.wildberries.ru")
 WB_FINANCE_BASE_URL = os.getenv("WB_FINANCE_BASE_URL", "https://finance-api.wildberries.ru")
 WB_DOCUMENTS_BASE_URL = os.getenv("WB_DOCUMENTS_BASE_URL", "https://documents-api.wildberries.ru")
+WB_PRICES_BASE_URL = os.getenv(
+    "WB_PRICES_BASE_URL", "https://discounts-prices-api.wildberries.ru"
+)
 WB_DOCUMENT_STORAGE_DIR = os.getenv("WB_DOCUMENT_STORAGE_DIR", "data/wb/documents")
 WB_DOCUMENT_DOWNLOAD_LIMIT = int(os.getenv("WB_DOCUMENT_DOWNLOAD_LIMIT", "5"))
 WB_DOCUMENT_MAX_FILE_BYTES = int(os.getenv("WB_DOCUMENT_MAX_FILE_BYTES", "104857600"))
@@ -166,6 +169,9 @@ YANDEX_MARKET_AD_POLL_ATTEMPTS = int(os.getenv("YANDEX_MARKET_AD_POLL_ATTEMPTS",
 YANDEX_MARKET_AD_MAX_AGE_SECONDS = int(
     os.getenv("YANDEX_MARKET_AD_MAX_AGE_SECONDS", "7200")
 )
+
+# Independent marketplace price snapshots.
+PRICE_SYNC_MAX_AGE_SECONDS = int(os.getenv("PRICE_SYNC_MAX_AGE_SECONDS", "14400"))
 
 # Ozon inventory is realtime; 00:00 Moscow is our daily business cutoff.
 # Server timezone does not affect the snapshot schedule.

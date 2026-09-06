@@ -1,0 +1,11 @@
+[Unit]
+Description=Capture %i marketplace prices every three hours
+
+[Timer]
+OnCalendar=*-*-* 00/3:15:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=120
+Unit=wbozon-prices@%i.service
+
+[Install]
+WantedBy=timers.target

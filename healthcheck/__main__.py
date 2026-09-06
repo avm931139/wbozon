@@ -16,6 +16,7 @@ from app.config import (
     INVENTORY_TIMEZONE,
     OPERATIONS_TG_BOT_TOKEN,
     OPERATIONS_TG_CHAT_ID,
+    PRICE_SYNC_MAX_AGE_SECONDS,
     OZON_ADS_MAX_AGE_SECONDS,
     OZON_ACCOUNTING_MAX_AGE_SECONDS,
     OZON_COMMUNICATIONS_MAX_AGE_SECONDS,
@@ -45,6 +46,7 @@ from app.db import SessionLocal
 from app.models import (
     HealthcheckRun,
     InventorySyncRun,
+    MarketplacePriceSyncRun,
     OperationsEventDelivery,
     OperationsMonitorState,
     OzonSyncRun,
@@ -87,6 +89,34 @@ YANDEX_MARKET_TASK_MAX_AGES = {
     "orders": YANDEX_MARKET_ORDERS_MAX_AGE_SECONDS,
     "advertising": YANDEX_MARKET_AD_MAX_AGE_SECONDS,
 }
+
+
+def _price_sync_checks(session, current: datetime) -> list[Check]:
+    checks: list[Check] = []
+    max_age = timedelta(seconds=PRICE_SYNC_MAX_AGE_SECONDS)
+    for marketplace in ("wb", "ozon", "yandex_market"):
+        latest = session.query(MarketplacePriceSyncRun).filter_by(
+            marketplace=marketplace
+        ).order_by(MarketplacePriceSyncRun.started_at.desc()).first()
+        if latest is None:
+            checks.append(Check(False, f"{marketplace} prices sync", "no runs recorded"))
+            continue
+        timestamp = latest.finished_at or latest.started_at
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
+        age = current - timestamp.astimezone(current.tzinfo)
+        detail = (
+            f"{latest.status}, age {age}, received={latest.rows_received}, "
+            f"saved={latest.rows_saved}"
+        )
+        if latest.error:
+            detail += f", error={latest.error[:300]}"
+        checks.append(Check(
+            latest.status in {"completed", "running"} and age <= max_age,
+            f"{marketplace} prices sync",
+            detail,
+        ))
+    return checks
 
 
 def _ozon_task_checks(session, current: datetime) -> list[Check]:
@@ -301,6 +331,7 @@ def collect_checks(
         checks.extend(_ozon_task_checks(session, current))
         if YANDEX_MARKET_CAMPAIGN_IDS:
             checks.extend(_yandex_market_task_checks(session, current))
+        checks.extend(_price_sync_checks(session, current))
 
         if WB_DOCUMENT_SYNC_REQUIRED:
             latest_documents = session.query(WBDocumentSyncRun).order_by(

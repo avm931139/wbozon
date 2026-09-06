@@ -25,6 +25,7 @@ from app.db import SessionLocal
 from app.models import (
     HealthcheckRun,
     InventorySyncRun,
+    MarketplacePriceSyncRun,
     OperationsEventDelivery,
     OperationsMonitorState,
     OzonSyncRun,
@@ -256,6 +257,13 @@ class OperationsNotificationService:
         ).all()
         events.extend(self._inventory_event(row) for row in inventory_rows)
 
+        price_rows = session.query(MarketplacePriceSyncRun).filter(
+            MarketplacePriceSyncRun.finished_at.is_not(None),
+            MarketplacePriceSyncRun.finished_at >= since,
+            MarketplacePriceSyncRun.finished_at <= until,
+        ).all()
+        events.extend(self._price_event(row) for row in price_rows)
+
         telegram_rows = session.query(WBTelegramDelivery).filter(
             WBTelegramDelivery.report_type.notlike("operations_%"),
             WBTelegramDelivery.status.in_(("sent", "error")),
@@ -436,6 +444,32 @@ class OperationsNotificationService:
             occurred_at=self._as_utc(row.finished_at),
             severity=severity,
             title=f"Остатки · {names.get(row.marketplace, row.marketplace)} · {run_name}",
+            detail=self._trim(detail),
+        )
+
+    def _price_event(self, row: MarketplacePriceSyncRun) -> OperationEvent:
+        names = {"wb": "Wildberries", "ozon": "Ozon", "yandex_market": "Яндекс Маркет"}
+        if row.status == "completed":
+            severity = "success"
+            detail = (
+                f"Цены сохранены: получено {row.rows_received}, "
+                f"снимков записано {row.rows_saved}."
+            )
+        else:
+            severity = "error"
+            error = row.error or "причина не записана"
+            detail = (
+                f"Загрузка цен не завершена. Ошибка: {error}. "
+                f"{self._problem_hint(error)} Проверить: "
+                f"journalctl -u wbozon-prices@{row.marketplace}.service."
+            )
+        return OperationEvent(
+            key=f"prices:{row.id}:{row.status}",
+            source_type="prices",
+            source_id=str(row.id),
+            occurred_at=self._as_utc(row.finished_at),
+            severity=severity,
+            title=f"Цены · {names.get(row.marketplace, row.marketplace)}",
             detail=self._trim(detail),
         )
 

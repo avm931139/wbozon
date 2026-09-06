@@ -29,3 +29,7 @@ def campaign_stocks(campaign_id: int) -> str:
 
 def business_orders(business_id: int) -> str:
     return f"/v1/businesses/{business_id}/orders"
+
+
+def business_prices(business_id: int) -> str:
+    return f"/v2/businesses/{business_id}/offer-prices"

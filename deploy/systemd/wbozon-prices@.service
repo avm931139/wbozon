@@ -1,0 +1,15 @@
+[Unit]
+Description=wbozon %i marketplace price snapshot
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wbozon
+Group=wbozon
+WorkingDirectory=/home/wbozon/wbozon
+EnvironmentFile=/home/wbozon/wbozon/.env
+ExecStart=/home/wbozon/wbozon/.venv/bin/python -m price_sync --marketplace %i
+
+[Install]
+WantedBy=multi-user.target

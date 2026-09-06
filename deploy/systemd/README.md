@@ -102,6 +102,22 @@ sudo systemctl start wbozon-operations.service
 sudo journalctl -u wbozon-operations.service -n 50 --no-pager
 ```
 
+## История цен каждые три часа
+
+Один шаблон запускает три полностью независимых задания. Каждый успешный запуск сохраняет новый снимок даже без изменения цены:
+
+```bash
+sudo systemctl enable --now \
+  wbozon-prices@wb.timer \
+  wbozon-prices@ozon.timer \
+  wbozon-prices@yandex_market.timer
+
+systemctl list-timers 'wbozon-prices@*' --all
+journalctl -u 'wbozon-prices@*.service' -n 100 --no-pager
+```
+
+Расписание — каждые три часа в `:15` по Москве с независимой случайной задержкой до двух минут. Сбой одного маркетплейса не меняет данные остальных. Ручной запуск: `python -m price_sync --marketplace wb` (также `ozon` или `yandex_market`).
+
 Он читает журналы БД и не является зависимостью WB/Ozon/inventory. Ошибка Telegram оставляет события в очереди и не меняет статус исходной синхронизации.
 
 `wbozon-telegram-relay.service` нужен на текущем VPS из-за блокировки Telegram. В среде с прямым доступом relay можно не включать и удалить `WB_TG_PROXY_URL` из `.env`.
