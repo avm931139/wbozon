@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh unified marketplace product mapping daily
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=120
+Unit=wbozon-product-mapping.service
+
+[Install]
+WantedBy=timers.target

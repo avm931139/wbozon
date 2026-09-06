@@ -16,6 +16,8 @@
 - [`ozon/`](../ozon) — каталог, остатки, отправления, поставки, обращения, продажи, документы и бухгалтерия Ozon Seller API, а также реклама Ozon Performance API;
 - [`yandex_market/`](../yandex_market) — клиент Partner API, справочники кабинета, каталог, заказы и складские остатки;
 - [`inventory_sync/`](../inventory_sync) — отдельные workers текущих остатков WB/Ozon/Яндекс Маркета и ежедневных срезов на 00:00 по Москве;
+- [`price_sync/`](../price_sync) — независимые трёхчасовые снимки цен трёх маркетплейсов;
+- [`product_master/`](../product_master) — единые товары и связи карточек площадок по артикулу;
 - [`telegram_bot/`](../telegram_bot) — формирование, планирование и отправка отчётов;
 - [`operations_bot/`](../operations_bot) — личный дайджест успешных и ошибочных действий из журналов PostgreSQL;
 - [`healthcheck/`](../healthcheck) — проверка systemd, свежести данных, полноты срезов и доставки Telegram;
@@ -211,7 +213,7 @@ sudo journalctl -u wbozon-ozon@orders.service -n 100 --no-pager
 
 Отсутствие Telegram-настроек не влияет на WB/Ozon/inventory workers, потому что Telegram работает отдельным процессом. Повторная отправка уже доставленного ручного отчёта выполняется с флагом `--force`.
 
-`operations_bot` также изолирован от рабочих процессов. Он читает только завершённые записи `wb_sync_runs`, `wb_document_sync_runs`, `ozon_sync_runs`, `inventory_sync_runs` и `wb_telegram_deliveries`. Новые события сначала фиксируются в `operations_event_deliveries`, поэтому при недоступном Telegram они не теряются и повторяются следующим запуском. Курсор `operations_monitor_states` исключает повторное чтение, а уникальный ключ события защищает от дублей.
+`operations_bot` также изолирован от рабочих процессов. Он читает только завершённые записи рабочих журналов, включая `wb_sync_runs`, `wb_document_sync_runs`, `ozon_sync_runs`, `yandex_market_sync_runs`, `inventory_sync_runs`, `marketplace_price_sync_runs`, `product_mapping_runs` и `wb_telegram_deliveries`. Новые события сначала фиксируются в `operations_event_deliveries`, поэтому при недоступном Telegram они не теряются и повторяются следующим запуском. Курсор `operations_monitor_states` исключает повторное чтение, а уникальный ключ события защищает от дублей.
 
 ## Синхронизируемые разделы
 
@@ -265,6 +267,12 @@ Ozon хранится в двух представлениях:
 Основные складские источники Ozon: `/v1/product/info/stocks-by-warehouse/fbo` и `/v2/product/info/stocks-by-warehouse/fbs`. `/v1/analytics/stocks` используется для названий складов и кластеров. С 17 августа 2026 года Ozon отдаёт аналитические остатки в реальном времени, поэтому `00:00 Europe/Moscow` — внутреннее бизнес-время фиксации, а не время публикации данных API.
 
 Полная схема загрузки и правила сверки описаны в [`ozon/WAREHOUSE_STOCK_ARCHITECTURE.md`](../ozon/WAREHOUSE_STOCK_ARCHITECTURE.md).
+
+## Единые товары и история цен
+
+`price_sync` раз в три часа независимо загружает цены WB, Ozon и Яндекс Маркета. Текущие значения находятся в `marketplace_current_prices`, каждый неизменяемый замер — в `marketplace_price_snapshots`, результаты запусков — в `marketplace_price_sync_runs`.
+
+`product_master` ежедневно объединяет карточки площадок по нормализованному артикулу. Точные совпадения связываются напрямую; известные тестовые окончания связываются с базой только при существовании базового артикула. Ручные связи не перезаписываются. Таблицы `master_products` и `marketplace_product_links` становятся основой для последующего присоединения себестоимости и собственного склада.
 
 ## Telegram-отчёты
 

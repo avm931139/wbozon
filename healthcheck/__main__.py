@@ -17,6 +17,7 @@ from app.config import (
     OPERATIONS_TG_BOT_TOKEN,
     OPERATIONS_TG_CHAT_ID,
     PRICE_SYNC_MAX_AGE_SECONDS,
+    PRODUCT_MAPPING_MAX_AGE_SECONDS,
     OZON_ADS_MAX_AGE_SECONDS,
     OZON_ACCOUNTING_MAX_AGE_SECONDS,
     OZON_COMMUNICATIONS_MAX_AGE_SECONDS,
@@ -47,6 +48,7 @@ from app.models import (
     HealthcheckRun,
     InventorySyncRun,
     MarketplacePriceSyncRun,
+    ProductMappingRun,
     OperationsEventDelivery,
     OperationsMonitorState,
     OzonSyncRun,
@@ -117,6 +119,30 @@ def _price_sync_checks(session, current: datetime) -> list[Check]:
             detail,
         ))
     return checks
+
+
+def _product_mapping_check(session, current: datetime) -> Check:
+    latest = session.query(ProductMappingRun).order_by(
+        ProductMappingRun.started_at.desc()
+    ).first()
+    if latest is None:
+        return Check(False, "product mapping sync", "no runs recorded")
+    timestamp = latest.finished_at or latest.started_at
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
+    age = current - timestamp.astimezone(current.tzinfo)
+    detail = (
+        f"{latest.status}, age {age}, sources={latest.source_rows}, "
+        f"masters={latest.master_products}, suffix={latest.suffix_links}"
+    )
+    if latest.error:
+        detail += f", error={latest.error[:300]}"
+    return Check(
+        latest.status in {"completed", "running"}
+        and age <= timedelta(seconds=PRODUCT_MAPPING_MAX_AGE_SECONDS),
+        "product mapping sync",
+        detail,
+    )
 
 
 def _ozon_task_checks(session, current: datetime) -> list[Check]:
@@ -332,6 +358,7 @@ def collect_checks(
         if YANDEX_MARKET_CAMPAIGN_IDS:
             checks.extend(_yandex_market_task_checks(session, current))
         checks.extend(_price_sync_checks(session, current))
+        checks.append(_product_mapping_check(session, current))
 
         if WB_DOCUMENT_SYNC_REQUIRED:
             latest_documents = session.query(WBDocumentSyncRun).order_by(

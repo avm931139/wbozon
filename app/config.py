@@ -172,6 +172,9 @@ YANDEX_MARKET_AD_MAX_AGE_SECONDS = int(
 
 # Independent marketplace price snapshots.
 PRICE_SYNC_MAX_AGE_SECONDS = int(os.getenv("PRICE_SYNC_MAX_AGE_SECONDS", "14400"))
+PRODUCT_MAPPING_MAX_AGE_SECONDS = int(
+    os.getenv("PRODUCT_MAPPING_MAX_AGE_SECONDS", "129600")
+)
 
 # Ozon inventory is realtime; 00:00 Moscow is our daily business cutoff.
 # Server timezone does not affect the snapshot schedule.

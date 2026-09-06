@@ -6,7 +6,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
-from app.models import MarketplaceCurrentPrice, MarketplacePriceSnapshot, MarketplacePriceSyncRun
+from app.models import (
+    MarketplaceCurrentPrice,
+    MarketplacePriceSnapshot,
+    MarketplacePriceSyncRun,
+    MarketplaceProductLink,
+    MasterProduct,
+)
 from ozon.exceptions import OzonParseError
 from ozon.prices import OzonPricesAPI
 from price_sync.runner import MarketplacePriceRunner
@@ -159,6 +165,28 @@ def test_price_service_keeps_unchanged_history_and_updates_current():
         clock=lambda: next(captured),
     )
     with session_factory() as session:
+        master = MasterProduct(
+            article="SKU-101",
+            name="Product",
+            active=True,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(master)
+        session.flush()
+        session.add(MarketplaceProductLink(
+            master_product_id=master.id,
+            marketplace="wb",
+            account_id="",
+            external_product_id="101",
+            offer_id="SKU-101",
+            source_article="SKU-101",
+            normalized_article="SKU-101",
+            match_method="exact",
+            is_test_variant=False,
+            active=True,
+            matched_at=datetime.now(timezone.utc),
+        ))
         session.add_all([
             MarketplacePriceSyncRun(
                 id="run-1", marketplace="wb", started_at=datetime.now(timezone.utc), status="running"
@@ -177,7 +205,12 @@ def test_price_service_keeps_unchanged_history_and_updates_current():
         assert session.query(MarketplacePriceSnapshot).count() == 2
         current = session.query(MarketplaceCurrentPrice).one()
         assert current.customer_price == Decimal("800")
+        assert current.master_product_id is not None
         assert current.captured_at == datetime(2026, 9, 6, 12, 0)
+        assert all(
+            row.master_product_id == current.master_product_id
+            for row in session.query(MarketplacePriceSnapshot).all()
+        )
 
 
 def test_price_runner_records_failed_attempt():

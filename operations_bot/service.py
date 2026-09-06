@@ -26,6 +26,7 @@ from app.models import (
     HealthcheckRun,
     InventorySyncRun,
     MarketplacePriceSyncRun,
+    ProductMappingRun,
     OperationsEventDelivery,
     OperationsMonitorState,
     OzonSyncRun,
@@ -264,6 +265,13 @@ class OperationsNotificationService:
         ).all()
         events.extend(self._price_event(row) for row in price_rows)
 
+        mapping_rows = session.query(ProductMappingRun).filter(
+            ProductMappingRun.finished_at.is_not(None),
+            ProductMappingRun.finished_at >= since,
+            ProductMappingRun.finished_at <= until,
+        ).all()
+        events.extend(self._product_mapping_event(row) for row in mapping_rows)
+
         telegram_rows = session.query(WBTelegramDelivery).filter(
             WBTelegramDelivery.report_type.notlike("operations_%"),
             WBTelegramDelivery.status.in_(("sent", "error")),
@@ -470,6 +478,32 @@ class OperationsNotificationService:
             occurred_at=self._as_utc(row.finished_at),
             severity=severity,
             title=f"Цены · {names.get(row.marketplace, row.marketplace)}",
+            detail=self._trim(detail),
+        )
+
+    def _product_mapping_event(self, row: ProductMappingRun) -> OperationEvent:
+        if row.status == "completed":
+            severity = "success"
+            detail = (
+                f"Связано {row.source_rows} карточек в {row.master_products} товаров; "
+                f"точных связей {row.exact_links}, вариантов с дополнением "
+                f"{row.suffix_links}, деактивировано {row.inactive_links}."
+            )
+        else:
+            severity = "error"
+            error = row.error or "причина не записана"
+            detail = (
+                f"Сопоставление товаров не завершено. Ошибка: {error}. "
+                f"{self._problem_hint(error)} Проверить: "
+                "journalctl -u wbozon-product-mapping.service."
+            )
+        return OperationEvent(
+            key=f"product_mapping:{row.id}:{row.status}",
+            source_type="product_mapping",
+            source_id=str(row.id),
+            occurred_at=self._as_utc(row.finished_at),
+            severity=severity,
+            title="Единый справочник товаров",
             detail=self._trim(detail),
         )
 

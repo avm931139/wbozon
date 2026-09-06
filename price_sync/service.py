@@ -7,6 +7,7 @@ from typing import Any, Callable
 from app.db import SessionLocal
 from app.models import (
     MarketplaceCurrentPrice,
+    MarketplaceProductLink,
     MarketplacePriceSnapshot,
     OzonProduct,
     WBProduct,
@@ -53,6 +54,7 @@ class MarketplacePriceService:
         records = self._source(marketplace).records()
         captured_at = self.clock()
         names = self._product_names(marketplace, records)
+        master_ids = self._master_product_ids(marketplace, records)
         with self.session_factory() as session:
             existing = {
                 row.source_key: row
@@ -75,12 +77,15 @@ class MarketplacePriceService:
                     session.add(current)
                 for field in PRICE_FIELDS:
                     setattr(current, field, values[field])
+                identity = self._record_identity(marketplace, record)
+                current.master_product_id = master_ids.get(identity)
                 current.captured_at = captured_at
                 current.active = True
                 session.add(MarketplacePriceSnapshot(
                     run_id=run_id,
                     marketplace=marketplace,
                     source_key=record.source_key,
+                    master_product_id=master_ids.get(identity),
                     captured_at=captured_at,
                     **{field: values[field] for field in PRICE_FIELDS},
                 ))
@@ -96,6 +101,27 @@ class MarketplacePriceService:
             "snapshots_saved": len(records),
             "captured_at": captured_at.isoformat(),
             "deactivated": len(set(existing) - seen),
+        }
+
+    @staticmethod
+    def _record_identity(marketplace: str, record: PriceRecord) -> tuple[str, str]:
+        external_id = record.offer_id if marketplace == "yandex_market" else record.product_id
+        return record.account_id, str(external_id or "")
+
+    def _master_product_ids(
+        self, marketplace: str, records: list[PriceRecord]
+    ) -> dict[tuple[str, str], int]:
+        if not records:
+            return {}
+        identities = {self._record_identity(marketplace, record) for record in records}
+        with self.session_factory() as session:
+            rows = session.query(MarketplaceProductLink).filter_by(
+                marketplace=marketplace, active=True
+            ).all()
+        return {
+            (row.account_id, row.external_product_id): int(row.master_product_id)
+            for row in rows
+            if (row.account_id, row.external_product_id) in identities
         }
 
     def _source(self, marketplace: str):

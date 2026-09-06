@@ -1479,6 +1479,60 @@ class MarketplacePriceSyncRun(Base):
     error = Column(Text, nullable=True)
 
 
+class ProductMappingRun(Base):
+    __tablename__ = "product_mapping_runs"
+
+    id = Column(String, primary_key=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(20), nullable=False, index=True)
+    source_rows = Column(Integer, nullable=False, default=0)
+    master_products = Column(Integer, nullable=False, default=0)
+    exact_links = Column(Integer, nullable=False, default=0)
+    suffix_links = Column(Integer, nullable=False, default=0)
+    inactive_links = Column(Integer, nullable=False, default=0)
+    error = Column(Text, nullable=True)
+
+
+class MasterProduct(Base):
+    __tablename__ = "master_products"
+
+    id = Column(Integer, primary_key=True)
+    article = Column(String, nullable=False, unique=True, index=True)
+    name = Column(String, nullable=True)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class MarketplaceProductLink(Base):
+    __tablename__ = "marketplace_product_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "marketplace",
+            "account_id",
+            "external_product_id",
+            name="uq_marketplace_product_link_source",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    master_product_id = Column(
+        Integer, ForeignKey("master_products.id"), nullable=False, index=True
+    )
+    marketplace = Column(String(30), nullable=False, index=True)
+    account_id = Column(String, nullable=False, default="", index=True)
+    external_product_id = Column(String, nullable=False, index=True)
+    offer_id = Column(String, nullable=False, index=True)
+    source_article = Column(String, nullable=False)
+    normalized_article = Column(String, nullable=False, index=True)
+    match_method = Column(String(20), nullable=False, index=True)
+    is_test_variant = Column(Boolean, nullable=False, default=False, index=True)
+    product_name = Column(String, nullable=True)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    matched_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class MarketplaceCurrentPrice(Base):
     __tablename__ = "marketplace_current_prices"
     __table_args__ = (
@@ -1486,6 +1540,9 @@ class MarketplaceCurrentPrice(Base):
     )
 
     id = Column(Integer, primary_key=True)
+    master_product_id = Column(
+        Integer, ForeignKey("master_products.id"), nullable=True, index=True
+    )
     marketplace = Column(String(30), nullable=False, index=True)
     source_key = Column(String, nullable=False)
     account_id = Column(String, nullable=False, default="", index=True)
@@ -1519,6 +1576,9 @@ class MarketplacePriceSnapshot(Base):
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    master_product_id = Column(
+        Integer, ForeignKey("master_products.id"), nullable=True, index=True
+    )
     run_id = Column(String, ForeignKey("marketplace_price_sync_runs.id"), nullable=False, index=True)
     marketplace = Column(String(30), nullable=False, index=True)
     source_key = Column(String, nullable=False, index=True)

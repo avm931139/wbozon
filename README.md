@@ -16,6 +16,7 @@
 - проверку сервисов, свежести данных и доставки отчётов в пакете `healthcheck`;
 - личный операционный дайджест успешных и ошибочных действий в пакете `operations_bot`;
 - независимая трёхчасовая история цен WB, Ozon и Яндекс Маркета в пакете `price_sync`;
+- единый справочник товаров и тестовых карточек площадок в пакете `product_master`;
 - отдельный интеграционный пакет Ozon Seller API `ozon`;
 - отдельный интеграционный пакет Partner API Яндекс Маркета `yandex_market`;
 - независимые по маркетплейсам workers текущих остатков и ежедневных срезов `inventory_sync`, включая детализацию Ozon по физическим складам;
@@ -243,7 +244,7 @@ python -m telegram_bot --once stock-files
 
 ## Дополнительная документация
 
-Полный индекс находится в [docs/README.md](docs/README.md). Подробное описание проекта доступно в [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md), инструкция по production и двум VPS — в [docs/VPS_RUNBOOK.md](docs/VPS_RUNBOOK.md), общей инфраструктуры — в [app/README.md](app/README.md), интеграции WB — в [wb/README.md](wb/README.md), документов WB — в [wb/DOCUMENTS.md](wb/DOCUMENTS.md), Ozon — в [ozon/README.md](ozon/README.md), документов Ozon — в [ozon/ACCOUNTING.md](ozon/ACCOUNTING.md), сверки FBO-поставок — в [ozon/SUPPLY_RECONCILIATION.md](ozon/SUPPLY_RECONCILIATION.md), остатков — в [inventory_sync/README.md](inventory_sync/README.md), истории цен — в [price_sync/README.md](price_sync/README.md), групповых отчётов — в [telegram_bot/README.md](telegram_bot/README.md), личного журнала — в [operations_bot/README.md](operations_bot/README.md), мониторинга — в [healthcheck/README.md](healthcheck/README.md), systemd-задач — в [deploy/systemd/README.md](deploy/systemd/README.md).
+Полный индекс находится в [docs/README.md](docs/README.md). Подробное описание проекта доступно в [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md), инструкция по production и двум VPS — в [docs/VPS_RUNBOOK.md](docs/VPS_RUNBOOK.md), общей инфраструктуры — в [app/README.md](app/README.md), интеграции WB — в [wb/README.md](wb/README.md), документов WB — в [wb/DOCUMENTS.md](wb/DOCUMENTS.md), Ozon — в [ozon/README.md](ozon/README.md), документов Ozon — в [ozon/ACCOUNTING.md](ozon/ACCOUNTING.md), сверки FBO-поставок — в [ozon/SUPPLY_RECONCILIATION.md](ozon/SUPPLY_RECONCILIATION.md), остатков — в [inventory_sync/README.md](inventory_sync/README.md), истории цен — в [price_sync/README.md](price_sync/README.md), единого справочника товаров — в [product_master/README.md](product_master/README.md), групповых отчётов — в [telegram_bot/README.md](telegram_bot/README.md), личного журнала — в [operations_bot/README.md](operations_bot/README.md), мониторинга — в [healthcheck/README.md](healthcheck/README.md), systemd-задач — в [deploy/systemd/README.md](deploy/systemd/README.md).
 
 Проверка работающих сервисов, свежести данных, полноты дневных срезов и доставки Telegram:
 
