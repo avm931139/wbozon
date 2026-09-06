@@ -169,13 +169,20 @@ class ProductCatalogService:
                 external = str(row.nm_id)
                 media = []
                 for photo in row.photos:
+                    # WB returns the same image in several CDN sizes. Keep one
+                    # locally: `big` is the largest consistently available URL;
+                    # the remaining fields are fallbacks for incomplete cards.
                     for role, url in (
-                        ("big", photo.big_url), ("c246x328", photo.c246x328_url),
-                        ("c516x688", photo.c516x688_url), ("hq", photo.hq_url),
-                        ("square", photo.square_url), ("tm", photo.tm_url),
+                        ("big", photo.big_url),
+                        ("hq", photo.hq_url),
+                        ("c516x688", photo.c516x688_url),
+                        ("c246x328", photo.c246x328_url),
+                        ("square", photo.square_url),
+                        ("tm", photo.tm_url),
                     ):
                         if url:
                             media.append(MediaCandidate("image", role, photo.position, url, {}))
+                            break
                 media.extend(_video_candidates(row.raw_data or {}))
                 attributes = [
                     AttributeCandidate(str(item.characteristic.wb_id), item.characteristic.name, item.value)

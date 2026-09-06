@@ -125,7 +125,15 @@ def test_catalog_normalization_is_idempotent_and_keeps_change_snapshots(tmp_path
             title="WB product",
             raw_data={"vendorCode": "NVL0012"},
         )
-        wb.photos.append(WBProductPhoto(position=0, big_url="https://cdn.test/wb.jpg"))
+        wb.photos.append(WBProductPhoto(
+            position=0,
+            big_url="https://cdn.test/wb.jpg",
+            c246x328_url="https://cdn.test/wb-small.jpg",
+            c516x688_url="https://cdn.test/wb-medium.jpg",
+            hq_url="https://cdn.test/wb-hq.jpg",
+            square_url="https://cdn.test/wb-square.jpg",
+            tm_url="https://cdn.test/wb-thumb.jpg",
+        ))
         ozon = OzonProduct(
             product_id=202,
             offer_id="NVL0012_D",
@@ -206,3 +214,6 @@ def test_catalog_normalization_is_idempotent_and_keeps_change_snapshots(tmp_path
             marketplace="yandex_market"
         ).one()
         assert yandex_media.master_product_id is not None
+        wb_media = session.query(MarketplaceProductMedia).filter_by(marketplace="wb").one()
+        assert wb_media.role == "big"
+        assert wb_media.source_url == "https://cdn.test/wb.jpg"
