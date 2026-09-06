@@ -27,6 +27,7 @@ from app.models import (
     InventorySyncRun,
     MarketplacePriceSyncRun,
     ProductMappingRun,
+    ProductCatalogSyncRun,
     OperationsEventDelivery,
     OperationsMonitorState,
     OzonSyncRun,
@@ -272,6 +273,13 @@ class OperationsNotificationService:
         ).all()
         events.extend(self._product_mapping_event(row) for row in mapping_rows)
 
+        catalog_rows = session.query(ProductCatalogSyncRun).filter(
+            ProductCatalogSyncRun.finished_at.is_not(None),
+            ProductCatalogSyncRun.finished_at >= since,
+            ProductCatalogSyncRun.finished_at <= until,
+        ).all()
+        events.extend(self._product_catalog_event(row) for row in catalog_rows)
+
         telegram_rows = session.query(WBTelegramDelivery).filter(
             WBTelegramDelivery.report_type.notlike("operations_%"),
             WBTelegramDelivery.status.in_(("sent", "error")),
@@ -505,6 +513,40 @@ class OperationsNotificationService:
             severity=severity,
             title="Единый справочник товаров",
             detail=self._trim(detail),
+        )
+
+    def _product_catalog_event(self, row: ProductCatalogSyncRun) -> OperationEvent:
+        if row.status == "completed":
+            severity = "success"
+        elif row.status == "partial":
+            severity = "error"
+        else:
+            severity = "error"
+        if row.status in {"completed", "partial"}:
+            detail = (
+                f"Карточек {row.source_rows}, медиа {row.media_rows}, "
+                f"характеристик {row.attribute_rows}, новых версий {row.snapshots_created}; "
+                f"скачано {row.files_downloaded}, уже было {row.files_existing}, "
+                f"ошибок файлов {row.files_failed}."
+            )
+            if row.status == "partial":
+                detail += " Повторная попытка будет выполнена следующим ежедневным запуском."
+        else:
+            error = row.error or "причина не записана"
+            detail = (
+                f"Обработка карточек не завершена. Ошибка: {error}. "
+                f"{self._problem_hint(error)}"
+            )
+        return OperationEvent(
+            key=f"product_catalog:{row.id}:{row.status}",
+            source_type="product_catalog",
+            source_id=str(row.id),
+            occurred_at=self._as_utc(row.finished_at),
+            severity=severity,
+            title="Карточки товаров · фото и видео",
+            detail=self._trim(
+                detail + " Проверить: journalctl -u wbozon-product-catalog.service."
+            ),
         )
 
     def _telegram_event(self, row: WBTelegramDelivery) -> OperationEvent:

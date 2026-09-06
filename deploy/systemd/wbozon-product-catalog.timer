@@ -1,0 +1,11 @@
+[Unit]
+Description=Normalize product cards and download missing media daily
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=120
+Unit=wbozon-product-catalog.service
+
+[Install]
+WantedBy=timers.target

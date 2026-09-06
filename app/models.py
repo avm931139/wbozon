@@ -1533,6 +1533,120 @@ class MarketplaceProductLink(Base):
     matched_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class ProductCatalogSyncRun(Base):
+    __tablename__ = "product_catalog_sync_runs"
+
+    id = Column(String, primary_key=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(20), nullable=False, index=True)
+    source_rows = Column(Integer, nullable=False, default=0)
+    media_rows = Column(Integer, nullable=False, default=0)
+    attribute_rows = Column(Integer, nullable=False, default=0)
+    snapshots_created = Column(Integer, nullable=False, default=0)
+    files_downloaded = Column(Integer, nullable=False, default=0)
+    files_existing = Column(Integer, nullable=False, default=0)
+    files_failed = Column(Integer, nullable=False, default=0)
+    bytes_downloaded = Column(BigInteger, nullable=False, default=0)
+    error = Column(Text, nullable=True)
+
+
+class MarketplaceProductMedia(Base):
+    __tablename__ = "marketplace_product_media"
+    __table_args__ = (
+        UniqueConstraint(
+            "marketplace",
+            "account_id",
+            "external_product_id",
+            "source_key",
+            name="uq_marketplace_product_media_source",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    master_product_id = Column(
+        Integer, ForeignKey("master_products.id"), nullable=True, index=True
+    )
+    marketplace = Column(String(30), nullable=False, index=True)
+    account_id = Column(String, nullable=False, default="", index=True)
+    external_product_id = Column(String, nullable=False, index=True)
+    offer_id = Column(String, nullable=False, index=True)
+    media_type = Column(String(20), nullable=False, index=True)
+    role = Column(String(50), nullable=False, index=True)
+    position = Column(Integer, nullable=False, default=0)
+    source_url = Column(Text, nullable=False)
+    source_key = Column(String(64), nullable=False)
+    local_path = Column(Text, nullable=True)
+    file_name = Column(String, nullable=True)
+    file_extension = Column(String(20), nullable=True)
+    content_type = Column(String(100), nullable=True)
+    file_size = Column(BigInteger, nullable=True)
+    file_sha256 = Column(String(64), nullable=True, index=True)
+    download_status = Column(String(20), nullable=False, default="pending", index=True)
+    download_attempts = Column(Integer, nullable=False, default=0)
+    download_error = Column(Text, nullable=True)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    first_seen_at = Column(DateTime(timezone=True), nullable=False)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    downloaded_at = Column(DateTime(timezone=True), nullable=True)
+    raw_data = Column(JSON, nullable=False, default=dict)
+
+
+class MarketplaceProductAttribute(Base):
+    __tablename__ = "marketplace_product_attributes"
+    __table_args__ = (
+        UniqueConstraint(
+            "marketplace",
+            "account_id",
+            "external_product_id",
+            "source_key",
+            name="uq_marketplace_product_attribute_source",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    master_product_id = Column(
+        Integer, ForeignKey("master_products.id"), nullable=True, index=True
+    )
+    marketplace = Column(String(30), nullable=False, index=True)
+    account_id = Column(String, nullable=False, default="", index=True)
+    external_product_id = Column(String, nullable=False, index=True)
+    offer_id = Column(String, nullable=False, index=True)
+    source_key = Column(String, nullable=False)
+    name = Column(String, nullable=False, index=True)
+    value = Column(JSON, nullable=True)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    first_seen_at = Column(DateTime(timezone=True), nullable=False)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class MarketplaceProductCatalogSnapshot(Base):
+    __tablename__ = "marketplace_product_catalog_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "marketplace",
+            "account_id",
+            "external_product_id",
+            "content_hash",
+            name="uq_marketplace_product_catalog_snapshot_hash",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(String, ForeignKey("product_catalog_sync_runs.id"), nullable=False, index=True)
+    master_product_id = Column(
+        Integer, ForeignKey("master_products.id"), nullable=True, index=True
+    )
+    marketplace = Column(String(30), nullable=False, index=True)
+    account_id = Column(String, nullable=False, default="", index=True)
+    external_product_id = Column(String, nullable=False, index=True)
+    offer_id = Column(String, nullable=False, index=True)
+    product_name = Column(String, nullable=True)
+    content_hash = Column(String(64), nullable=False, index=True)
+    captured_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    data = Column(JSON, nullable=False)
+
+
 class MarketplaceCurrentPrice(Base):
     __tablename__ = "marketplace_current_prices"
     __table_args__ = (

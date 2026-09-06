@@ -17,6 +17,7 @@ from app.config import (
     OPERATIONS_TG_BOT_TOKEN,
     OPERATIONS_TG_CHAT_ID,
     PRICE_SYNC_MAX_AGE_SECONDS,
+    PRODUCT_CATALOG_MAX_AGE_SECONDS,
     PRODUCT_MAPPING_MAX_AGE_SECONDS,
     OZON_ADS_MAX_AGE_SECONDS,
     OZON_ACCOUNTING_MAX_AGE_SECONDS,
@@ -49,6 +50,7 @@ from app.models import (
     InventorySyncRun,
     MarketplacePriceSyncRun,
     ProductMappingRun,
+    ProductCatalogSyncRun,
     OperationsEventDelivery,
     OperationsMonitorState,
     OzonSyncRun,
@@ -141,6 +143,31 @@ def _product_mapping_check(session, current: datetime) -> Check:
         latest.status in {"completed", "running"}
         and age <= timedelta(seconds=PRODUCT_MAPPING_MAX_AGE_SECONDS),
         "product mapping sync",
+        detail,
+    )
+
+
+def _product_catalog_check(session, current: datetime) -> Check:
+    latest = session.query(ProductCatalogSyncRun).order_by(
+        ProductCatalogSyncRun.started_at.desc()
+    ).first()
+    if latest is None:
+        return Check(False, "product catalog media sync", "no runs recorded")
+    timestamp = latest.finished_at or latest.started_at
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
+    age = current - timestamp.astimezone(current.tzinfo)
+    detail = (
+        f"{latest.status}, age {age}, products={latest.source_rows}, "
+        f"media={latest.media_rows}, downloaded={latest.files_downloaded}, "
+        f"existing={latest.files_existing}, failed={latest.files_failed}"
+    )
+    if latest.error:
+        detail += f", error={latest.error[:300]}"
+    return Check(
+        latest.status in {"completed", "running"}
+        and age <= timedelta(seconds=PRODUCT_CATALOG_MAX_AGE_SECONDS),
+        "product catalog media sync",
         detail,
     )
 
@@ -359,6 +386,7 @@ def collect_checks(
             checks.extend(_yandex_market_task_checks(session, current))
         checks.extend(_price_sync_checks(session, current))
         checks.append(_product_mapping_check(session, current))
+        checks.append(_product_catalog_check(session, current))
 
         if WB_DOCUMENT_SYNC_REQUIRED:
             latest_documents = session.query(WBDocumentSyncRun).order_by(

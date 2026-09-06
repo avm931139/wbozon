@@ -130,6 +130,18 @@ journalctl -u wbozon-product-mapping.service -n 50 --no-pager
 
 Не включайте одновременно systemd timer и эквивалентную cron-строку. Повторный параллельный запуск дополнительно закрыт advisory lock.
 
+## Карточки и локальные фото/видео
+
+В 03:00 МСК, после построения единого справочника, отдельная задача нормализует карточки и докачивает медиа:
+
+```bash
+sudo systemctl enable --now wbozon-product-catalog.timer
+sudo systemctl start wbozon-product-catalog.service
+journalctl -u wbozon-product-catalog.service -n 100 --no-pager
+```
+
+Файлы размещаются в `PRODUCT_MEDIA_STORAGE_DIR`, по умолчанию `/home/wbozon/wbozon/data/product_media`. Не включайте timer одновременно с production cron-строкой той же команды.
+
 Он читает журналы БД и не является зависимостью WB/Ozon/inventory. Ошибка Telegram оставляет события в очереди и не меняет статус исходной синхронизации.
 
 `wbozon-telegram-relay.service` нужен на текущем VPS из-за блокировки Telegram. В среде с прямым доступом relay можно не включать и удалить `WB_TG_PROXY_URL` из `.env`.

@@ -175,6 +175,20 @@ PRICE_SYNC_MAX_AGE_SECONDS = int(os.getenv("PRICE_SYNC_MAX_AGE_SECONDS", "14400"
 PRODUCT_MAPPING_MAX_AGE_SECONDS = int(
     os.getenv("PRODUCT_MAPPING_MAX_AGE_SECONDS", "129600")
 )
+PRODUCT_CATALOG_MAX_AGE_SECONDS = int(
+    os.getenv("PRODUCT_CATALOG_MAX_AGE_SECONDS", "129600")
+)
+PRODUCT_MEDIA_STORAGE_DIR = os.getenv("PRODUCT_MEDIA_STORAGE_DIR", "data/product_media")
+PRODUCT_MEDIA_MAX_FILE_BYTES = int(
+    os.getenv("PRODUCT_MEDIA_MAX_FILE_BYTES", "536870912")
+)
+PRODUCT_MEDIA_DOWNLOAD_TIMEOUT_SECONDS = int(
+    os.getenv("PRODUCT_MEDIA_DOWNLOAD_TIMEOUT_SECONDS", "60")
+)
+PRODUCT_MEDIA_DOWNLOAD_WORKERS = int(
+    os.getenv("PRODUCT_MEDIA_DOWNLOAD_WORKERS", "4")
+)
+PRODUCT_MEDIA_DOWNLOAD_LIMIT = int(os.getenv("PRODUCT_MEDIA_DOWNLOAD_LIMIT", "0"))
 
 # Ozon inventory is realtime; 00:00 Moscow is our daily business cutoff.
 # Server timezone does not affect the snapshot schedule.

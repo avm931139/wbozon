@@ -15,6 +15,7 @@
 - [Периодическая синхронизация остатков по маркетплейсам](../inventory_sync/README.md)
 - [История цен маркетплейсов](../price_sync/README.md)
 - [Единый справочник товаров](../product_master/README.md)
+- [Карточки товаров и локальное хранилище фото/видео](../product_catalog/README.md)
 - [Telegram-отчёты](../telegram_bot/README.md)
 - [Личные уведомления о работе программы](../operations_bot/README.md)
 - [Healthcheck и серверный мониторинг](../healthcheck/README.md)
