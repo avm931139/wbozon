@@ -46,10 +46,13 @@ def _decimal(value: Any) -> Decimal:
 
 
 def _order_total(prices: dict[str, Any], fallback: Any = None) -> Decimal:
-    explicit = prices.get("buyerTotal") or prices.get("buyerItemsTotal") or fallback
-    if explicit is not None:
-        return _decimal(explicit)
-    return _decimal(prices.get("payment")) + _decimal(prices.get("cashback"))
+    # Business orders split the seller's gross merchandise amount between the
+    # buyer payment, Plus points and Yandex Market compensation for discounts.
+    # The seller cabinet shows their sum before marketplace commissions.
+    components = ("payment", "cashback", "subsidy")
+    if any(prices.get(component) is not None for component in components):
+        return sum((_decimal(prices.get(component)) for component in components), Decimal("0"))
+    return _decimal(prices.get("buyerTotal") or prices.get("buyerItemsTotal") or fallback)
 
 
 class YandexMarketOrderService:
@@ -172,7 +175,14 @@ class YandexMarketOrderService:
                 row.payment_type = item.get("paymentType")
                 row.payment_method = item.get("paymentMethod")
                 row.items_count = sum(int(product.get("count") or 0) for product in order_items if isinstance(product, dict))
-                total = prices.get("buyerTotal") or prices.get("buyerItemsTotal") or prices.get("payment") or item.get("total")
+                total = (
+                    prices.get("buyerTotal")
+                    or prices.get("buyerItemsTotal")
+                    or prices.get("payment")
+                    or prices.get("cashback")
+                    or prices.get("subsidy")
+                    or item.get("total")
+                )
                 row.total_amount = _order_total(prices, item.get("total"))
                 row.currency = (
                     total.get("currencyId") or total.get("currency")

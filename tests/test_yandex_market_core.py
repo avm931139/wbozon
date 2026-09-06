@@ -133,6 +133,7 @@ def test_identity_catalog_and_orders_are_persisted(monkeypatch):
                 "prices": {
                     "payment": {"value": 1900, "currencyId": "RUR"},
                     "cashback": {"value": 90, "currencyId": "RUR"},
+                    "subsidy": {"value": 500, "currencyId": "RUR"},
                 },
                 "items": [{
                     "id": 9,
@@ -167,7 +168,7 @@ def test_identity_catalog_and_orders_are_persisted(monkeypatch):
         assert session.query(YandexMarketOffer).one().name == "Товар"
         assert session.query(YandexMarketCampaignOffer).one().status == "PUBLISHED"
         assert session.query(YandexMarketOrder).one().items_count == 2
-        assert session.query(YandexMarketOrder).one().total_amount == 1990
+        assert session.query(YandexMarketOrder).one().total_amount == 2490
         assert session.query(YandexMarketOrderItem).one().offer_id == "sku-1"
 
 

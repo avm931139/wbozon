@@ -140,7 +140,7 @@ class TelegramReportService:
         amount = sum((Decimal(row.total_amount or 0) for row in rows), Decimal("0"))
         return "\n".join([
             "ЯНДЕКС МАРКЕТ · СЕГОДНЯ",
-            f"Заказы: {len(rows)}; товаров: {units}; сумма: {_money(amount)}.",
+            f"Заказы: {len(rows)}; товаров: {units}; товарная сумма до комиссий: {_money(amount)}.",
             f"Товары по модели: FBY {fby} / FBS {fbs}.",
             f"Статусы: доставлено {delivered}, отменено {cancelled}, возвратов {returned}.",
             self._task_run_line(run),
