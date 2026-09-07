@@ -50,9 +50,13 @@ def _decimal(value: Any) -> Decimal:
         return Decimal(0)
 
 
-def _source_hash(posting_number: str, row: dict[str, Any]) -> str:
+def _source_hash(posting_number: str, row: dict[str, Any], occurrence: int = 0) -> str:
     canonical = json.dumps(
-        {"posting_number": posting_number, "accrual": row},
+        {
+            "posting_number": posting_number,
+            "accrual": row,
+            "occurrence": occurrence,
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -211,9 +215,19 @@ class OzonFinanceSyncService:
                     session.query(OzonFinancePostingAccrual).filter_by(
                         posting_number=posting_number
                     ).delete(synchronize_session=False)
+                    occurrences: dict[str, int] = {}
                     for item in accruals:
                         if not isinstance(item, dict) or item.get("type_id") is None:
                             continue
+                        canonical = json.dumps(
+                            item,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            default=str,
+                        )
+                        occurrence = occurrences.get(canonical, 0)
+                        occurrences[canonical] = occurrence + 1
                         type_id = int(item["type_id"])
                         if session.get(OzonFinanceAccrualType, type_id) is None:
                             session.add(OzonFinanceAccrualType(
@@ -227,7 +241,7 @@ class OzonFinanceSyncService:
                         accrued = item.get("accrued") or {}
                         seller_price = item.get("seller_price")
                         session.add(OzonFinancePostingAccrual(
-                            source_hash=_source_hash(posting_number, item),
+                            source_hash=_source_hash(posting_number, item, occurrence),
                             posting_number=posting_number,
                             accrual_date=_date(item.get("accrual_date")),
                             type_id=type_id,

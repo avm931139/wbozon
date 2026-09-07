@@ -58,16 +58,17 @@ class FinanceAPI:
 
     def accruals_by_postings(self, posting_numbers):
         assert posting_numbers == ["123-1-1"]
+        duplicate = {
+            "accrual_date": "2026-09-01",
+            "type_id": 10,
+            "sku": 9001,
+            "quantity": 2,
+            "seller_price": {"amount": "500", "currency": "RUB"},
+            "accrued": {"amount": "-149.50", "currency": "RUB"},
+        }
         return [{
             "posting_number": "123-1-1",
-            "accruals": [{
-                "accrual_date": "2026-09-01",
-                "type_id": 10,
-                "sku": 9001,
-                "quantity": 2,
-                "seller_price": {"amount": "500", "currency": "RUB"},
-                "accrued": {"amount": "-149.50", "currency": "RUB"},
-            }],
+            "accruals": [duplicate, dict(duplicate)],
         }]
 
 
@@ -87,21 +88,23 @@ def test_finance_sync_persists_daily_types_and_posting_details():
     assert result == {
         "types": 1,
         "daily": 1,
-        "postings": {"requested": 1, "returned": 1, "rows": 1, "batches": 1},
+        "postings": {"requested": 1, "returned": 1, "rows": 2, "batches": 1},
     }
     with sessions() as session:
         daily = session.query(OzonFinanceAccrual).one()
         assert daily.posting_number == "123-1-1"
         assert str(daily.amount) == "850.500000"
         assert session.get(OzonFinanceAccrualType, 10).name == "Delivery"
-        detail = session.query(OzonFinancePostingAccrual).one()
-        assert detail.sku == 9001
-        assert str(detail.accrued) == "-149.500000"
+        details = session.query(OzonFinancePostingAccrual).all()
+        assert len(details) == 2
+        assert {detail.sku for detail in details} == {9001}
+        assert {str(detail.accrued) for detail in details} == {"-149.500000"}
+        assert details[0].source_hash != details[1].source_hash
 
     repeated = service.sync_all()
-    assert repeated["postings"]["rows"] == 1
+    assert repeated["postings"]["rows"] == 2
     with sessions() as session:
-        assert session.query(OzonFinancePostingAccrual).count() == 1
+        assert session.query(OzonFinancePostingAccrual).count() == 2
 
 
 def test_finance_sync_retries_rate_limit_and_ignores_non_posting_unit_numbers():
