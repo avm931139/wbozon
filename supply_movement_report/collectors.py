@@ -162,7 +162,7 @@ def ozon_returns(_session: Any, today: date) -> list[dict[str, Any]]:
 def yandex_movements(_session: Any, _today: date) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     client = YandexMarketClient(); start = date.fromisoformat(YANDEX_MARKET_HISTORY_FROM)
     supplies, returns = [], []
-    campaigns = [int(x.strip()) for x in (YANDEX_MARKET_CAMPAIGN_IDS or "").split(",") if x.strip()]
+    campaigns = [int(value) for value in YANDEX_MARKET_CAMPAIGN_IDS]
     for campaign_id in campaigns:
         token = None
         while True:
