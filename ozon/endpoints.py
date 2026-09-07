@@ -28,6 +28,12 @@ class OzonAccountingEndpoints:
     CASH_FLOW = "/v1/finance/cash-flow-statement/list"
 
 
+class OzonFinanceEndpoints:
+    ACCRUAL_BY_DAY = "/v1/finance/accrual/by-day"
+    ACCRUAL_POSTINGS = "/v1/finance/accrual/postings"
+    ACCRUAL_TYPES = "/v1/finance/accrual/types"
+
+
 class OzonSupplyReconciliationEndpoints:
     BUNDLE = "/v1/supply-order/bundle"
     ACT_SUMMARY = "/v1/supply-order/act/summary/get"

@@ -213,28 +213,14 @@ class OzonOverviewService:
                 self.sleeper(self.daily_sales_rate_limit_backoff_seconds * (2**attempt))
         return []
 
-    def sync_finances(self) -> int:
-        start = self._incremental_start(OzonFinanceAccrual.accrual_date)
-        end = self.today()
-        count = 0; cursor = start
-        now = datetime.now(timezone.utc)
-        with SessionLocal() as session:
-            while cursor <= end:
-                chunk_end = min(end, cursor + timedelta(days=30))
-                for item in self.finances.accruals_by_day(cursor, chunk_end):
-                    day = _date(item.get("date") or item.get("accrual_date"))
-                    if day is None: continue
-                    operation_id = _finance_operation_id(item)
-                    kind = str(item.get("accrual_type") or item.get("type") or item.get("accrued_category") or "unknown")
-                    row = session.query(OzonFinanceAccrual).filter_by(accrual_date=day, operation_id=operation_id, accrual_type=kind).one_or_none()
-                    if row is None: row = OzonFinanceAccrual(accrual_date=day, operation_id=operation_id, accrual_type=kind, raw_data=item, fetched_at=now); session.add(row)
-                    posting = item.get("posting") or {}; total = item.get("amount", item.get("total_amount", 0))
-                    row.accrual_name = item.get("accrual_name") or item.get("type_name"); row.posting_number = posting.get("posting_number") or item.get("posting_number")
-                    row.amount = _decimal(total); row.currency = total.get("currency") if isinstance(total, dict) else item.get("currency")
-                    row.raw_data = item; row.fetched_at = now; count += 1
-                cursor = chunk_end + timedelta(days=1)
-            session.commit()
-        return count
+    def sync_finances(self) -> dict[str, Any]:
+        from ozon.services.finance_service import OzonFinanceSyncService
+
+        return OzonFinanceSyncService(
+            api=self.finances,
+            history_from=self.history_from,
+            today=self.today,
+        ).sync_all()
 
     def _incremental_start(self, column: Any) -> date:
         with SessionLocal() as session: latest = session.query(func.max(column)).scalar()

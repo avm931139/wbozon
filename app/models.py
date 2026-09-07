@@ -1932,6 +1932,33 @@ class OzonFinanceAccrual(Base):
     fetched_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class OzonFinanceAccrualType(Base):
+    __tablename__ = "ozon_finance_accrual_types"
+
+    type_id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class OzonFinancePostingAccrual(Base):
+    __tablename__ = "ozon_finance_posting_accruals"
+
+    id = Column(Integer, primary_key=True)
+    source_hash = Column(String(64), nullable=False, unique=True, index=True)
+    posting_number = Column(String, nullable=False, index=True)
+    accrual_date = Column(Date, nullable=True, index=True)
+    type_id = Column(Integer, ForeignKey("ozon_finance_accrual_types.type_id"), nullable=False, index=True)
+    sku = Column(BigInteger, nullable=True, index=True)
+    quantity = Column(Integer, nullable=True)
+    seller_price = Column(Numeric(20, 6), nullable=True)
+    accrued = Column(Numeric(20, 6), nullable=False, default=0)
+    currency = Column(String(10), nullable=True)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class OzonAccountingReportRequest(Base):
     __tablename__ = "ozon_accounting_report_requests"
     __table_args__ = (

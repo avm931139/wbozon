@@ -195,8 +195,8 @@ commit `1953152` от 19 августа 2026 года. Канонический 
 ### Прочие методы (`BetaMethod`, 18)
 - `POST /v1/analytics/manage/stocks` — Управление остатками
 - `POST /v1/finance/accrual/by-day` — Получить начисления за день — **РЕАЛИЗОВАНО**
-- `POST /v1/finance/accrual/postings` — Получить начисления по отправлениям
-- `POST /v1/finance/accrual/types` — Получить справочник начислений
+- `POST /v1/finance/accrual/postings` — Получить начисления по отправлениям — **РЕАЛИЗОВАНО**
+- `POST /v1/finance/accrual/types` — Получить справочник начислений — **РЕАЛИЗОВАНО**
 - `POST /v1/finance/balance` — Получить отчёт о балансе — **РЕАЛИЗОВАНО**
 - `POST /v1/posting/fbp/get` — Получить информацию об отправлении по идентификатору
 - `POST /v1/product/stairway-discount/by-quantity/get` — Получить информацию о скидке от количества

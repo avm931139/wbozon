@@ -54,6 +54,8 @@ OZON_SUPPLY_RECONCILIATION_RATE_LIMIT_RETRIES=4
 OZON_SUPPLY_RECONCILIATION_RATE_LIMIT_BACKOFF_SECONDS=30
 OZON_TIMEZONE=Europe/Moscow
 OZON_REQUIRED_TASKS=products,orders,supplies,daily_sales,finances,ads
+OZON_FINANCE_POSTING_BATCH_LIMIT=25
+OZON_FINANCE_POSTING_REQUEST_PAUSE_SECONDS=0.25
 OZON_ACCOUNTING_STORAGE_DIR=data/ozon/accounting
 OZON_ACCOUNTING_HISTORY_FROM=2026-01-01
 OZON_ACCOUNTING_DOWNLOAD_LIMIT=50
@@ -93,6 +95,20 @@ python -m ozon --task finances
 python -m ozon --task documents
 python -m ozon --task ads
 ```
+
+Задание `finances` использует новый beta-контур начислений Ozon:
+
+- `/v1/finance/accrual/by-day` — ежедневный полный журнал;
+- `/v1/finance/accrual/types` — справочник названий начислений;
+- `/v1/finance/accrual/postings` — детализация по отправлениям партиями до 200.
+
+Сводные начисления сохраняются в `ozon_finance_accruals`, справочник — в
+`ozon_finance_accrual_types`, детализация SKU/услуг — в
+`ozon_finance_posting_accruals`. Поле `unit_number` из дневного метода сохраняется
+как `posting_number` только для категории `POSTING`. Первый запуск постепенно
+дозаполняет историю, но делает не более `OZON_FINANCE_POSTING_BATCH_LIMIT` запросов;
+последующие запуски повторно обновляют отправления из свежего дневного окна.
+Исходный JSON хранится во всех таблицах, поскольку методы пока имеют статус beta.
 
 В production рекомендуется запускать отдельные задания через файлы из
 [`deploy/systemd`](../deploy/systemd/README.md). Старые `--once` и постоянный `python -m ozon` сохранены для
