@@ -8,6 +8,7 @@ import re
 import tempfile
 import zipfile
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -145,7 +146,13 @@ class OzonAccountingStorage:
         self.root = Path(root).expanduser().resolve()
         self.max_file_bytes = max_file_bytes
 
-    def save(self, report_type: str, code: str, downloaded: DownloadedReport) -> StoredOzonReport:
+    def save(
+        self,
+        report_type: str,
+        code: str,
+        downloaded: DownloadedReport,
+        period_start: date | None = None,
+    ) -> StoredOzonReport:
         content = downloaded.content
         if not content:
             raise ValueError("Ozon report file is empty")
@@ -161,7 +168,8 @@ class OzonAccountingStorage:
         if not _EXTENSION.fullmatch(extension):
             extension = self._detect_extension(content)
         self._validate_content(extension, content)
-        file_name = f"{stem}.{extension}"
+        prefix = f"{period_start:%Y-%m}_" if period_start else ""
+        file_name = f"{prefix}{stem}.{extension}"
 
         directory = self.root / safe_type / safe_code
         directory.mkdir(parents=True, exist_ok=True)
@@ -274,6 +282,47 @@ class OzonAccountingStorage:
             file_name=target.name,
             extension="xlsx",
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            size=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+        )
+
+    def create_period_copy(
+        self,
+        relative_path: str,
+        period_start: date,
+        *,
+        content_type: str | None = None,
+    ) -> StoredOzonReport:
+        """Create a month-prefixed copy while retaining the previously stored file."""
+        source = (self.root / relative_path).resolve(strict=True)
+        if (self.root != source and self.root not in source.parents) or not source.is_file():
+            raise ValueError("Ozon report path escapes storage directory")
+        prefix = f"{period_start:%Y-%m}_"
+        if source.name.startswith(prefix):
+            target = source
+        else:
+            target = source.with_name(prefix + source.name)
+            descriptor, temporary_name = tempfile.mkstemp(prefix=".ozon-period-", dir=source.parent)
+            try:
+                with source.open("rb") as source_handle, os.fdopen(descriptor, "wb") as target_handle:
+                    for chunk in iter(lambda: source_handle.read(1024 * 1024), b""):
+                        target_handle.write(chunk)
+                    target_handle.flush()
+                    os.fsync(target_handle.fileno())
+                os.replace(temporary_name, target)
+            except BaseException:
+                try:
+                    os.unlink(temporary_name)
+                except FileNotFoundError:
+                    pass
+                raise
+        content = target.read_bytes()
+        extension = target.suffix.lower().lstrip(".")
+        return StoredOzonReport(
+            relative_path=target.relative_to(self.root).as_posix(),
+            file_name=target.name,
+            extension=extension,
+            content_type=content_type,
             size=len(content),
             sha256=hashlib.sha256(content).hexdigest(),
         )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from io import BytesIO
 from pathlib import Path
 import zipfile
@@ -24,7 +24,7 @@ from ozon.accounting_storage import (
     OzonReportDownloader,
 )
 from ozon.exceptions import OzonHTTPError
-from ozon.services.accounting_service import OzonAccountingService
+from ozon.services.accounting_service import FINANCE_REPORT_TYPES, OzonAccountingService
 from ozon.services.sync_service import OzonSyncService
 
 
@@ -200,6 +200,24 @@ def test_accounting_storage_creates_readable_xlsx_and_preserves_csv(tmp_path):
     assert converted.extension == "xlsx"
 
 
+def test_accounting_storage_prefixes_month_and_keeps_previous_file(tmp_path):
+    storage = OzonAccountingStorage(tmp_path)
+    original = storage.save(
+        "finance_realization_posting",
+        "report-code",
+        DownloadedReport(
+            content=_xlsx_bytes(),
+            file_name="report.xlsx",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            source_url="https://files.ozone.ru/report.xlsx",
+        ),
+    )
+    named = storage.create_period_copy(original.relative_path, date(2026, 7, 1))
+    assert named.file_name == "2026-07_report.xlsx"
+    assert Path(tmp_path, original.relative_path).is_file()
+    assert Path(tmp_path, named.relative_path).is_file()
+
+
 class FakeAccountingAPI:
     def __init__(self):
         self.created = []
@@ -336,6 +354,44 @@ def test_missing_monthly_documents_are_persisted_as_normal_absence(tmp_path):
             "COMPENSATION_REPORT",
             "DECOMPENSATION_REPORT",
         }
+
+
+def test_failed_monthly_report_request_is_retried(tmp_path):
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        for report_type in FINANCE_REPORT_TYPES:
+            session.add(OzonAccountingReportRequest(
+                report_type=report_type,
+                period_start=date(2026, 1, 1),
+                period_end=date(2026, 1, 31),
+                report_code=f"old:{report_type}",
+                status="failed" if report_type == "REALIZATION_POSTING_REPORT" else "success",
+                raw_data={},
+                requested_at=now,
+                updated_at=now,
+            ))
+        session.commit()
+    api = FakeAccountingAPI()
+    service = OzonAccountingService(
+        api=api,
+        storage=OzonAccountingStorage(tmp_path),
+        session_factory=session_factory,
+        history_from=date(2026, 1, 1),
+        today=lambda: date(2026, 2, 1),
+    )
+    result = service.request_missing_reports()
+    assert result["requested"] == 1
+    assert result["skipped"] == len(FINANCE_REPORT_TYPES) - 1
+    assert api.created == ["REALIZATION_POSTING_REPORT:2026-01"]
+    with session_factory() as session:
+        retried = session.query(OzonAccountingReportRequest).filter_by(
+            report_type="REALIZATION_POSTING_REPORT"
+        ).one()
+        assert retried.status == "requested"
+        assert retried.report_code == "REALIZATION_POSTING_REPORT:2026-01"
 
     repeated = service.request_missing_reports()
     assert repeated == {

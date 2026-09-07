@@ -104,11 +104,11 @@ class OzonAccountingService:
         for period_start, period_end in periods:
             for report_type in sorted(FINANCE_REPORT_TYPES):
                 with self.session_factory() as session:
-                    exists = session.query(OzonAccountingReportRequest.id).filter_by(
+                    existing = session.query(OzonAccountingReportRequest).filter_by(
                         report_type=report_type,
                         period_start=period_start,
-                    ).first()
-                if exists:
+                    ).one_or_none()
+                if existing is not None and existing.status != "failed":
                     skipped += 1
                     continue
                 try:
@@ -119,35 +119,62 @@ class OzonAccountingService:
                         raise ValueError("Ozon report response has no code")
                     now = datetime.now(timezone.utc)
                     with self.session_factory() as session:
-                        session.add(OzonAccountingReportRequest(
+                        row = session.query(OzonAccountingReportRequest).filter_by(
                             report_type=report_type,
                             period_start=period_start,
-                            period_end=period_end,
-                            report_code=code,
-                            status="requested",
-                            raw_data=payload,
-                            requested_at=now,
-                            updated_at=now,
-                        ))
+                        ).one_or_none()
+                        if row is None:
+                            row = OzonAccountingReportRequest(
+                                report_type=report_type,
+                                period_start=period_start,
+                                period_end=period_end,
+                                report_code=code,
+                                status="requested",
+                                raw_data=payload,
+                                requested_at=now,
+                                updated_at=now,
+                            )
+                            session.add(row)
+                        else:
+                            row.period_end = period_end
+                            row.report_code = code
+                            row.status = "requested"
+                            row.raw_data = payload
+                            row.requested_at = now
+                            row.updated_at = now
                         session.commit()
                     requested += 1
                 except Exception as exc:
                     if _is_not_found(exc):
                         now = datetime.now(timezone.utc)
                         with self.session_factory() as session:
-                            session.add(OzonAccountingReportRequest(
+                            row = session.query(OzonAccountingReportRequest).filter_by(
                                 report_type=report_type,
                                 period_start=period_start,
-                                period_end=period_end,
-                                report_code=f"NOT_FOUND:{report_type}:{period_start:%Y-%m}",
-                                status="not_found",
-                                raw_data={
-                                    "available": False,
-                                    "reason": str(exc),
-                                },
-                                requested_at=now,
-                                updated_at=now,
-                            ))
+                            ).one_or_none()
+                            values = {
+                                "available": False,
+                                "reason": str(exc),
+                            }
+                            if row is None:
+                                row = OzonAccountingReportRequest(
+                                    report_type=report_type,
+                                    period_start=period_start,
+                                    period_end=period_end,
+                                    report_code=f"NOT_FOUND:{report_type}:{period_start:%Y-%m}",
+                                    status="not_found",
+                                    raw_data=values,
+                                    requested_at=now,
+                                    updated_at=now,
+                                )
+                                session.add(row)
+                            else:
+                                row.period_end = period_end
+                                row.report_code = f"NOT_FOUND:{report_type}:{period_start:%Y-%m}"
+                                row.status = "not_found"
+                                row.raw_data = values
+                                row.requested_at = now
+                                row.updated_at = now
                             session.commit()
                         unavailable += 1
                         logger.info(
@@ -245,7 +272,11 @@ class OzonAccountingService:
                 OzonAccountingReport.status == "success",
                 OzonAccountingReport.file_url.is_not(None),
             ).order_by(OzonAccountingReport.report_created_at.desc()).all()
-            pending: list[tuple[int, str, str, str]] = []
+            requests_by_code = {
+                row.report_code: row.period_start
+                for row in session.query(OzonAccountingReportRequest).all()
+            }
+            pending: list[tuple[int, str, str, str, date | None]] = []
             for report in reports:
                 if report.file and self.storage.verify(
                     report.file.local_path,
@@ -253,15 +284,15 @@ class OzonAccountingService:
                     sha256=report.file.file_sha256,
                 ):
                     continue
-                pending.append((report.id, report.report_type, report.code, report.file_url))
+                pending.append((report.id, report.report_type, report.code, report.file_url, requests_by_code.get(report.code)))
             pending = pending[:limit]
 
         downloaded = 0
         errors: list[str] = []
-        for report_id, report_type, code, url in pending:
+        for report_id, report_type, code, url, period_start in pending:
             try:
                 payload = self.downloader.download(url)
-                stored = self.storage.save(report_type, code, payload)
+                stored = self.storage.save(report_type, code, payload, period_start)
                 if stored.extension == "csv":
                     stored = self.storage.create_excel_copy(stored.relative_path)
                 with self.session_factory() as session:
@@ -321,6 +352,50 @@ class OzonAccountingService:
                 logger.exception("Ozon accounting CSV conversion failed: %s", error)
                 errors.append(error)
         return {"selected": len(file_ids), "converted": converted, "failed": len(errors), "errors": errors}
+
+    def add_period_to_file_names(self) -> dict[str, Any]:
+        """Give tracked accounting files a visible YYYY-MM prefix without deleting old files."""
+        with self.session_factory() as session:
+            rows = session.query(
+                OzonAccountingReportFile.id,
+                OzonAccountingReportRequest.period_start,
+            ).join(
+                OzonAccountingReport,
+                OzonAccountingReport.id == OzonAccountingReportFile.report_id,
+            ).join(
+                OzonAccountingReportRequest,
+                OzonAccountingReportRequest.report_code == OzonAccountingReport.code,
+            ).all()
+        renamed = 0
+        skipped = 0
+        errors: list[str] = []
+        for file_id, period_start in rows:
+            try:
+                with self.session_factory() as session:
+                    row = session.get(OzonAccountingReportFile, file_id)
+                    if row is None:
+                        continue
+                    if row.file_name.startswith(f"{period_start:%Y-%m}_"):
+                        skipped += 1
+                        continue
+                    stored = self.storage.create_period_copy(
+                        row.local_path,
+                        period_start,
+                        content_type=row.content_type,
+                    )
+                    row.local_path = stored.relative_path
+                    row.file_name = stored.file_name
+                    row.file_extension = stored.extension
+                    row.file_size = stored.size
+                    row.file_sha256 = stored.sha256
+                    row.downloaded_at = datetime.now(timezone.utc)
+                    session.commit()
+                renamed += 1
+            except Exception as exc:
+                error = f"file_id={file_id}: {type(exc).__name__}: {exc}"
+                logger.exception("Ozon accounting period filename failed: %s", error)
+                errors.append(error)
+        return {"selected": len(rows), "renamed": renamed, "skipped": skipped, "failed": len(errors), "errors": errors}
 
     def sync_json_snapshots(self) -> dict[str, Any]:
         callbacks: list[tuple[str, date, date, Callable[[], dict[str, Any]]]] = []
@@ -402,6 +477,7 @@ class OzonAccountingService:
             ("registry", self.sync_report_registry),
             ("files", lambda: self.download_ready_files(download_limit)),
             ("excel_files", self.normalize_csv_files),
+            ("named_files", self.add_period_to_file_names),
             ("snapshots", self.sync_json_snapshots),
         )
         for name, callback in steps:
