@@ -85,9 +85,21 @@ class DashboardService:
                 coalesce(sum(retail_amount) FILTER (WHERE seller_operation_name='Продажа'),0)
                     - coalesce(sum(retail_amount) FILTER (WHERE seller_operation_name='Возврат'),0) finance_buyouts_amount
                 FROM wb_financial_sales_rows WHERE rr_date>=:b AND rr_date<:u""", b=begin, u=until),
-            "ozon": one("""SELECT coalesce(sum(amount) FILTER (WHERE amount>0 AND accrual_type<>'POSTING'),0) compensation,
-                abs(coalesce(sum(amount) FILTER (WHERE amount<0),0)) expenses
-                FROM ozon_finance_accruals WHERE accrual_date>=:b AND accrual_date<=:e""", b=begin, e=finish),
+            "ozon": one("""WITH ledger AS (
+                    SELECT count(*) rows,coalesce(sum(amount),0) net_accrual,
+                        coalesce(sum(amount) FILTER (WHERE accrual_type='NON_ITEM' AND amount>0),0) compensation
+                    FROM ozon_finance_accruals WHERE accrual_date>=:b AND accrual_date<=:e
+                ), sales AS (
+                    SELECT coalesce(sum(CASE WHEN p.seller_price<0 THEN -coalesce(p.quantity,0) ELSE coalesce(p.quantity,0) END),0) finance_buyouts,
+                        coalesce(sum(coalesce(p.seller_price,0)*coalesce(p.quantity,0)),0) finance_buyouts_amount
+                    FROM ozon_finance_posting_accruals p
+                    JOIN ozon_finance_accrual_types t ON t.type_id=p.type_id
+                    WHERE p.accrual_date>=:b AND p.accrual_date<=:e AND t.name='SaleCommission'
+                ) SELECT ledger.rows,sales.finance_buyouts,sales.finance_buyouts_amount,
+                    ledger.compensation,
+                    sales.finance_buyouts_amount+ledger.compensation revenue,
+                    sales.finance_buyouts_amount+ledger.compensation-ledger.net_accrual expenses
+                FROM ledger CROSS JOIN sales""", b=begin, e=finish),
             "yandex_market": one("""SELECT coalesce(sum(amount) FILTER (WHERE amount>0),0) revenue,
                 abs(coalesce(sum(amount) FILTER (WHERE amount<0),0)) expenses,count(*) rows
                 FROM yandex_market_finance_transactions WHERE transaction_at>=:b AND transaction_at<:u""", b=begin, u=until),
@@ -105,9 +117,15 @@ class DashboardService:
                     financial.cost_of_goods finance_cost_of_goods,financial.costed_units finance_costed_units
                 FROM operational CROSS JOIN financial""", b=begin, u=until),
             "ozon": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC),
-                sold AS (SELECT p->>'offer_id' offer_id,coalesce((p->>'quantity')::int,0) quantity FROM ozon_postings o CROSS JOIN LATERAL jsonb_array_elements(o.products::jsonb) p WHERE lower(o.status)='delivered' AND o.in_process_at>=:b AND o.in_process_at<:u)
-                SELECT coalesce(sum(s.quantity*coalesce(c.unit_cost,0)),0) cost_of_goods,coalesce(sum(s.quantity) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
-                FROM sold s LEFT JOIN marketplace_product_links l ON l.marketplace='ozon' AND l.active AND l.offer_id=s.offer_id LEFT JOIN c ON c.master_product_id=l.master_product_id""", b=begin, u=until),
+                sku_master AS (SELECT DISTINCT ON (p.sku) p.sku,l.master_product_id
+                    FROM ozon_products p JOIN marketplace_product_links l ON l.marketplace='ozon' AND l.active AND l.external_product_id=p.product_id::text
+                    WHERE p.sku IS NOT NULL ORDER BY p.sku,l.id),
+                sold AS (SELECT p.sku,CASE WHEN p.seller_price<0 THEN -coalesce(p.quantity,0) ELSE coalesce(p.quantity,0) END quantity
+                    FROM ozon_finance_posting_accruals p JOIN ozon_finance_accrual_types t ON t.type_id=p.type_id
+                    WHERE t.name='SaleCommission' AND p.accrual_date>=:b AND p.accrual_date<=:e)
+                SELECT coalesce(sum(s.quantity*coalesce(c.unit_cost,0)),0) cost_of_goods,
+                    coalesce(sum(s.quantity) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
+                FROM sold s LEFT JOIN sku_master m ON m.sku=s.sku LEFT JOIN c ON c.master_product_id=m.master_product_id""", b=begin, e=finish),
             "yandex_market": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC)
                 SELECT coalesce(sum(i.count*coalesce(c.unit_cost,0)),0) cost_of_goods,coalesce(sum(i.count) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
                 FROM yandex_market_order_items i JOIN yandex_market_orders o ON o.business_id=i.business_id AND o.order_id=i.order_id
@@ -129,6 +147,10 @@ class DashboardService:
             wb["buyouts_source"] = "financial_report"
         else:
             wb["buyouts_source"] = "operational_sales"
+        if "error" not in finances["ozon"] and finances["ozon"].get("rows", 0):
+            ozon["buyouts"] = finances["ozon"].get("finance_buyouts", 0)
+            ozon["buyouts_amount"] = finances["ozon"].get("finance_buyouts_amount", 0)
+            ozon["buyouts_source"] = "finance_accruals"
         for key, values in markets.items():
             self._complete(values, finances[key], costs[key])
         for item in (*markets.values(), *ads.values()):

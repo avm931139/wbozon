@@ -39,3 +39,18 @@ def test_dashboard_uses_historical_marketplace_order_sources():
     assert "wb_fbo_orders" in source
     assert "finance_buyouts" in source
     assert "OzonPosting" not in source
+
+
+def test_dashboard_uses_ozon_finance_accruals_for_buyouts_and_profit():
+    import inspect
+
+    source = inspect.getsource(DashboardService._period_metrics)
+    assert "t.name='SaleCommission'" in source
+    assert "finance_buyouts_amount" in source
+    assert "sales.finance_buyouts_amount+ledger.compensation-ledger.net_accrual expenses" in source
+    assert "p.seller_price<0" in source
+
+
+def test_dashboard_labels_ozon_advertising_without_calling_it_revenue():
+    assert "Рекламные кампании" in HTML
+    assert "Атрибутированная сумма заказов" in HTML

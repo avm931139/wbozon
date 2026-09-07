@@ -40,15 +40,21 @@ seven days with the preceding seven days). Labels are bilingual Russian/Chinese.
 Marketplace cards use these definitions:
 
 - orders and cancellations show units, product amount and cancellation rate;
-- purchased items are WB `sale` operations or Ozon/Yandex orders from the
-  selected cohort whose current status is delivered;
+- purchased Ozon items and their amount are reconstructed from financial
+  `SaleCommission` accrual details, including returns in the selected financial
+  period; WB and Yandex use their respective saved finance/operational sources;
 - revenue is purchased-item amount plus saved compensation;
 - marketplace expenses contain finance-ledger charges but not product cost;
 - profit is revenue minus marketplace expenses and latest imported unit cost;
 - stock value is current available quantity multiplied by that unit cost.
 
-WB calculations use detailed realization rows. Ozon calculations use daily
-finance accruals. Yandex Market calculations use the official payment ledger
+WB calculations use detailed realization rows. Ozon revenue is net sales and
+returns from posting accrual details plus `NON_ITEM` compensation; expenses are
+the difference between that revenue and the complete daily net accrual. This
+reproduces the Seller cabinet identity: sales and returns + compensation - all
+charges = total accrual. Ozon advertising spend remains a Performance API
+campaign metric, while attributed order amount is not labelled as accounting
+revenue. Yandex Market calculations use the official payment ledger
 (`united-netting`), where accruals are revenue and retentions are expenses.
 Until this ledger is synchronized, Yandex finance is deliberately returned as
 unavailable; order totals must not be presented as complete profit data.
