@@ -16,6 +16,9 @@ fi
 
 apt-get update
 apt-get install -y nginx apache2-utils
+# The package may auto-start its public placeholder site. Keep Nginx stopped
+# until the VPN-only virtual host below has been installed and validated.
+systemctl stop nginx.service || true
 
 install -d -m 700 /etc/nginx/ssl
 if [[ ! -s /etc/nginx/ssl/wbozon-dashboard.key || ! -s /etc/nginx/ssl/wbozon-dashboard.crt ]]; then
@@ -59,7 +62,8 @@ install -m 644 "${PROJECT_DIR}/deploy/systemd/wbozon-dashboard.service" \
 systemctl daemon-reload
 nginx -t
 systemctl enable --now wbozon-dashboard.service
-systemctl enable --now nginx.service
+systemctl enable nginx.service
+systemctl restart nginx.service
 
 curl --fail --silent http://127.0.0.1:17843/health
 echo
