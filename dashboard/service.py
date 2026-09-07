@@ -47,13 +47,20 @@ class DashboardService:
     def _period_metrics(self, db: Any, begin: date, finish: date) -> dict[str, Any]:
         until = finish + timedelta(days=1)
         one = lambda sql, **params: self._one(db, sql, **params)
-        wb = one("""SELECT count(*) orders,
+        wb = one("""WITH marketplace_orders AS (
+            SELECT srid,order_date,status,seller_price FROM wb_order_feed_orders WHERE is_mp IS TRUE
+            UNION ALL
+            SELECT srid,order_date,CASE WHEN is_cancel THEN 'cancel' ELSE 'active' END,
+                coalesce(finished_price,price_with_discount,total_price,0)
+            FROM wb_fbo_orders
+        ) SELECT count(*) orders,
             coalesce(sum(seller_price),0) orders_amount,
             count(*) FILTER (WHERE status='cancel') cancelled,
             coalesce(sum(seller_price) FILTER (WHERE status='cancel'),0) cancelled_amount,
             (SELECT count(*) FROM wb_operational_sales WHERE operation_type='sale' AND event_date>=:b AND event_date<:u) buyouts,
-            (SELECT coalesce(sum(finished_price),0) FROM wb_operational_sales WHERE operation_type='sale' AND event_date>=:b AND event_date<:u) buyouts_amount
-            FROM wb_order_feed_orders WHERE order_date>=:b AND order_date<:u""", b=begin, u=until)
+            (SELECT coalesce(sum(finished_price),0) FROM wb_operational_sales WHERE operation_type='sale' AND event_date>=:b AND event_date<:u) buyouts_amount,
+            (SELECT min(event_date) FROM wb_operational_sales) operational_from
+            FROM marketplace_orders WHERE order_date>=:b AND order_date<:u""", b=begin, u=until)
         ozon = one("""WITH postings AS (SELECT order_id,order_number,posting_number,status,
             coalesce((SELECT sum(coalesce((p->>'quantity')::int,0)) FROM jsonb_array_elements(products::jsonb) p),0) units,
             coalesce((SELECT sum(coalesce((CASE WHEN jsonb_typeof(p->'price')='object' THEN coalesce(p->'price'->>'amount',p->'price'->>'value') ELSE p->>'price' END)::numeric,0)*coalesce((p->>'quantity')::int,0)) FROM jsonb_array_elements(products::jsonb) p),0) amount
@@ -72,7 +79,11 @@ class DashboardService:
             FROM yandex_market_orders WHERE created_at>=:b AND created_at<:u""", b=begin, u=until)
         finances = {
             "wb": one("""SELECT coalesce(sum(additional_payment),0) compensation,
-                coalesce(sum(delivery_service+acquiring_fee+ppvz_sales_commission+penalty+rebill_logistic_cost+paid_storage+deduction+paid_acceptance),0) expenses
+                coalesce(sum(delivery_service+acquiring_fee+ppvz_sales_commission+penalty+rebill_logistic_cost+paid_storage+deduction+paid_acceptance),0) expenses,
+                coalesce(sum(quantity) FILTER (WHERE seller_operation_name='Продажа'),0)
+                    - coalesce(sum(quantity) FILTER (WHERE seller_operation_name='Возврат'),0) finance_buyouts,
+                coalesce(sum(retail_amount) FILTER (WHERE seller_operation_name='Продажа'),0)
+                    - coalesce(sum(retail_amount) FILTER (WHERE seller_operation_name='Возврат'),0) finance_buyouts_amount
                 FROM wb_financial_sales_rows WHERE rr_date>=:b AND rr_date<:u""", b=begin, u=until),
             "ozon": one("""SELECT coalesce(sum(amount) FILTER (WHERE amount>0 AND accrual_type<>'POSTING'),0) compensation,
                 abs(coalesce(sum(amount) FILTER (WHERE amount<0),0)) expenses
@@ -82,10 +93,17 @@ class DashboardService:
                 FROM yandex_market_finance_transactions WHERE transaction_at>=:b AND transaction_at<:u""", b=begin, u=until),
         }
         costs = {
-            "wb": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC)
-                SELECT coalesce(sum(coalesce(c.unit_cost,0)),0) cost_of_goods,count(*) FILTER (WHERE c.unit_cost IS NOT NULL) costed_units
-                FROM wb_operational_sales s LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=s.nm_id::text
-                LEFT JOIN c ON c.master_product_id=l.master_product_id WHERE s.operation_type='sale' AND s.event_date>=:b AND s.event_date<:u""", b=begin, u=until),
+            "wb": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC),
+                operational AS (SELECT coalesce(sum(coalesce(c.unit_cost,0)),0) cost_of_goods,count(*) FILTER (WHERE c.unit_cost IS NOT NULL) costed_units
+                    FROM wb_operational_sales s LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=s.nm_id::text
+                    LEFT JOIN c ON c.master_product_id=l.master_product_id WHERE s.operation_type='sale' AND s.event_date>=:b AND s.event_date<:u),
+                financial AS (SELECT coalesce(sum((CASE WHEN s.seller_operation_name='Возврат' THEN -s.quantity ELSE s.quantity END)*coalesce(c.unit_cost,0)) FILTER (WHERE s.seller_operation_name IN ('Продажа','Возврат')),0) cost_of_goods,
+                    coalesce(sum((CASE WHEN s.seller_operation_name='Возврат' THEN -s.quantity ELSE s.quantity END)) FILTER (WHERE s.seller_operation_name IN ('Продажа','Возврат') AND c.unit_cost IS NOT NULL),0) costed_units
+                    FROM wb_financial_sales_rows s LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=s.nm_id::text
+                    LEFT JOIN c ON c.master_product_id=l.master_product_id WHERE s.rr_date>=:b AND s.rr_date<:u)
+                SELECT operational.cost_of_goods,operational.costed_units,
+                    financial.cost_of_goods finance_cost_of_goods,financial.costed_units finance_costed_units
+                FROM operational CROSS JOIN financial""", b=begin, u=until),
             "ozon": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC),
                 sold AS (SELECT p->>'offer_id' offer_id,coalesce((p->>'quantity')::int,0) quantity FROM ozon_postings o CROSS JOIN LATERAL jsonb_array_elements(o.products::jsonb) p WHERE lower(o.status)='delivered' AND o.in_process_at>=:b AND o.in_process_at<:u)
                 SELECT coalesce(sum(s.quantity*coalesce(c.unit_cost,0)),0) cost_of_goods,coalesce(sum(s.quantity) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
@@ -102,6 +120,15 @@ class DashboardService:
             "yandex_market": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(attributed_revenue),0) attributed_revenue FROM yandex_market_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
         }
         markets = {"wb": wb, "ozon": ozon, "yandex_market": yandex}
+        operational_from = wb.get("operational_from")
+        if operational_from is None or begin < operational_from.date():
+            wb["buyouts"] = finances["wb"].get("finance_buyouts", 0)
+            wb["buyouts_amount"] = finances["wb"].get("finance_buyouts_amount", 0)
+            costs["wb"]["cost_of_goods"] = costs["wb"].get("finance_cost_of_goods", 0)
+            costs["wb"]["costed_units"] = costs["wb"].get("finance_costed_units", 0)
+            wb["buyouts_source"] = "financial_report"
+        else:
+            wb["buyouts_source"] = "operational_sales"
         for key, values in markets.items():
             self._complete(values, finances[key], costs[key])
         for item in (*markets.values(), *ads.values()):
@@ -166,8 +193,11 @@ class DashboardService:
             series_result = self._one(db, """SELECT coalesce(json_agg(d ORDER BY report_day,marketplace),'[]'::json) data
                 FROM (SELECT report_day,marketplace,sum(orders) orders,sum(revenue) revenue FROM (
                     SELECT order_date::date report_day,'wb' marketplace,count(*) orders,
-                        coalesce(sum(seller_price),0) revenue
-                    FROM wb_order_feed_orders WHERE order_date>=:b AND order_date<:u GROUP BY 1
+                        coalesce(sum(seller_price),0) revenue FROM (
+                            SELECT order_date,seller_price FROM wb_order_feed_orders WHERE is_mp IS TRUE
+                            UNION ALL
+                            SELECT order_date,coalesce(finished_price,price_with_discount,total_price,0) FROM wb_fbo_orders
+                        ) wb_orders WHERE order_date>=:b AND order_date<:u GROUP BY 1
                     UNION ALL
                     SELECT in_process_at::date,'ozon',
                         count(DISTINCT coalesce(order_id::text,order_number,posting_number)),

@@ -30,3 +30,12 @@ def test_dashboard_labels_actual_buyouts_instead_of_financial_result():
     assert "每日订单" in HTML
     assert "bar.empty" in HTML
     assert "v.amount" in HTML
+
+
+def test_dashboard_uses_historical_marketplace_order_sources():
+    import inspect
+
+    source = inspect.getsource(DashboardService._period_metrics)
+    assert "wb_fbo_orders" in source
+    assert "finance_buyouts" in source
+    assert "OzonPosting" not in source
