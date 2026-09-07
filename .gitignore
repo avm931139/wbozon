@@ -9,6 +9,7 @@ logs/
 data/wb/documents/
 data/ozon/accounting/
 data/finance_reconciliation/
+data/supply_movement_reports/
 ~$*
 tree.txt
 tests/dialog gpt/
