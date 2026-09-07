@@ -32,3 +32,9 @@ recommended in production.
 
 The API endpoints are `/health` and `/api/summary?from=YYYY-MM-DD&to=YYYY-MM-DD`.
 The maximum selectable period is 730 days.
+
+The marketplace cards show purchased units and their product amount instead of
+the ambiguous "financial result" metric. WB purchases are `sale` operations
+dated by `event_date`. For Ozon and Yandex Market, the selected-period order
+cohort is counted only when its current status is `delivered`/`DELIVERED`.
+Returns and cancelled orders are excluded from this metric.

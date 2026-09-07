@@ -44,24 +44,34 @@ class DashboardService:
 
             wb = one("""SELECT count(*) FILTER (WHERE status <> 'cancel') orders,
                 coalesce(sum(seller_price) FILTER (WHERE status <> 'cancel'),0) revenue,
-                count(*) FILTER (WHERE status='cancel') cancelled
+                count(*) FILTER (WHERE status='cancel') cancelled,
+                (SELECT count(*) FROM wb_operational_sales
+                    WHERE operation_type='sale' AND event_date>=:b AND event_date<:u) buyouts,
+                (SELECT coalesce(sum(finished_price),0) FROM wb_operational_sales
+                    WHERE operation_type='sale' AND event_date>=:b AND event_date<:u) buyouts_amount
                 FROM wb_order_feed_orders WHERE order_date>=:b AND order_date<:u""", b=begin, u=until)
-            ozon = one("""SELECT count(DISTINCT coalesce(order_id::text,order_number,posting_number)) orders,
-                coalesce(sum((SELECT sum(
+            ozon = one("""WITH postings AS (
+                SELECT order_id,order_number,posting_number,status,
+                coalesce((SELECT sum(coalesce((p->>'quantity')::int,0))
+                    FROM jsonb_array_elements(products::jsonb) p),0) units,
+                coalesce((SELECT sum(
                     coalesce((CASE WHEN jsonb_typeof(p->'price')='object'
                         THEN coalesce(p->'price'->>'amount',p->'price'->>'value')
                         ELSE p->>'price' END)::numeric,0)
                     * coalesce((p->>'quantity')::int,0))
-                    FROM jsonb_array_elements(products::jsonb) p)),0) revenue,
+                    FROM jsonb_array_elements(products::jsonb) p),0) amount
+                FROM ozon_postings WHERE in_process_at>=:b AND in_process_at<:u
+                ) SELECT count(DISTINCT coalesce(order_id::text,order_number,posting_number)) orders,
+                coalesce(sum(amount),0) revenue,
                 count(*) FILTER (WHERE lower(status) IN ('cancelled','canceled')) cancelled
-                FROM ozon_postings WHERE in_process_at>=:b AND in_process_at<:u""", b=begin, u=until)
+                ,coalesce(sum(units) FILTER (WHERE lower(status)='delivered'),0) buyouts
+                ,coalesce(sum(amount) FILTER (WHERE lower(status)='delivered'),0) buyouts_amount
+                FROM postings""", b=begin, u=until)
             yandex = one("""SELECT count(*) orders,coalesce(sum(total_amount),0) revenue,
-                count(*) FILTER (WHERE status='CANCELLED') cancelled
+                count(*) FILTER (WHERE status='CANCELLED') cancelled,
+                coalesce(sum(items_count) FILTER (WHERE status='DELIVERED'),0) buyouts,
+                coalesce(sum(total_amount) FILTER (WHERE status='DELIVERED'),0) buyouts_amount
                 FROM yandex_market_orders WHERE created_at>=:b AND created_at<:u""", b=begin, u=until)
-            finance = {
-                "wb": one("SELECT coalesce(sum(for_pay),0) net FROM wb_financial_sales_rows WHERE rr_date>=:b AND rr_date<:u", b=begin, u=until),
-                "ozon": one("SELECT coalesce(sum(amount),0) net FROM ozon_finance_accruals WHERE accrual_date>=:b AND accrual_date<:u", b=begin, u=until),
-            }
             ads = {
                 "wb": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(order_sum),0) revenue FROM wb_advert_daily_stats WHERE stat_date>=:b AND stat_date<:u", b=begin, u=until),
                 "ozon": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(orders_money),0) revenue FROM ozon_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
@@ -87,7 +97,7 @@ class DashboardService:
                 UNION ALL SELECT created_at::date,'yandex_market',count(*),sum(total_amount) FROM yandex_market_orders WHERE created_at>=:b AND created_at<:u GROUP BY 1
                 ) source_rows GROUP BY report_day,marketplace
                 ) daily_rows""", b=begin, u=until)
-        for item in (wb, ozon, yandex, *finance.values(), *ads.values(), *stocks.values(), prices, *supplies.values()):
+        for item in (wb, ozon, yandex, *ads.values(), *stocks.values(), prices, *supplies.values()):
             for key, value in list(item.items()):
                 if isinstance(value, Decimal): item[key] = _number(value)
         raw_series = series_result.get("data", []) if "error" not in series_result else []
@@ -99,4 +109,4 @@ class DashboardService:
             }
             for row in raw_series
         ]
-        return {"period": {"from": begin.isoformat(), "to": finish.isoformat()}, "marketplaces": {"wb": wb, "ozon": ozon, "yandex_market": yandex}, "finance": finance, "ads": ads, "stocks": stocks, "prices": prices, "supplies": supplies, "series": series, "series_error": series_result.get("error")}
+        return {"period": {"from": begin.isoformat(), "to": finish.isoformat()}, "marketplaces": {"wb": wb, "ozon": ozon, "yandex_market": yandex}, "ads": ads, "stocks": stocks, "prices": prices, "supplies": supplies, "series": series, "series_error": series_result.get("error")}
