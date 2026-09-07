@@ -1466,6 +1466,26 @@ class YandexMarketAdDailyStat(Base):
     fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class YandexMarketFinanceTransaction(Base):
+    __tablename__ = "yandex_market_finance_transactions"
+
+    id = Column(Integer, primary_key=True)
+    source_hash = Column(String(64), nullable=False, unique=True, index=True)
+    business_id = Column(BigInteger, nullable=False, index=True)
+    partner_id = Column(BigInteger, nullable=True, index=True)
+    transaction_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    transaction_id = Column(String, nullable=True, index=True)
+    transaction_type = Column(String(30), nullable=False, index=True)
+    transaction_source = Column(String, nullable=True, index=True)
+    order_id = Column(BigInteger, nullable=True, index=True)
+    offer_id = Column(String, nullable=True, index=True)
+    product_or_service = Column(String, nullable=True)
+    quantity = Column(Integer, nullable=False, default=0)
+    amount = Column(Numeric(20, 6), nullable=False, default=0)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class MarketplacePriceSyncRun(Base):
     __tablename__ = "marketplace_price_sync_runs"
 

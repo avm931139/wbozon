@@ -187,7 +187,9 @@ YANDEX_MARKET_ORDER_LOOKBACK_DAYS = int(os.getenv("YANDEX_MARKET_ORDER_LOOKBACK_
 YANDEX_MARKET_TIMEZONE = os.getenv("YANDEX_MARKET_TIMEZONE", "Europe/Moscow")
 YANDEX_MARKET_REQUIRED_TASKS = tuple(
     value.strip()
-    for value in os.getenv("YANDEX_MARKET_REQUIRED_TASKS", "identity,catalog,orders").split(",")
+    for value in os.getenv(
+        "YANDEX_MARKET_REQUIRED_TASKS", "identity,catalog,orders,advertising,finances"
+    ).split(",")
     if value.strip()
 )
 YANDEX_MARKET_IDENTITY_MAX_AGE_SECONDS = int(
@@ -203,6 +205,9 @@ YANDEX_MARKET_AD_POLL_SECONDS = float(os.getenv("YANDEX_MARKET_AD_POLL_SECONDS",
 YANDEX_MARKET_AD_POLL_ATTEMPTS = int(os.getenv("YANDEX_MARKET_AD_POLL_ATTEMPTS", "36"))
 YANDEX_MARKET_AD_MAX_AGE_SECONDS = int(
     os.getenv("YANDEX_MARKET_AD_MAX_AGE_SECONDS", "7200")
+)
+YANDEX_MARKET_FINANCE_MAX_AGE_SECONDS = int(
+    os.getenv("YANDEX_MARKET_FINANCE_MAX_AGE_SECONDS", "7200")
 )
 
 # Independent marketplace price snapshots.

@@ -34,10 +34,11 @@ YANDEX_MARKET_TIMEOUT_SECONDS=10
 YANDEX_MARKET_HISTORY_FROM=2026-01-01
 YANDEX_MARKET_ORDER_LOOKBACK_DAYS=30
 YANDEX_MARKET_TIMEZONE=Europe/Moscow
-YANDEX_MARKET_REQUIRED_TASKS=identity,catalog,orders,advertising
+YANDEX_MARKET_REQUIRED_TASKS=identity,catalog,orders,advertising,finances
 YANDEX_MARKET_AD_POLL_SECONDS=5
 YANDEX_MARKET_AD_POLL_ATTEMPTS=36
 YANDEX_MARKET_AD_MAX_AGE_SECONDS=7200
+YANDEX_MARKET_FINANCE_MAX_AGE_SECONDS=7200
 ```
 
 Для нескольких магазинов перечислите campaign ID через запятую. `businessId`
@@ -54,6 +55,7 @@ python -m yandex_market --task identity
 python -m yandex_market --task catalog
 python -m yandex_market --task orders
 python -m yandex_market --task advertising
+python -m yandex_market --task finances
 python -m inventory_sync --marketplace yandex_market --once
 ```
 
@@ -63,6 +65,13 @@ python -m inventory_sync --marketplace yandex_market --once
 Асинхронные JSON-отчёты опрашиваются до готовности; ошибка задачи не откатывает
 заказы, каталог или остатки. Если `YANDEX_MARKET_BUSINESS_ID` не задан, задача
 использует единственный кабинет, ранее сохранённый заданием `identity`.
+
+`finances` каждый час формирует официальный JSON-отчёт по платежам
+`/v2/reports/united-netting/generate`, сохраняет каждое начисление положительной
+суммой, каждое удержание отрицательной и повторно сверяет последние семь дней.
+Первый запуск загружает историю с `YANDEX_MARKET_HISTORY_FROM` блоками не более
+90 дней. Данные находятся в `yandex_market_finance_transactions` и являются
+источником выручки и расходов Яндекс Маркета в дашборде.
 
 Первый запуск заказов загружает данные с `YANDEX_MARKET_HISTORY_FROM` отрезками
 не более 30 дней между границами запроса. `date_to` бизнес-метода фактически не
@@ -88,6 +97,7 @@ python -m inventory_sync --marketplace yandex_market --once
 - `yandex_market_order_items` — позиции заказов;
 - `yandex_market_sync_runs` — независимый журнал задач;
 - `yandex_market_ad_daily_stats` — дневные показатели рекламы по источнику и кампании;
+- `yandex_market_finance_transactions` — начисления и удержания отчёта по платежам;
 - `yandex_market_stocks` и `yandex_market_stock_snapshots` — остатки.
 
 Групповой почасовой Telegram-отчёт читает `yandex_market_orders` и показывает

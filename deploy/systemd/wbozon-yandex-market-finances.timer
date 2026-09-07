@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize Yandex Market finance transactions hourly
+
+[Timer]
+OnCalendar=*-*-* *:20:00
+RandomizedDelaySec=120
+Persistent=true
+Unit=wbozon-yandex-market@finances.service
+
+[Install]
+WantedBy=timers.target

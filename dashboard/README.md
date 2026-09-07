@@ -33,8 +33,22 @@ recommended in production.
 The API endpoints are `/health` and `/api/summary?from=YYYY-MM-DD&to=YYYY-MM-DD`.
 The maximum selectable period is 730 days.
 
-The marketplace cards show purchased units and their product amount instead of
-the ambiguous "financial result" metric. WB purchases are `sale` operations
-dated by `event_date`. For Ozon and Yandex Market, the selected-period order
-cohort is counted only when its current status is `delivered`/`DELIVERED`.
-Returns and cancelled orders are excluded from this metric.
+The dashboard opens on the current Moscow date. Every period metric is compared
+with the immediately preceding period of the same length (today with yesterday,
+seven days with the preceding seven days). Labels are bilingual Russian/Chinese.
+
+Marketplace cards use these definitions:
+
+- orders and cancellations show units, product amount and cancellation rate;
+- purchased items are WB `sale` operations or Ozon/Yandex orders from the
+  selected cohort whose current status is delivered;
+- revenue is purchased-item amount plus saved compensation;
+- marketplace expenses contain finance-ledger charges but not product cost;
+- profit is revenue minus marketplace expenses and latest imported unit cost;
+- stock value is current available quantity multiplied by that unit cost.
+
+WB calculations use detailed realization rows. Ozon calculations use daily
+finance accruals. Yandex Market calculations use the official payment ledger
+(`united-netting`), where accruals are revenue and retentions are expenses.
+Until this ledger is synchronized, Yandex finance is deliberately returned as
+unavailable; order totals must not be presented as complete profit data.
