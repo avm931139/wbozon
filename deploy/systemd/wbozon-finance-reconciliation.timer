@@ -1,0 +1,11 @@
+[Unit]
+Description=Check uploaded cabinet financial reports every ten minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/10:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=30
+Unit=wbozon-finance-reconciliation.service
+
+[Install]
+WantedBy=timers.target

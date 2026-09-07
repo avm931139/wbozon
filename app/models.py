@@ -2014,6 +2014,39 @@ class OzonAccountingSnapshot(Base):
     fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class FinanceReconciliationRun(Base):
+    """Result of comparing one immutable cabinet export with saved API finance data."""
+
+    __tablename__ = "finance_reconciliation_runs"
+    __table_args__ = (
+        UniqueConstraint("file_sha256", name="uq_finance_reconciliation_file_sha256"),
+        {"comment": "Сверки загруженных вручную финансовых отчётов с финансовыми данными API."},
+    )
+
+    id = Column(String(36), primary_key=True)
+    source_file = Column(String, nullable=False)
+    file_sha256 = Column(String(64), nullable=False, index=True)
+    marketplace = Column(String(30), nullable=True, index=True)
+    period_start = Column(Date, nullable=True, index=True)
+    period_end = Column(Date, nullable=True, index=True)
+    status = Column(String(30), nullable=False, index=True)
+    cabinet_rows = Column(Integer, nullable=False, default=0)
+    api_rows = Column(Integer, nullable=False, default=0)
+    matched_rows = Column(Integer, nullable=False, default=0)
+    missing_in_api = Column(Integer, nullable=False, default=0)
+    missing_in_cabinet = Column(Integer, nullable=False, default=0)
+    amount_mismatches = Column(Integer, nullable=False, default=0)
+    cabinet_total = Column(Numeric(20, 6), nullable=True)
+    api_total = Column(Numeric(20, 6), nullable=True)
+    difference = Column(Numeric(20, 6), nullable=True)
+    report_path = Column(String, nullable=True)
+    details = Column(JSON, nullable=False, default=dict)
+    error = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    telegram_message_id = Column(BigInteger, nullable=True)
+
+
 class OzonAdCampaign(Base):
     __tablename__ = "ozon_ad_campaigns"
     id = Column(Integer, primary_key=True)
