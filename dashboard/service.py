@@ -47,7 +47,12 @@ class DashboardService:
                 count(*) FILTER (WHERE status='cancel') cancelled
                 FROM wb_order_feed_orders WHERE order_date>=:b AND order_date<:u""", b=begin, u=until)
             ozon = one("""SELECT count(DISTINCT coalesce(order_id::text,order_number,posting_number)) orders,
-                coalesce(sum((SELECT sum(coalesce((p->>'price')::numeric,0)*coalesce((p->>'quantity')::int,0)) FROM jsonb_array_elements(products::jsonb) p)),0) revenue,
+                coalesce(sum((SELECT sum(
+                    coalesce((CASE WHEN jsonb_typeof(p->'price')='object'
+                        THEN coalesce(p->'price'->>'amount',p->'price'->>'value')
+                        ELSE p->>'price' END)::numeric,0)
+                    * coalesce((p->>'quantity')::int,0))
+                    FROM jsonb_array_elements(products::jsonb) p)),0) revenue,
                 count(*) FILTER (WHERE lower(status) IN ('cancelled','canceled')) cancelled
                 FROM ozon_postings WHERE in_process_at>=:b AND in_process_at<:u""", b=begin, u=until)
             yandex = one("""SELECT count(*) orders,coalesce(sum(total_amount),0) revenue,
@@ -75,13 +80,13 @@ class DashboardService:
                     (SELECT coalesce(sum(declared_quantity),0) FROM ozon_fbo_supply_declared_items) sent,
                     (SELECT coalesce(sum(fact_quantity),0) FROM ozon_fbo_supply_act_items WHERE upper(act_type)='ACCEPTANCE') accepted"""),
             }
-            series_result = one("""SELECT coalesce(json_agg(rows ORDER BY day,marketplace),'[]'::json) data FROM (
-                SELECT day,marketplace,sum(orders) orders,sum(revenue) revenue FROM (
-                SELECT order_date::date day,'wb' marketplace,count(*) orders,sum(seller_price) revenue FROM wb_order_feed_orders WHERE order_date>=:b AND order_date<:u AND status<>'cancel' GROUP BY 1
+            series_result = one("""SELECT coalesce(json_agg(daily_rows ORDER BY report_day,marketplace),'[]'::json) data FROM (
+                SELECT report_day,marketplace,sum(orders) orders,sum(revenue) revenue FROM (
+                SELECT order_date::date AS report_day,'wb' AS marketplace,count(*) orders,sum(seller_price) revenue FROM wb_order_feed_orders WHERE order_date>=:b AND order_date<:u AND status<>'cancel' GROUP BY 1
                 UNION ALL SELECT in_process_at::date,'ozon',count(DISTINCT coalesce(order_id::text,order_number,posting_number)),0 FROM ozon_postings WHERE in_process_at>=:b AND in_process_at<:u GROUP BY 1
                 UNION ALL SELECT created_at::date,'yandex_market',count(*),sum(total_amount) FROM yandex_market_orders WHERE created_at>=:b AND created_at<:u GROUP BY 1
-                ) x GROUP BY day,marketplace
-                ) rows""", b=begin, u=until)
+                ) source_rows GROUP BY report_day,marketplace
+                ) daily_rows""", b=begin, u=until)
         for item in (wb, ozon, yandex, *finance.values(), *ads.values(), *stocks.values(), prices, *supplies.values()):
             for key, value in list(item.items()):
                 if isinstance(value, Decimal): item[key] = _number(value)
@@ -89,7 +94,7 @@ class DashboardService:
         series = [
             {
                 **dict(row),
-                "day": str(row["day"]),
+                "day": str(row["report_day"]),
                 "revenue": _number(row["revenue"]),
             }
             for row in raw_series
