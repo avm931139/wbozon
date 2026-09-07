@@ -27,3 +27,6 @@ def test_dashboard_labels_actual_buyouts_instead_of_financial_result():
     assert "v.buyouts_amount" in HTML
     assert "收入" in HTML
     assert "利润" in HTML
+    assert "每日订单" in HTML
+    assert "bar.empty" in HTML
+    assert "v.amount" in HTML

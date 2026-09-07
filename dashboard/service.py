@@ -163,7 +163,25 @@ class DashboardService:
             stocks = self._stocks(db)
             previous_stocks = self._historical_stocks(db, previous_finish)
             prices = self._one(db, "SELECT count(*) active,count(*) FILTER (WHERE in_promotion IS TRUE) promotions,count(*) FILTER (WHERE coalesce(seller_price,customer_price,list_price,0)<=0) invalid FROM marketplace_current_prices WHERE active IS TRUE")
-            series_result = self._one(db, """SELECT coalesce(json_agg(d ORDER BY report_day,marketplace),'[]'::json) data FROM (SELECT report_day,marketplace,sum(orders) orders,sum(revenue) revenue FROM (SELECT order_date::date report_day,'wb' marketplace,count(*) orders,sum(seller_price) revenue FROM wb_order_feed_orders WHERE order_date>=:b AND order_date<:u AND status<>'cancel' GROUP BY 1 UNION ALL SELECT in_process_at::date,'ozon',count(DISTINCT coalesce(order_id::text,order_number,posting_number)),0 FROM ozon_postings WHERE in_process_at>=:b AND in_process_at<:u GROUP BY 1 UNION ALL SELECT created_at::date,'yandex_market',count(*),sum(total_amount) FROM yandex_market_orders WHERE created_at>=:b AND created_at<:u GROUP BY 1) x GROUP BY report_day,marketplace) d""", b=begin, u=until)
+            series_result = self._one(db, """SELECT coalesce(json_agg(d ORDER BY report_day,marketplace),'[]'::json) data
+                FROM (SELECT report_day,marketplace,sum(orders) orders,sum(revenue) revenue FROM (
+                    SELECT order_date::date report_day,'wb' marketplace,count(*) orders,
+                        coalesce(sum(seller_price),0) revenue
+                    FROM wb_order_feed_orders WHERE order_date>=:b AND order_date<:u GROUP BY 1
+                    UNION ALL
+                    SELECT in_process_at::date,'ozon',
+                        count(DISTINCT coalesce(order_id::text,order_number,posting_number)),
+                        coalesce(sum((SELECT sum(coalesce(
+                            (CASE WHEN jsonb_typeof(p->'price')='object'
+                                THEN coalesce(p->'price'->>'amount',p->'price'->>'value')
+                                ELSE p->>'price' END)::numeric,0)
+                            * coalesce((p->>'quantity')::int,0))
+                            FROM jsonb_array_elements(products::jsonb) p)),0)
+                    FROM ozon_postings WHERE in_process_at>=:b AND in_process_at<:u GROUP BY 1
+                    UNION ALL
+                    SELECT created_at::date,'yandex_market',count(*),coalesce(sum(total_amount),0)
+                    FROM yandex_market_orders WHERE created_at>=:b AND created_at<:u GROUP BY 1
+                ) x GROUP BY report_day,marketplace) d""", b=begin, u=until)
         self._convert(prices)
         raw = series_result.get("data", []) if "error" not in series_result else []
         series = [{**dict(row), "day": str(row["report_day"]), "revenue": _number(row["revenue"])} for row in raw]
