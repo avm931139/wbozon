@@ -68,11 +68,11 @@ def wb_supplies(session: Any) -> list[dict[str, Any]]:
     } for item, supply in rows]
 
 
-def wb_returns(session: Any, today: date) -> list[dict[str, Any]]:
+def wb_returns(session: Any, today: date, start_override: date | None = None) -> list[dict[str, Any]]:
     products = {row.nm_id: row for row in session.query(WBProduct).all()}
     client = WBClient(base_url=WB_ANALYTICS_BASE_URL)
     earliest = session.query(WBFbwSupply.create_date).order_by(WBFbwSupply.create_date).first()
-    start = earliest[0].date() if earliest and earliest[0] else date(today.year, 1, 1)
+    start = start_override or (earliest[0].date() if earliest and earliest[0] else date(today.year, 1, 1))
     result = []
     for chunk_start, chunk_end in _month_chunks(start, today):
         for attempt in range(3):

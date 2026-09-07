@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -36,6 +36,19 @@ def _cell(value: Any) -> Any:
 class SupplyMovementReportService:
     def __init__(self, *, session_factory: Callable[..., Any] = SessionLocal) -> None:
         self.session_factory = session_factory
+
+    @staticmethod
+    def _cached_rows(path: Path, sheet_name: str) -> list[dict[str, Any]]:
+        if not path.exists(): return []
+        workbook = load_workbook(path, read_only=True, data_only=True)
+        try:
+            if sheet_name not in workbook.sheetnames: return []
+            values = workbook[sheet_name].iter_rows(values_only=True)
+            headers = next(values, None)
+            if not headers or headers[0] == "Данных нет": return []
+            return [dict(zip(headers, row)) for row in values if any(value is not None for value in row)]
+        finally:
+            workbook.close()
 
     @staticmethod
     def _add_sheet(workbook: Workbook, title: str, rows: list[dict[str, Any]]) -> None:
@@ -74,9 +87,21 @@ class SupplyMovementReportService:
                 errors["Яндекс · Заявки"] = f"{type(exc).__name__}: {exc}"
                 data["Яндекс · Поставки"] = []; data["Яндекс · Возвраты"] = []
             if include_live_returns:
-                for key, callback in (("WB · Возвраты", lambda: wb_returns(session, today)), ("Ozon · Возвраты", lambda: ozon_returns(session, today))):
-                    try: data[key] = callback()
-                    except Exception as exc: errors[key] = f"{type(exc).__name__}: {exc}"; data[key] = []
+                cached_wb = self._cached_rows(DEFAULT_PATH.resolve(), "WB · Возвраты")
+                try:
+                    refresh_from = today.replace(day=1) if cached_wb else None
+                    fresh_wb = wb_returns(session, today, refresh_from)
+                    merged = {(row.get("Возврат/заказ"), row.get("ШК единицы")): row for row in cached_wb}
+                    merged.update({(row.get("Возврат/заказ"), row.get("ШК единицы")): row for row in fresh_wb})
+                    data["WB · Возвраты"] = list(merged.values())
+                except Exception as exc:
+                    if cached_wb:
+                        data["WB · Возвраты"] = cached_wb
+                        warnings["WB · Возвраты"] = f"Использован локальный кэш; обновление текущего месяца: {type(exc).__name__}: {exc}"
+                    else:
+                        errors["WB · Возвраты"] = f"{type(exc).__name__}: {exc}"; data["WB · Возвраты"] = []
+                try: data["Ozon · Возвраты"] = ozon_returns(session, today)
+                except Exception as exc: errors["Ozon · Возвраты"] = f"{type(exc).__name__}: {exc}"; data["Ozon · Возвраты"] = []
             else:
                 data["WB · Возвраты"] = []; data["Ozon · Возвраты"] = []
 
@@ -91,7 +116,7 @@ class SupplyMovementReportService:
             rows = data.get(key, [])
             planned = sum((row.get("Отправлено, шт.") or row.get("Отправлено/план, шт.") or row.get("К возврату, шт.") or row.get("Количество, шт.") or 0) for row in rows)
             actual = sum((row.get("Принято, шт.") or row.get("Принято/факт, шт.") or row.get("Фактически, шт.") or 0) for row in rows)
-            source_status = errors.get(key)
+            source_status = errors.get(key) or warnings.get(key)
             if not source_status and key.startswith("Яндекс"):
                 source_status = errors.get("Яндекс · Заявки") or warnings.get("Яндекс · Заявки")
             summary.append([key, len(rows), planned, actual, source_status or "OK"])
