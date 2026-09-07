@@ -20,7 +20,7 @@ def test_report_has_separate_marketplace_supply_and_return_sheets():
         patch("supply_movement_report.service.wb_returns", return_value=reverse),
         patch("supply_movement_report.service.ozon_supplies", return_value=supply),
         patch("supply_movement_report.service.ozon_returns", return_value=reverse),
-        patch("supply_movement_report.service.yandex_movements", return_value=(supply, reverse)),
+        patch("supply_movement_report.service.yandex_movements", return_value=(supply, reverse, [])),
     ):
         content, result = service.build()
 
@@ -41,7 +41,7 @@ def test_source_failure_does_not_block_other_marketplaces():
         patch("supply_movement_report.service.wb_returns", return_value=[]),
         patch("supply_movement_report.service.ozon_supplies", return_value=[]),
         patch("supply_movement_report.service.ozon_returns", return_value=[]),
-        patch("supply_movement_report.service.yandex_movements", return_value=([], [])),
+        patch("supply_movement_report.service.yandex_movements", return_value=([], [], [])),
     ):
         content, result = service.build()
 

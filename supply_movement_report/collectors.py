@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+import time
 from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
@@ -21,7 +22,9 @@ from app.models import (
 )
 from ozon.client import OzonClient
 from wb.client import WBClient
+from wb.exceptions import WBRateLimitError
 from yandex_market.client import YandexMarketClient
+from yandex_market.exceptions import YandexMarketHTTPError
 
 
 def _iso(value: Any) -> Any:
@@ -72,7 +75,13 @@ def wb_returns(session: Any, today: date) -> list[dict[str, Any]]:
     start = earliest[0].date() if earliest and earliest[0] else date(today.year, 1, 1)
     result = []
     for chunk_start, chunk_end in _month_chunks(start, today):
-        payload = client.get("/api/v1/analytics/goods-return", params={"dateFrom": chunk_start.isoformat(), "dateTo": chunk_end.isoformat()})
+        for attempt in range(3):
+            try:
+                payload = client.get("/api/v1/analytics/goods-return", params={"dateFrom": chunk_start.isoformat(), "dateTo": chunk_end.isoformat()})
+                break
+            except WBRateLimitError:
+                if attempt == 2: raise
+                time.sleep(65)
         for item in (payload.get("report", []) if isinstance(payload, dict) else []):
             product = products.get(item.get("nmId"))
             result.append({
@@ -159,15 +168,21 @@ def ozon_returns(_session: Any, today: date) -> list[dict[str, Any]]:
     return result
 
 
-def yandex_movements(_session: Any, _today: date) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def yandex_movements(_session: Any, _today: date) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     client = YandexMarketClient(); start = date.fromisoformat(YANDEX_MARKET_HISTORY_FROM)
-    supplies, returns = [], []
+    supplies, returns, warnings = [], [], []
     campaigns = [int(value) for value in YANDEX_MARKET_CAMPAIGN_IDS]
     for campaign_id in campaigns:
         token = None
         while True:
             body = {"requestDateFrom": f"{start.isoformat()}T00:00:00Z", "sorting": {"direction": "ASC", "attribute": "ID"}}
-            payload = client.post(f"/v2/campaigns/{campaign_id}/supply-requests", params={"pageToken": token} if token else None, json_body=body)
+            try:
+                payload = client.post(f"/v2/campaigns/{campaign_id}/supply-requests", params={"pageToken": token} if token else None, json_body=body)
+            except YandexMarketHTTPError as exc:
+                if "CAMPAIGN_TYPE_NOT_SUPPORTED" in str(exc):
+                    warnings.append(f"Кампания {campaign_id}: заявки поставок недоступны для этой модели (ожидается FBS)")
+                    break
+                raise
             section = payload.get("result") or {}
             for request in section.get("requests") or []:
                 identity = request.get("id") or {}; request_id = identity.get("id")
@@ -197,4 +212,4 @@ def yandex_movements(_session: Any, _today: date) -> tuple[list[dict[str, Any]],
             new_token = (section.get("paging") or {}).get("nextPageToken")
             if not new_token or new_token == token: break
             token = new_token
-    return supplies, returns
+    return supplies, returns, warnings

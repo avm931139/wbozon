@@ -60,14 +60,16 @@ class SupplyMovementReportService:
             ws.column_dimensions[get_column_letter(index)].width = width
 
     def build(self, *, include_live_returns: bool = True) -> tuple[bytes, dict[str, Any]]:
-        today = date.today(); errors = {}; data = {}
+        today = date.today(); errors = {}; warnings = {}; data = {}
         with self.session_factory() as session:
             for key, callback in (("WB · Поставки", lambda: wb_supplies(session)), ("Ozon · Поставки", lambda: ozon_supplies(session))):
                 try: data[key] = callback()
                 except Exception as exc: errors[key] = f"{type(exc).__name__}: {exc}"; data[key] = []
             try:
-                ym_supply, ym_return = yandex_movements(session, today)
+                ym_supply, ym_return, ym_warnings = yandex_movements(session, today)
                 data["Яндекс · Поставки"] = ym_supply; data["Яндекс · Возвраты"] = ym_return
+                if ym_warnings:
+                    warnings["Яндекс · Заявки"] = "; ".join(ym_warnings)
             except Exception as exc:
                 errors["Яндекс · Заявки"] = f"{type(exc).__name__}: {exc}"
                 data["Яндекс · Поставки"] = []; data["Яндекс · Возвраты"] = []
@@ -89,13 +91,18 @@ class SupplyMovementReportService:
             rows = data.get(key, [])
             planned = sum((row.get("Отправлено, шт.") or row.get("Отправлено/план, шт.") or row.get("К возврату, шт.") or row.get("Количество, шт.") or 0) for row in rows)
             actual = sum((row.get("Принято, шт.") or row.get("Принято/факт, шт.") or row.get("Фактически, шт.") or 0) for row in rows)
-            summary.append([key, len(rows), planned, actual, errors.get(key, "OK")])
+            source_status = errors.get(key)
+            if not source_status and key.startswith("Яндекс"):
+                source_status = errors.get("Яндекс · Заявки") or warnings.get("Яндекс · Заявки")
+            summary.append([key, len(rows), planned, actual, source_status or "OK"])
             self._add_sheet(workbook, key, rows)
         if errors:
             self._add_sheet(workbook, "Ошибки источников", [{"Источник": key, "Ошибка": value} for key, value in errors.items()])
+        if warnings:
+            self._add_sheet(workbook, "Ограничения API", [{"Источник": key, "Ограничение": value} for key, value in warnings.items()])
         summary.column_dimensions["A"].width = 26; summary.column_dimensions["B"].width = 85
         stream = BytesIO(); workbook.save(stream); workbook.close()
-        return stream.getvalue(), {"sheets": {key: len(data.get(key, [])) for key in order}, "errors": errors}
+        return stream.getvalue(), {"sheets": {key: len(data.get(key, [])) for key in order}, "errors": errors, "warnings": warnings}
 
     def save(self, destination: str | Path = DEFAULT_PATH, *, include_live_returns: bool = True) -> dict[str, Any]:
         path = Path(destination).resolve(); path.parent.mkdir(parents=True, exist_ok=True)

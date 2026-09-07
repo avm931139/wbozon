@@ -9,5 +9,5 @@ def test_yandex_campaign_ids_use_parsed_config_tuple(monkeypatch):
     monkeypatch.setattr("supply_movement_report.collectors.YANDEX_MARKET_CAMPAIGN_IDS", (149007825, 149010920))
     monkeypatch.setattr("supply_movement_report.collectors.YandexMarketClient", lambda: client)
 
-    assert yandex_movements(None, None) == ([], [])
+    assert yandex_movements(None, None) == ([], [], [])
     assert client.post.call_count == 2
