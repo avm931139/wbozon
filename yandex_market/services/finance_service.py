@@ -107,8 +107,7 @@ class YandexMarketFinanceService:
             if transaction_at is None or not begin <= transaction_at.date() <= finish:
                 continue
             transaction_type = str(raw.get("transactionType") or "").strip()
-            amount = abs(_decimal(raw.get("transactionSum")))
-            signed = -amount if transaction_type.casefold() in {"удержание", "retention"} else amount
+            signed = _decimal(raw.get("transactionSum"))
             canonical = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
             occurrence = occurrences.get(canonical, 0)
             occurrences[canonical] = occurrence + 1

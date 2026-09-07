@@ -66,7 +66,7 @@ def test_finance_service_replaces_period_and_signs_retentions():
             "transactionId": 2,
             "transactionType": "Удержание",
             "transactionSource": "Размещение товаров на витрине",
-            "transactionSum": 125.05,
+            "transactionSum": -125.05,
             "orderId": 10,
             "shopSku": "SKU-1",
             "count": 1,
@@ -86,6 +86,44 @@ def test_finance_service_replaces_period_and_signs_retentions():
         assert saved[1].amount == Decimal("-125.050000")
         assert saved[2].amount == Decimal("-125.050000")
         assert saved[1].source_hash != saved[2].source_hash
+
+
+def test_finance_service_preserves_signs_for_all_ledger_operation_types():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    service = YandexMarketFinanceService(
+        api=object(), session_factory=factory, business_id=216673578
+    )
+    rows = [
+        {
+            "transactionDate": "06.09.2026 12:01",
+            "transactionType": operation,
+            "transactionSum": amount,
+        }
+        for operation, amount in (
+            ("Начисление", 100),
+            ("Удержание", -10),
+            ("Списание", -20),
+            ("Возврат", -30),
+            ("Возврат списания", 5),
+        )
+    ]
+
+    service._replace(rows, date(2026, 9, 6), date(2026, 9, 6), 216673578)
+
+    with factory() as session:
+        amounts = {
+            row.transaction_type: row.amount
+            for row in session.query(YandexMarketFinanceTransaction).all()
+        }
+    assert amounts == {
+        "Начисление": Decimal("100.000000"),
+        "Удержание": Decimal("-10.000000"),
+        "Списание": Decimal("-20.000000"),
+        "Возврат": Decimal("-30.000000"),
+        "Возврат списания": Decimal("5.000000"),
+    }
 
 
 def test_finance_datetime_is_moscow_aware_and_invalid_value_is_skipped():
