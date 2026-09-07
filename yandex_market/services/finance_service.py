@@ -101,6 +101,7 @@ class YandexMarketFinanceService:
 
     def _replace(self, rows: list[dict[str, Any]], begin: date, finish: date, business_id: int) -> int:
         parsed = []
+        occurrences: dict[str, int] = {}
         for raw in rows:
             transaction_at = _datetime(raw.get("transactionDate"))
             if transaction_at is None or not begin <= transaction_at.date() <= finish:
@@ -109,8 +110,12 @@ class YandexMarketFinanceService:
             amount = abs(_decimal(raw.get("transactionSum")))
             signed = -amount if transaction_type.casefold() in {"удержание", "retention"} else amount
             canonical = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+            occurrence = occurrences.get(canonical, 0)
+            occurrences[canonical] = occurrence + 1
             parsed.append({
-                "source_hash": hashlib.sha256(canonical.encode()).hexdigest(),
+                "source_hash": hashlib.sha256(
+                    f"{canonical}:{occurrence}".encode()
+                ).hexdigest(),
                 "business_id": int(raw.get("businessId") or business_id),
                 "partner_id": int(raw["partnerId"]) if raw.get("partnerId") is not None else None,
                 "transaction_at": transaction_at,

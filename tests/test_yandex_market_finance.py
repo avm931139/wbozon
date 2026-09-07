@@ -72,17 +72,20 @@ def test_finance_service_replaces_period_and_signs_retentions():
             "count": 1,
         },
     ]
+    rows.append(dict(rows[-1]))
 
-    assert service._replace(rows, date(2026, 9, 6), date(2026, 9, 6), 216673578) == 2
-    assert service._replace(rows, date(2026, 9, 6), date(2026, 9, 6), 216673578) == 2
+    assert service._replace(rows, date(2026, 9, 6), date(2026, 9, 6), 216673578) == 3
+    assert service._replace(rows, date(2026, 9, 6), date(2026, 9, 6), 216673578) == 3
 
     with factory() as session:
         saved = session.query(YandexMarketFinanceTransaction).order_by(
             YandexMarketFinanceTransaction.transaction_id
         ).all()
-        assert len(saved) == 2
+        assert len(saved) == 3
         assert saved[0].amount == Decimal("1250.500000")
         assert saved[1].amount == Decimal("-125.050000")
+        assert saved[2].amount == Decimal("-125.050000")
+        assert saved[1].source_hash != saved[2].source_hash
 
 
 def test_finance_datetime_is_moscow_aware_and_invalid_value_is_skipped():
