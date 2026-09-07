@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from datetime import date
 from io import BytesIO
+from pathlib import Path
 import zipfile
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from openpyxl import load_workbook
 
 from app.db import Base
 from app.models import (
@@ -171,6 +173,31 @@ def test_accounting_storage_is_atomic_confined_and_verified(tmp_path):
     assert storage.verify(stored.relative_path, size=stored.size, sha256=stored.sha256)
     (tmp_path / stored.relative_path).write_bytes(b"damaged")
     assert not storage.verify(stored.relative_path, size=stored.size, sha256=stored.sha256)
+
+
+def test_accounting_storage_creates_readable_xlsx_and_preserves_csv(tmp_path):
+    storage = OzonAccountingStorage(tmp_path)
+    csv_content = (
+        'order_posting_number,item_name,amount\r\n'
+        '08789986-0400-2,"Люстра, бронза",9500.00\r\n'
+    ).encode("utf-8")
+    source = storage.save(
+        "finance_realization_posting",
+        "report-code",
+        DownloadedReport(
+            content=csv_content,
+            file_name="report.csv",
+            content_type="text/csv; charset=utf-8",
+            source_url="https://files.ozone.ru/report.csv",
+        ),
+    )
+    converted = storage.create_excel_copy(source.relative_path)
+    assert Path(tmp_path, source.relative_path).read_bytes() == csv_content
+    workbook = load_workbook(Path(tmp_path, converted.relative_path), read_only=True)
+    rows = list(workbook.active.values)
+    assert rows[0] == ("order_posting_number", "item_name", "amount")
+    assert rows[1] == ("08789986-0400-2", "Люстра, бронза", 9500)
+    assert converted.extension == "xlsx"
 
 
 class FakeAccountingAPI:

@@ -262,6 +262,8 @@ class OzonAccountingService:
             try:
                 payload = self.downloader.download(url)
                 stored = self.storage.save(report_type, code, payload)
+                if stored.extension == "csv":
+                    stored = self.storage.create_excel_copy(stored.relative_path)
                 with self.session_factory() as session:
                     row = session.query(OzonAccountingReportFile).filter_by(report_id=report_id).one_or_none()
                     if row is None:
@@ -286,6 +288,39 @@ class OzonAccountingService:
             "failed": len(errors),
             "errors": errors,
         }
+
+    def normalize_csv_files(self) -> dict[str, Any]:
+        """Convert previously downloaded CSV reports to XLSX without deleting originals."""
+        with self.session_factory() as session:
+            file_ids = [
+                row[0]
+                for row in session.query(OzonAccountingReportFile.id).filter_by(
+                    file_extension="csv"
+                ).all()
+            ]
+        converted = 0
+        errors: list[str] = []
+        for file_id in file_ids:
+            try:
+                with self.session_factory() as session:
+                    row = session.get(OzonAccountingReportFile, file_id)
+                    if row is None:
+                        continue
+                    stored = self.storage.create_excel_copy(row.local_path)
+                    row.local_path = stored.relative_path
+                    row.file_name = stored.file_name
+                    row.file_extension = stored.extension
+                    row.content_type = stored.content_type
+                    row.file_size = stored.size
+                    row.file_sha256 = stored.sha256
+                    row.downloaded_at = datetime.now(timezone.utc)
+                    session.commit()
+                converted += 1
+            except Exception as exc:
+                error = f"file_id={file_id}: {type(exc).__name__}: {exc}"
+                logger.exception("Ozon accounting CSV conversion failed: %s", error)
+                errors.append(error)
+        return {"selected": len(file_ids), "converted": converted, "failed": len(errors), "errors": errors}
 
     def sync_json_snapshots(self) -> dict[str, Any]:
         callbacks: list[tuple[str, date, date, Callable[[], dict[str, Any]]]] = []
@@ -366,6 +401,7 @@ class OzonAccountingService:
             ("requests", self.request_missing_reports),
             ("registry", self.sync_report_registry),
             ("files", lambda: self.download_ready_files(download_limit)),
+            ("excel_files", self.normalize_csv_files),
             ("snapshots", self.sync_json_snapshots),
         )
         for name, callback in steps:

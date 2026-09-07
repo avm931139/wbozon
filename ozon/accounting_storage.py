@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import io
 import os
@@ -7,11 +8,14 @@ import re
 import tempfile
 import zipfile
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urljoin, urlparse
 
 import requests
+from openpyxl import Workbook
+from openpyxl.styles import Font
 
 from app.config import (
     OZON_ACCOUNTING_MAX_FILE_BYTES,
@@ -24,6 +28,33 @@ from app.config import (
 _UNSAFE = re.compile(r"[^\w.() -]+", re.UNICODE)
 _FILENAME = re.compile(r"filename\*?=(?:UTF-8''|\")?([^\";]+)", re.IGNORECASE)
 _EXTENSION = re.compile(r"^[a-z0-9]{1,30}$")
+_NUMBER = re.compile(r"^-?\d+(?:\.\d+)?$")
+_NUMERIC_COLUMNS = (
+    "amount",
+    "price",
+    "ratio",
+    "quantity",
+    "total",
+    "fee",
+    "bonus",
+    "commission",
+    "compensation",
+    "coinvestment",
+    "stars",
+)
+
+
+def _excel_value(header: str, value: str) -> Any:
+    stripped = value.strip()
+    if stripped and any(token in header.lower() for token in _NUMERIC_COLUMNS) and _NUMBER.fullmatch(stripped):
+        try:
+            return Decimal(stripped)
+        except InvalidOperation:
+            pass
+    # Prevent product-controlled text from becoming a spreadsheet formula.
+    if stripped.startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
 
 
 @dataclass(frozen=True)
@@ -176,6 +207,76 @@ class OzonAccountingStorage:
             return digest.hexdigest() == sha256
         except OSError:
             return False
+
+    def create_excel_copy(self, relative_path: str) -> StoredOzonReport:
+        """Create an Excel-friendly XLSX beside a source CSV and keep the CSV intact."""
+        source = (self.root / relative_path).resolve(strict=True)
+        if (self.root != source and self.root not in source.parents) or not source.is_file():
+            raise ValueError("Ozon report path escapes storage directory")
+        if source.suffix.lower() != ".csv":
+            raise ValueError("only Ozon CSV reports can be converted to XLSX")
+        raw = source.read_bytes()
+        if len(raw) > self.max_file_bytes:
+            raise ValueError(
+                f"Ozon report exceeds the configured limit of {self.max_file_bytes} bytes"
+            )
+        text = raw.decode("utf-8-sig")
+        sample = text[:8192]
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+        except csv.Error:
+            dialect = csv.excel
+        rows = csv.reader(io.StringIO(text, newline=""), dialect)
+
+        workbook = Workbook(write_only=False)
+        sheet = workbook.active
+        sheet.title = "Ozon report"
+        max_widths: list[int] = []
+        row_count = 0
+        headers: list[str] = []
+        for row_count, row in enumerate(rows, start=1):
+            if row_count == 1:
+                headers = row
+                values: list[Any] = row
+            else:
+                values = [
+                    _excel_value(headers[index] if index < len(headers) else "", value)
+                    for index, value in enumerate(row)
+                ]
+            sheet.append(values)
+            if len(max_widths) < len(row):
+                max_widths.extend([0] * (len(row) - len(max_widths)))
+            for index, value in enumerate(row):
+                max_widths[index] = min(50, max(max_widths[index], len(value)))
+        if row_count:
+            sheet.freeze_panes = "A2"
+            sheet.auto_filter.ref = sheet.dimensions
+            for cell in sheet[1]:
+                cell.font = Font(bold=True)
+        for index, width in enumerate(max_widths, start=1):
+            sheet.column_dimensions[sheet.cell(row=1, column=index).column_letter].width = max(10, width + 2)
+
+        target = source.with_suffix(".xlsx")
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".ozon-xlsx-", suffix=".xlsx", dir=source.parent)
+        os.close(descriptor)
+        try:
+            workbook.save(temporary_name)
+            os.replace(temporary_name, target)
+        except BaseException:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
+            raise
+        content = target.read_bytes()
+        return StoredOzonReport(
+            relative_path=target.relative_to(self.root).as_posix(),
+            file_name=target.name,
+            extension="xlsx",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            size=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+        )
 
     @staticmethod
     def _detect_extension(content: bytes) -> str:
