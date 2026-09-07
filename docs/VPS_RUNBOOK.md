@@ -138,6 +138,53 @@ nano .env
 stat -c '%a %U:%G %n' /home/wbozon/wbozon/.env /home/wbozon/.ssh/telegram_relay
 ```
 
+## Приватный дашборд через OpenVPN
+
+Дашборд не публикуется на внешнем IP. Python-процесс слушает только
+`127.0.0.1:17843`, а Nginx — только адрес существующего туннеля
+`10.8.0.1:28443`. Рабочий адрес после подключения клиента к OpenVPN:
+
+```text
+https://10.8.0.1:28443
+```
+
+Для первой установки нужны `nginx`, `apache2-utils`, TLS-сертификат и пароль
+HTTP Basic. Настройка не меняет `server.conf`, порт `1194/udp` или маршруты
+OpenVPN. Drop-in лишь задаёт порядок запуска Nginx после VPN:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y nginx apache2-utils
+sudo install -d -m 700 /etc/nginx/ssl
+sudo openssl req -x509 -nodes -newkey rsa:3072 -days 825 \
+  -keyout /etc/nginx/ssl/wbozon-dashboard.key \
+  -out /etc/nginx/ssl/wbozon-dashboard.crt \
+  -subj '/CN=10.8.0.1' -addext 'subjectAltName=IP:10.8.0.1'
+sudo chmod 600 /etc/nginx/ssl/wbozon-dashboard.key
+sudo htpasswd -c /etc/nginx/.htpasswd-wbozon-dashboard anton
+sudo cp deploy/nginx/wbozon-dashboard.conf /etc/nginx/sites-available/wbozon-dashboard
+sudo ln -s /etc/nginx/sites-available/wbozon-dashboard /etc/nginx/sites-enabled/wbozon-dashboard
+sudo install -d /etc/systemd/system/nginx.service.d
+sudo cp deploy/systemd/nginx.service.d/wbozon-dashboard.conf /etc/systemd/system/nginx.service.d/
+sudo cp deploy/systemd/wbozon-dashboard.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo nginx -t
+sudo systemctl enable --now wbozon-dashboard.service nginx.service
+```
+
+Самоподписанный сертификат шифрует соединение, но браузер покажет предупреждение,
+пока сертификат не добавлен в доверенные на клиентском компьютере. Проверки:
+
+```bash
+curl http://127.0.0.1:17843/health
+ss -lnt | grep -E ':(17843|28443) '
+systemctl status wbozon-dashboard.service nginx.service --no-pager
+```
+
+В выводе `ss` должны быть только `127.0.0.1:17843` и `10.8.0.1:28443`, но не
+`0.0.0.0` и не публичный IP. Код и схема защиты описаны в
+[`dashboard/README.md`](../dashboard/README.md).
+
 ## Доступ production VPS к GitHub
 
 Сначала проверьте текущую схему:

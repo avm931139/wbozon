@@ -3,6 +3,7 @@
 - [Общая документация проекта](PROJECT_DOCUMENTATION.md)
 - [Архитектура независимых процессов](ARCHITECTURE.md)
 - [VPS: доступ, назначение серверов и эксплуатация](VPS_RUNBOOK.md)
+- [Приватный дашборд](../dashboard/README.md)
 - [Контекст для AI-ассистентов](project_context_for_chatgpt.md)
 - [Общая инфраструктура и ORM](../app/README.md)
 - [Интеграция Wildberries](../wb/README.md)

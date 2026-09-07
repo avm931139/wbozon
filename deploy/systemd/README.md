@@ -251,3 +251,14 @@ sudo journalctl -u wbozon-healthcheck.service -n 100 --no-pager
 `inactive (dead)` нормально только для успешно завершившихся oneshot services. Постоянные `wbozon-wb.service`, `wbozon-inventory@*.service`, `wbozon-telegram.service` и relay должны быть `active (running)`.
 
 Календарь timers задан в `Europe/Moscow`; поле `NEXT` выводится systemd в локальной временной зоне VPS.
+
+## Приватный дашборд
+
+`wbozon-dashboard.service` запускает read-only веб-приложение на
+`127.0.0.1:17843`. Внешний доступ обеспечивает Nginx только через адрес OpenVPN
+`10.8.0.1:28443`; конфигурация и полная процедура установки приведены в
+[`dashboard/README.md`](../../dashboard/README.md) и
+[`docs/VPS_RUNBOOK.md`](../../docs/VPS_RUNBOOK.md).
+
+Drop-in `nginx.service.d/wbozon-dashboard.conf` не меняет OpenVPN и нужен только
+для правильного порядка запуска после перезагрузки сервера.

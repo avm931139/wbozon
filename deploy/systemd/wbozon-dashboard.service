@@ -1,0 +1,22 @@
+[Unit]
+Description=wbozon private marketplace dashboard
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wbozon
+Group=wbozon
+WorkingDirectory=/home/wbozon/wbozon
+EnvironmentFile=/home/wbozon/wbozon/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/wbozon/wbozon/.venv/bin/python -m dashboard
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/home/wbozon/wbozon/logs
+
+[Install]
+WantedBy=multi-user.target
