@@ -47,6 +47,7 @@ def upgrade() -> None:
         WHERE (posting_number IS NULL OR posting_number = '')
           AND coalesce(raw_data ->> 'unit_number', '') <> ''
           AND coalesce(raw_data ->> 'accrued_category', '') = 'POSTING'
+          AND (raw_data ->> 'unit_number') ~ '^[0-9]{1,32}-[0-9]{1,32}-[0-9]{1,32}$'
     """)
 
 

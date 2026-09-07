@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -13,6 +14,8 @@ from sqlalchemy import func, select
 from app.config import (
     OZON_FINANCE_POSTING_BATCH_LIMIT,
     OZON_FINANCE_POSTING_REQUEST_PAUSE_SECONDS,
+    OZON_FINANCE_RATE_LIMIT_BACKOFF_SECONDS,
+    OZON_FINANCE_RATE_LIMIT_RETRIES,
     OZON_HISTORY_FROM,
     OZON_SYNC_OVERLAP_DAYS,
 )
@@ -24,9 +27,11 @@ from app.models import (
 )
 from ozon.business_time import ozon_today
 from ozon.finances import OzonFinancesAPI
+from ozon.exceptions import OzonRateLimitError
 
 
 logger = logging.getLogger(__name__)
+_POSTING_NUMBER = re.compile(r"^[0-9]{1,32}-[0-9]{1,32}-[0-9]{1,32}$")
 
 
 def _date(value: Any) -> date | None:
@@ -76,9 +81,11 @@ class OzonFinanceSyncService:
         today: Callable[[], date] = ozon_today,
         posting_batch_limit: int = OZON_FINANCE_POSTING_BATCH_LIMIT,
         request_pause_seconds: float = OZON_FINANCE_POSTING_REQUEST_PAUSE_SECONDS,
+        rate_limit_retries: int = OZON_FINANCE_RATE_LIMIT_RETRIES,
+        rate_limit_backoff_seconds: float = OZON_FINANCE_RATE_LIMIT_BACKOFF_SECONDS,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
-        if posting_batch_limit < 1 or request_pause_seconds < 0:
+        if posting_batch_limit < 1 or request_pause_seconds < 0 or rate_limit_retries < 0 or rate_limit_backoff_seconds < 0:
             raise ValueError("invalid Ozon finance posting synchronization settings")
         self.api = api or OzonFinancesAPI()
         self.session_factory = session_factory
@@ -86,10 +93,24 @@ class OzonFinanceSyncService:
         self.today = today
         self.posting_batch_limit = posting_batch_limit
         self.request_pause_seconds = request_pause_seconds
+        self.rate_limit_retries = rate_limit_retries
+        self.rate_limit_backoff_seconds = rate_limit_backoff_seconds
         self.sleeper = sleeper
 
+    def _rate_limited(self, callback: Callable[[], Any]) -> Any:
+        for attempt in range(self.rate_limit_retries + 1):
+            try:
+                return callback()
+            except OzonRateLimitError:
+                if attempt >= self.rate_limit_retries:
+                    raise
+                delay = self.rate_limit_backoff_seconds * (2**attempt)
+                logger.warning("Ozon finance rate limit; retrying in %.1f seconds", delay)
+                self.sleeper(delay)
+        raise RuntimeError("unreachable")
+
     def sync_types(self) -> int:
-        rows = self.api.accrual_types()
+        rows = self._rate_limited(self.api.accrual_types)
         now = datetime.now(timezone.utc)
         with self.session_factory() as session:
             for item in rows:
@@ -112,7 +133,7 @@ class OzonFinanceSyncService:
             latest = session.query(func.max(OzonFinanceAccrual.accrual_date)).scalar()
         start = max(self.history_from, latest - timedelta(days=OZON_SYNC_OVERLAP_DAYS)) if latest else self.history_from
         end = self.today()
-        rows = self.api.accruals_by_day(start, end)
+        rows = self._rate_limited(lambda: self.api.accruals_by_day(start, end))
         now = datetime.now(timezone.utc)
         posting_numbers: set[str] = set()
         saved = 0
@@ -145,7 +166,7 @@ class OzonFinanceSyncService:
                 row.currency = total.get("currency") if isinstance(total, dict) else item.get("currency")
                 row.raw_data = item
                 row.fetched_at = now
-                if category == "POSTING" and unit_number:
+                if category == "POSTING" and _POSTING_NUMBER.fullmatch(unit_number):
                     posting_numbers.add(unit_number)
                 saved += 1
             session.commit()
@@ -157,8 +178,11 @@ class OzonFinanceSyncService:
             rows = session.query(OzonFinanceAccrual.posting_number).filter(
                 OzonFinanceAccrual.posting_number.is_not(None),
                 ~OzonFinanceAccrual.posting_number.in_(known),
-            ).distinct().limit(limit).all()
-        return [str(row[0]) for row in rows if row[0]]
+            ).distinct().all()
+        return [
+            str(row[0]) for row in rows
+            if row[0] and _POSTING_NUMBER.fullmatch(str(row[0]))
+        ][:limit]
 
     def sync_postings(self, current: set[str]) -> dict[str, int]:
         capacity = self.posting_batch_limit * 200
@@ -175,7 +199,7 @@ class OzonFinanceSyncService:
         for index, batch in enumerate(batches):
             if index and self.request_pause_seconds:
                 self.sleeper(self.request_pause_seconds)
-            groups = self.api.accruals_by_postings(batch)
+            groups = self._rate_limited(lambda batch=batch: self.api.accruals_by_postings(batch))
             now = datetime.now(timezone.utc)
             with self.session_factory() as session:
                 for group in groups:
