@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh preliminary Wildberries Sales Funnel metrics hourly
+
+[Timer]
+OnCalendar=*-*-* *:10:00 Europe/Moscow
+RandomizedDelaySec=60
+Persistent=true
+Unit=wbozon-wb-sales-funnel.service
+
+[Install]
+WantedBy=timers.target

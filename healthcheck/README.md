@@ -10,7 +10,9 @@ python -m healthcheck
 
 - активность отдельных `wbozon-inventory@wb.service`, `wbozon-inventory@ozon.service` и, при настроенных кампаниях, `wbozon-inventory@yandex_market.service`;
 - активность timers и свежесть независимых заданий Яндекс Маркета `identity`, `catalog` и `orders`;
-- активность `wbozon-wb.service`, Telegram worker, stock timer и, если настроен proxy, SSH relay;
+- активность `wbozon-wb.service`, независимых timers Order Feed и Sales Funnel,
+  а также свежесть их последних запусков;
+- активность Telegram worker, stock timer и, если настроен proxy, SSH relay;
 - активность ежедневного timer документов WB и свежесть его журнала, если `WB_DOCUMENT_SYNC_REQUIRED=true`;
 - активность `wbozon-operations.timer`, свежесть его курсора и ошибки очереди, если задан `OPERATIONS_TG_CHAT_ID`;
 - последний статус и свежесть независимого журнала цен WB, Ozon и Яндекс Маркета;

@@ -69,6 +69,7 @@ sudo systemctl enable --now \
 sudo systemctl enable --now \
   wbozon-wb.service \
   wbozon-wb-order-feed.timer \
+  wbozon-wb-sales-funnel.timer \
   wbozon-telegram-relay.service \
   wbozon-telegram.service \
   wbozon-telegram-stock.timer \
@@ -81,6 +82,11 @@ sudo systemctl enable --now \
 `WB_TG_OPERATIONAL_INTERVAL_SECONDS=3600` и
 `WB_TG_MESSAGE_DELAY_SECONDS=3`, затем перезапустите
 `wbozon-telegram.service`.
+
+`wbozon-wb-sales-funnel.timer` раз в час независимо обновляет предварительные
+заказы и выкупы WB за скользящие семь дней для дашборда. После появления
+закрытого отчёта реализации дашборд автоматически переключает весь покрытый
+период на точные финансовые данные.
 
 После обновления кода проверьте, что долгоживущий Telegram-процесс перечитал его
 и почасовой отчёт содержит все три секции:
@@ -233,6 +239,7 @@ sudo systemctl enable --now wbozon-ozon-communications.timer
 systemctl --no-pager --full status \
   wbozon-wb.service \
   wbozon-wb-order-feed.timer \
+  wbozon-wb-sales-funnel.timer \
   wbozon-inventory@wb.service \
   wbozon-inventory@ozon.service \
   wbozon-inventory@yandex_market.service \

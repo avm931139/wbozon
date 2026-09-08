@@ -30,6 +30,9 @@ def test_dashboard_labels_actual_buyouts_instead_of_financial_result():
     assert "每日订单" in HTML
     assert "bar.empty" in HTML
     assert "v.amount" in HTML
+    assert "предварительный расчёт" in HTML
+    assert "покрытие" not in HTML
+    assert "есть товары без себестоимости" in HTML
 
 
 def test_dashboard_uses_historical_marketplace_order_sources():
@@ -48,7 +51,9 @@ def test_dashboard_uses_wb_finance_rows_for_closed_period_metrics():
     source = inspect.getsource(DashboardService._period_metrics)
     assert "retail_price_with_discount*quantity" in source
     assert "finance_buyouts_amount+compensation-net_payout expenses" in source
-    assert "finances[\"wb\"].get(\"rows\", 0)" in source
+    assert "wb_finance_exact" in source
+    assert "wb_sales_funnel_daily" in source
+    assert 'wb["data_status"] = "preliminary"' in source
     assert "Бронирование товара через самовывоз" in source
     net_payout_sql = source.split("net_payout", 1)[0].rsplit("coalesce(sum(", 1)[-1]
     assert "deduction" not in net_payout_sql

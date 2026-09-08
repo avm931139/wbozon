@@ -941,6 +941,44 @@ class WBOrderFeedSyncRun(Base):
     error = Column(Text, nullable=True)
 
 
+class WBSalesFunnelDaily(Base):
+    """Hourly-refreshed preliminary WB sales-funnel metrics by product and day."""
+
+    __tablename__ = "wb_sales_funnel_daily"
+    __table_args__ = (
+        UniqueConstraint("stat_date", "nm_id", name="uq_wb_sales_funnel_daily_date_nm"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    stat_date = Column(Date, nullable=False, index=True)
+    nm_id = Column(BigInteger, nullable=False, index=True)
+    vendor_code = Column(String, nullable=True, index=True)
+    title = Column(String, nullable=True)
+    currency = Column(String(10), nullable=True)
+    order_count = Column(Integer, nullable=False, default=0)
+    order_sum = Column(Numeric(20, 6), nullable=False, default=0)
+    buyout_count = Column(Integer, nullable=False, default=0)
+    buyout_sum = Column(Numeric(20, 6), nullable=False, default=0)
+    cancel_count = Column(Integer, nullable=False, default=0)
+    cancel_sum = Column(Numeric(20, 6), nullable=False, default=0)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class WBSalesFunnelSyncRun(Base):
+    __tablename__ = "wb_sales_funnel_sync_runs"
+
+    id = Column(String(32), primary_key=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    status = Column(String(20), nullable=False, index=True)
+    period_from = Column(Date, nullable=False)
+    period_to = Column(Date, nullable=False)
+    rows_received = Column(Integer, nullable=False, default=0)
+    rows_upserted = Column(Integer, nullable=False, default=0)
+    error = Column(Text, nullable=True)
+
+
 class WBOperationalSale(Base):
     __tablename__ = "wb_operational_sales"
 

@@ -61,6 +61,10 @@ class DashboardService:
             (SELECT coalesce(sum(finished_price),0) FROM wb_operational_sales WHERE operation_type='sale' AND event_date>=:b AND event_date<:u) buyouts_amount,
             (SELECT min(event_date) FROM wb_operational_sales) operational_from
             FROM marketplace_orders WHERE order_date>=:b AND order_date<:u""", b=begin, u=until)
+        wb_funnel = one("""SELECT count(*) rows,min(stat_date) data_from,max(stat_date) data_to,
+            coalesce(sum(order_count),0) orders,coalesce(sum(order_sum),0) orders_amount,
+            coalesce(sum(buyout_count),0) buyouts,coalesce(sum(buyout_sum),0) buyouts_amount
+            FROM wb_sales_funnel_daily WHERE stat_date>=:b AND stat_date<=:e""", b=begin, e=finish)
         ozon = one("""WITH postings AS (SELECT order_id,order_number,posting_number,status,
             coalesce((SELECT sum(coalesce((p->>'quantity')::int,0)) FROM jsonb_array_elements(products::jsonb) p),0) units,
             coalesce((SELECT sum(coalesce((CASE WHEN jsonb_typeof(p->'price')='object' THEN coalesce(p->'price'->>'amount',p->'price'->>'value') ELSE p->>'price' END)::numeric,0)*coalesce((p->>'quantity')::int,0)) FROM jsonb_array_elements(products::jsonb) p),0) amount
@@ -78,7 +82,19 @@ class DashboardService:
             coalesce(sum(total_amount) FILTER (WHERE status='DELIVERED'),0) buyouts_amount
             FROM yandex_market_orders WHERE created_at>=:b AND created_at<:u""", b=begin, u=until)
         finances = {
-            "wb": one("""WITH ledger AS (
+            "wb": one("""WITH coverage AS (
+                    SELECT min(date_from)::date finance_from,max(date_to)::date finance_through,
+                        NOT EXISTS (
+                            SELECT 1
+                            FROM generate_series(CAST(:b AS date),CAST(:e AS date),interval '1 day') day
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM wb_financial_sales_reports report
+                                WHERE report.details_synced_at IS NOT NULL
+                                  AND day::date BETWEEN report.date_from::date AND report.date_to::date
+                            )
+                        ) covered
+                    FROM wb_financial_sales_reports WHERE details_synced_at IS NOT NULL
+                ), ledger AS (
                     SELECT count(*) rows,
                         coalesce(sum(CASE
                             WHEN seller_operation_name='Возврат' THEN -quantity
@@ -100,8 +116,9 @@ class DashboardService:
                     FROM wb_financial_sales_rows WHERE rr_date>=:b AND rr_date<:u
                 ) SELECT rows,finance_buyouts,finance_buyouts_amount,compensation,
                     finance_buyouts_amount+compensation revenue,
-                    finance_buyouts_amount+compensation-net_payout expenses
-                FROM ledger""", b=begin, u=until),
+                    finance_buyouts_amount+compensation-net_payout expenses,
+                    coverage.finance_from,coverage.finance_through,coverage.covered
+                FROM ledger CROSS JOIN coverage""", b=begin, e=finish, u=until),
             "ozon": one("""WITH ledger AS (
                     SELECT count(*) rows,coalesce(sum(amount),0) net_accrual,
                         coalesce(sum(amount) FILTER (WHERE accrual_type='NON_ITEM' AND amount>0),0) compensation
@@ -131,8 +148,16 @@ class DashboardService:
                     FROM wb_financial_sales_rows s LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=s.nm_id::text
                     LEFT JOIN c ON c.master_product_id=l.master_product_id WHERE s.rr_date>=:b AND s.rr_date<:u)
                 SELECT operational.cost_of_goods,operational.costed_units,
-                    financial.cost_of_goods finance_cost_of_goods,financial.costed_units finance_costed_units
-                FROM operational CROSS JOIN financial""", b=begin, u=until),
+                    financial.cost_of_goods finance_cost_of_goods,financial.costed_units finance_costed_units,
+                    funnel.cost_of_goods funnel_cost_of_goods,funnel.costed_units funnel_costed_units
+                FROM operational CROSS JOIN financial CROSS JOIN (
+                    SELECT coalesce(sum(f.buyout_count*coalesce(c.unit_cost,0)),0) cost_of_goods,
+                        coalesce(sum(f.buyout_count) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
+                    FROM wb_sales_funnel_daily f
+                    LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=f.nm_id::text
+                    LEFT JOIN c ON c.master_product_id=l.master_product_id
+                    WHERE f.stat_date>=:b AND f.stat_date<=:e
+                ) funnel""", b=begin, e=finish, u=until),
             "ozon": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC),
                 sku_master AS (SELECT DISTINCT ON (p.sku) p.sku,l.master_product_id
                     FROM ozon_products p JOIN marketplace_product_links l ON l.marketplace='ozon' AND l.active AND l.external_product_id=p.product_id::text
@@ -155,14 +180,33 @@ class DashboardService:
             "yandex_market": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(attributed_revenue),0) attributed_revenue FROM yandex_market_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
         }
         markets = {"wb": wb, "ozon": ozon, "yandex_market": yandex}
-        if "error" not in finances["wb"] and finances["wb"].get("rows", 0):
+        wb_finance_exact = "error" not in finances["wb"] and bool(finances["wb"].get("covered"))
+        if wb_finance_exact:
+            finances["wb"]["available"] = True
             wb["buyouts"] = finances["wb"].get("finance_buyouts", 0)
             wb["buyouts_amount"] = finances["wb"].get("finance_buyouts_amount", 0)
             costs["wb"]["cost_of_goods"] = costs["wb"].get("finance_cost_of_goods", 0)
             costs["wb"]["costed_units"] = costs["wb"].get("finance_costed_units", 0)
             wb["buyouts_source"] = "financial_report"
+            wb["data_status"] = "exact"
         else:
-            wb["buyouts_source"] = "operational_sales"
+            if "error" not in wb_funnel and wb_funnel.get("rows", 0):
+                for field in ("orders", "orders_amount", "buyouts", "buyouts_amount"):
+                    wb[field] = wb_funnel.get(field, 0)
+                costs["wb"]["cost_of_goods"] = costs["wb"].get("funnel_cost_of_goods", 0)
+                costs["wb"]["costed_units"] = costs["wb"].get("funnel_costed_units", 0)
+                wb["buyouts_source"] = "sales_funnel"
+                wb["preliminary_from"] = wb_funnel.get("data_from")
+                wb["preliminary_to"] = wb_funnel.get("data_to")
+            else:
+                wb["buyouts_source"] = "operational_sales_fallback"
+            wb["data_status"] = "preliminary"
+            finances["wb"] = {
+                "rows": 0,
+                "revenue": wb.get("buyouts_amount", 0),
+                "expenses": None,
+                "notice": "closed WB financial report does not cover the full period",
+            }
         if "error" not in finances["ozon"] and finances["ozon"].get("rows", 0):
             ozon["buyouts"] = finances["ozon"].get("finance_buyouts", 0)
             ozon["buyouts_amount"] = finances["ozon"].get("finance_buyouts_amount", 0)
@@ -182,7 +226,15 @@ class DashboardService:
         values["cancel_rate"] = _number(values.get("cancelled")) / orders * 100 if orders else 0
         values.update(costs)
         values["cost_coverage"] = _number(costs.get("costed_units")) / buyouts * 100 if buyouts else 100
-        if finance.get("expenses") is None or "error" in finance or finance.get("rows") == 0:
+        values["cost_missing"] = buyouts > _number(costs.get("costed_units"))
+        if values.get("data_status") == "preliminary":
+            values.update({"compensation": None, "revenue": _number(values.get("buyouts_amount")),
+                "expenses": None, "expense_ratio": None, "profit": None, "profit_margin": None,
+                "finance_notice": finance.get("notice")})
+            return
+        if finance.get("expenses") is None or "error" in finance or (
+            finance.get("rows") == 0 and not finance.get("available")
+        ):
             values.update({"compensation": None, "revenue": None, "expenses": None, "expense_ratio": None, "profit": None, "profit_margin": None, "finance_notice": finance.get("notice") or finance.get("error")})
             return
         compensation = _number(finance.get("compensation"))
@@ -228,14 +280,20 @@ class DashboardService:
             stocks = self._stocks(db)
             previous_stocks = self._historical_stocks(db, previous_finish)
             prices = self._one(db, "SELECT count(*) active,count(*) FILTER (WHERE in_promotion IS TRUE) promotions,count(*) FILTER (WHERE coalesce(seller_price,customer_price,list_price,0)<=0) invalid FROM marketplace_current_prices WHERE active IS TRUE")
-            series_result = self._one(db, """SELECT coalesce(json_agg(d ORDER BY report_day,marketplace),'[]'::json) data
-                FROM (SELECT report_day,marketplace,sum(orders) orders,sum(revenue) revenue FROM (
-                    SELECT order_date::date report_day,'wb' marketplace,count(*) orders,
+            if current["marketplaces"]["wb"].get("buyouts_source") == "sales_funnel":
+                wb_series = """SELECT stat_date report_day,'wb' marketplace,sum(order_count) orders,
+                        coalesce(sum(order_sum),0) revenue FROM wb_sales_funnel_daily
+                        WHERE stat_date>=:b AND stat_date<:u GROUP BY 1"""
+            else:
+                wb_series = """SELECT order_date::date report_day,'wb' marketplace,count(*) orders,
                         coalesce(sum(seller_price),0) revenue FROM (
                             SELECT order_date,seller_price FROM wb_order_feed_orders WHERE is_mp IS TRUE
                             UNION ALL
                             SELECT order_date,coalesce(price_with_discount,finished_price,total_price,0) FROM wb_fbo_orders
-                        ) wb_orders WHERE order_date>=:b AND order_date<:u GROUP BY 1
+                        ) wb_orders WHERE order_date>=:b AND order_date<:u GROUP BY 1"""
+            series_result = self._one(db, """SELECT coalesce(json_agg(d ORDER BY report_day,marketplace),'[]'::json) data
+                FROM (SELECT report_day,marketplace,sum(orders) orders,sum(revenue) revenue FROM (
+                    """ + wb_series + """
                     UNION ALL
                     SELECT in_process_at::date,'ozon',
                         count(DISTINCT coalesce(order_id::text,order_number,posting_number)),

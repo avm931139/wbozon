@@ -37,6 +37,7 @@ from app.config import (
     WB_DOCUMENT_MAX_AGE_SECONDS,
     WB_DOCUMENT_SYNC_REQUIRED,
     WB_ORDER_FEED_MAX_AGE_SECONDS,
+    WB_SALES_FUNNEL_MAX_AGE_SECONDS,
     YANDEX_MARKET_CAMPAIGN_IDS,
     YANDEX_MARKET_AD_MAX_AGE_SECONDS,
     YANDEX_MARKET_CATALOG_MAX_AGE_SECONDS,
@@ -61,6 +62,7 @@ from app.models import (
     WBFBSStockSnapshot,
     WBDocumentSyncRun,
     WBOrderFeedSyncRun,
+    WBSalesFunnelSyncRun,
     WBTelegramDelivery,
     YandexMarketStockSnapshot,
     YandexMarketSyncRun,
@@ -310,6 +312,8 @@ def collect_checks(
             checks.append(Check(ok, f"Yandex Market {task} timer", status))
     order_feed_ok, order_feed_status = systemctl("wbozon-wb-order-feed.timer")
     checks.append(Check(order_feed_ok, "WB Order Feed timer", order_feed_status))
+    funnel_ok, funnel_status = systemctl("wbozon-wb-sales-funnel.timer")
+    checks.append(Check(funnel_ok, "WB Sales Funnel timer", funnel_status))
     if WB_DOCUMENT_SYNC_REQUIRED:
         documents_ok, documents_status = systemctl("wbozon-wb-documents.timer")
         checks.append(Check(documents_ok, "WB documents timer", documents_status))
@@ -347,6 +351,30 @@ def collect_checks(
                 latest_order_feed.status in {"completed", "running"}
                 and age <= timedelta(seconds=WB_ORDER_FEED_MAX_AGE_SECONDS),
                 "WB Order Feed sync",
+                detail,
+            ))
+
+        latest_funnel = session.query(WBSalesFunnelSyncRun).order_by(
+            WBSalesFunnelSyncRun.started_at.desc()
+        ).first()
+        if latest_funnel is None:
+            checks.append(Check(False, "WB Sales Funnel sync", "no runs recorded"))
+        else:
+            timestamp = latest_funnel.finished_at or latest_funnel.started_at
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
+            age = current - timestamp.astimezone(timezone)
+            detail = (
+                f"{latest_funnel.status}, age {age}, period "
+                f"{latest_funnel.period_from}..{latest_funnel.period_to}, "
+                f"received={latest_funnel.rows_received}, upserted={latest_funnel.rows_upserted}"
+            )
+            if latest_funnel.error:
+                detail += f", error={latest_funnel.error[:300]}"
+            checks.append(Check(
+                latest_funnel.status in {"completed", "running"}
+                and age <= timedelta(seconds=WB_SALES_FUNNEL_MAX_AGE_SECONDS),
+                "WB Sales Funnel sync",
                 detail,
             ))
 

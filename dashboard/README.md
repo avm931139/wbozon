@@ -48,15 +48,22 @@ Marketplace cards use these definitions:
 - profit is revenue minus marketplace expenses and latest imported unit cost;
 - stock value is current available quantity multiplied by that unit cost.
 
-WB closed-period buyouts, revenue, expenses and cost of goods use detailed
-realization rows. Revenue is retail sales at the agreed seller discount net of
+WB automatically has two display modes. If detailed realization reports cover
+the complete selected period, the card uses exact closed-period buyouts,
+revenue, expenses and cost of goods. If the period is not yet covered, the card
+title says `предварительный расчёт / 初步估算`: orders and purchases come from the
+hourly Sales Funnel history, while cancellations retain the realtime Order Feed
+source. Preliminary revenue equals the Sales Funnel purchase amount; expenses
+and profit remain unavailable until the financial report closes. Revenue in the
+exact mode is retail sales at the agreed seller discount net of
 returns plus compensation. Expenses are the difference between that revenue
 and the reconstructed net payout, so marketplace commission and every saved
 delivery, storage, penalty and acceptance charge are included once. Technical
 `deduction` and `rebill_logistic_cost` detail fields are not subtracted again:
 WB has already reflected their effect in the payable financial operations.
-Operational sales remain the fallback when WB has not published finance rows
-for the selected current period. Ozon revenue is net sales and
+Operational sales remain a fallback only until the first Sales Funnel sync.
+Product cost is shown without a redundant `100% coverage` label; a warning is
+shown only when one or more purchased items have no imported cost. Ozon revenue is net sales and
 returns from posting accrual details plus `NON_ITEM` compensation; expenses are
 the difference between that revenue and the complete daily net accrual. This
 reproduces the Seller cabinet identity: sales and returns + compensation - all

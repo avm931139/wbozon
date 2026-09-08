@@ -493,7 +493,7 @@
 
 - `POST /api/analytics/v3/sales-funnel/grouped/history` — Grouped Listings Statistics per Days — `seller-analytics-api.wildberries.ru`
 - `POST /api/analytics/v3/sales-funnel/products` — Listings Statistics per Period — `seller-analytics-api.wildberries.ru`
-- `POST /api/analytics/v3/sales-funnel/products/history` — Listings Statistics per Days — `seller-analytics-api.wildberries.ru`
+- `POST /api/analytics/v3/sales-funnel/products/history` — Listings Statistics per Days — `seller-analytics-api.wildberries.ru` — **РЕАЛИЗОВАНО** (предварительные заказы и выкупы, последние 7 дней)
 
 ### Seller Analytics CSV (4)
 
