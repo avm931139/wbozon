@@ -50,6 +50,9 @@ def test_dashboard_uses_wb_finance_rows_for_closed_period_metrics():
     assert "finance_buyouts_amount+compensation-net_payout expenses" in source
     assert "finances[\"wb\"].get(\"rows\", 0)" in source
     assert "Бронирование товара через самовывоз" in source
+    net_payout_sql = source.split("net_payout", 1)[0].rsplit("coalesce(sum(", 1)[-1]
+    assert "deduction" not in net_payout_sql
+    assert "rebill_logistic_cost" not in net_payout_sql
 
 
 def test_dashboard_uses_ozon_finance_accruals_for_buyouts_and_profit():

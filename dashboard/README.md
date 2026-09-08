@@ -52,7 +52,9 @@ WB closed-period buyouts, revenue, expenses and cost of goods use detailed
 realization rows. Revenue is retail sales at the agreed seller discount net of
 returns plus compensation. Expenses are the difference between that revenue
 and the reconstructed net payout, so marketplace commission and every saved
-delivery, storage, penalty, deduction and acceptance charge are included once.
+delivery, storage, penalty and acceptance charge are included once. Technical
+`deduction` and `rebill_logistic_cost` detail fields are not subtracted again:
+WB has already reflected their effect in the payable financial operations.
 Operational sales remain the fallback when WB has not published finance rows
 for the selected current period. Ozon revenue is net sales and
 returns from posting accrual details plus `NON_ITEM` compensation; expenses are

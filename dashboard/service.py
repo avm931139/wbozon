@@ -96,7 +96,7 @@ class DashboardService:
                             ELSE 0 END),0)
                             + coalesce(sum(CASE WHEN seller_operation_name NOT IN ('Продажа','Возврат','Бронирование товара через самовывоз') THEN for_pay ELSE 0 END),0)
                             + coalesce(sum(additional_payment),0)
-                            - coalesce(sum(delivery_service+penalty+rebill_logistic_cost+paid_storage+deduction+paid_acceptance),0) net_payout
+                            - coalesce(sum(delivery_service+penalty+paid_storage+paid_acceptance),0) net_payout
                     FROM wb_financial_sales_rows WHERE rr_date>=:b AND rr_date<:u
                 ) SELECT rows,finance_buyouts,finance_buyouts_amount,compensation,
                     finance_buyouts_amount+compensation revenue,
