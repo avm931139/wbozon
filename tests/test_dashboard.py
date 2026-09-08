@@ -39,6 +39,17 @@ def test_dashboard_uses_historical_marketplace_order_sources():
     assert "wb_fbo_orders" in source
     assert "finance_buyouts" in source
     assert "OzonPosting" not in source
+    assert "coalesce(price_with_discount,finished_price,total_price,0)" in source
+
+
+def test_dashboard_uses_wb_finance_rows_for_closed_period_metrics():
+    import inspect
+
+    source = inspect.getsource(DashboardService._period_metrics)
+    assert "retail_price_with_discount*quantity" in source
+    assert "finance_buyouts_amount+compensation-net_payout expenses" in source
+    assert "finances[\"wb\"].get(\"rows\", 0)" in source
+    assert "Бронирование товара через самовывоз" in source
 
 
 def test_dashboard_uses_ozon_finance_accruals_for_buyouts_and_profit():

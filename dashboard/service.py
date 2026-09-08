@@ -51,7 +51,7 @@ class DashboardService:
             SELECT srid,order_date,status,seller_price FROM wb_order_feed_orders WHERE is_mp IS TRUE
             UNION ALL
             SELECT srid,order_date,CASE WHEN is_cancel THEN 'cancel' ELSE 'active' END,
-                coalesce(finished_price,price_with_discount,total_price,0)
+                coalesce(price_with_discount,finished_price,total_price,0)
             FROM wb_fbo_orders
         ) SELECT count(*) orders,
             coalesce(sum(seller_price),0) orders_amount,
@@ -78,13 +78,30 @@ class DashboardService:
             coalesce(sum(total_amount) FILTER (WHERE status='DELIVERED'),0) buyouts_amount
             FROM yandex_market_orders WHERE created_at>=:b AND created_at<:u""", b=begin, u=until)
         finances = {
-            "wb": one("""SELECT coalesce(sum(additional_payment),0) compensation,
-                coalesce(sum(delivery_service+acquiring_fee+ppvz_sales_commission+penalty+rebill_logistic_cost+paid_storage+deduction+paid_acceptance),0) expenses,
-                coalesce(sum(quantity) FILTER (WHERE seller_operation_name='Продажа'),0)
-                    - coalesce(sum(quantity) FILTER (WHERE seller_operation_name='Возврат'),0) finance_buyouts,
-                coalesce(sum(retail_amount) FILTER (WHERE seller_operation_name='Продажа'),0)
-                    - coalesce(sum(retail_amount) FILTER (WHERE seller_operation_name='Возврат'),0) finance_buyouts_amount
-                FROM wb_financial_sales_rows WHERE rr_date>=:b AND rr_date<:u""", b=begin, u=until),
+            "wb": one("""WITH ledger AS (
+                    SELECT count(*) rows,
+                        coalesce(sum(CASE
+                            WHEN seller_operation_name='Возврат' THEN -quantity
+                            WHEN seller_operation_name IN ('Продажа','Бронирование товара через самовывоз') THEN quantity
+                            ELSE 0 END),0) finance_buyouts,
+                        coalesce(sum(CASE
+                            WHEN seller_operation_name='Возврат' THEN -retail_price_with_discount*quantity
+                            WHEN seller_operation_name IN ('Продажа','Бронирование товара через самовывоз') THEN retail_price_with_discount*quantity
+                            ELSE 0 END),0) finance_buyouts_amount,
+                        coalesce(sum(CASE WHEN seller_operation_name NOT IN ('Продажа','Возврат','Бронирование товара через самовывоз') THEN for_pay ELSE 0 END),0)
+                            + coalesce(sum(additional_payment),0) compensation,
+                        coalesce(sum(CASE
+                            WHEN seller_operation_name='Возврат' THEN -for_pay
+                            WHEN seller_operation_name IN ('Продажа','Бронирование товара через самовывоз') THEN for_pay
+                            ELSE 0 END),0)
+                            + coalesce(sum(CASE WHEN seller_operation_name NOT IN ('Продажа','Возврат','Бронирование товара через самовывоз') THEN for_pay ELSE 0 END),0)
+                            + coalesce(sum(additional_payment),0)
+                            - coalesce(sum(delivery_service+penalty+rebill_logistic_cost+paid_storage+deduction+paid_acceptance),0) net_payout
+                    FROM wb_financial_sales_rows WHERE rr_date>=:b AND rr_date<:u
+                ) SELECT rows,finance_buyouts,finance_buyouts_amount,compensation,
+                    finance_buyouts_amount+compensation revenue,
+                    finance_buyouts_amount+compensation-net_payout expenses
+                FROM ledger""", b=begin, u=until),
             "ozon": one("""WITH ledger AS (
                     SELECT count(*) rows,coalesce(sum(amount),0) net_accrual,
                         coalesce(sum(amount) FILTER (WHERE accrual_type='NON_ITEM' AND amount>0),0) compensation
@@ -109,8 +126,8 @@ class DashboardService:
                 operational AS (SELECT coalesce(sum(coalesce(c.unit_cost,0)),0) cost_of_goods,count(*) FILTER (WHERE c.unit_cost IS NOT NULL) costed_units
                     FROM wb_operational_sales s LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=s.nm_id::text
                     LEFT JOIN c ON c.master_product_id=l.master_product_id WHERE s.operation_type='sale' AND s.event_date>=:b AND s.event_date<:u),
-                financial AS (SELECT coalesce(sum((CASE WHEN s.seller_operation_name='Возврат' THEN -s.quantity ELSE s.quantity END)*coalesce(c.unit_cost,0)) FILTER (WHERE s.seller_operation_name IN ('Продажа','Возврат')),0) cost_of_goods,
-                    coalesce(sum((CASE WHEN s.seller_operation_name='Возврат' THEN -s.quantity ELSE s.quantity END)) FILTER (WHERE s.seller_operation_name IN ('Продажа','Возврат') AND c.unit_cost IS NOT NULL),0) costed_units
+                financial AS (SELECT coalesce(sum((CASE WHEN s.seller_operation_name='Возврат' THEN -s.quantity ELSE s.quantity END)*coalesce(c.unit_cost,0)) FILTER (WHERE s.seller_operation_name IN ('Продажа','Возврат','Бронирование товара через самовывоз')),0) cost_of_goods,
+                    coalesce(sum((CASE WHEN s.seller_operation_name='Возврат' THEN -s.quantity ELSE s.quantity END)) FILTER (WHERE s.seller_operation_name IN ('Продажа','Возврат','Бронирование товара через самовывоз') AND c.unit_cost IS NOT NULL),0) costed_units
                     FROM wb_financial_sales_rows s LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=s.nm_id::text
                     LEFT JOIN c ON c.master_product_id=l.master_product_id WHERE s.rr_date>=:b AND s.rr_date<:u)
                 SELECT operational.cost_of_goods,operational.costed_units,
@@ -138,8 +155,7 @@ class DashboardService:
             "yandex_market": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(attributed_revenue),0) attributed_revenue FROM yandex_market_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
         }
         markets = {"wb": wb, "ozon": ozon, "yandex_market": yandex}
-        operational_from = wb.get("operational_from")
-        if operational_from is None or begin < operational_from.date():
+        if "error" not in finances["wb"] and finances["wb"].get("rows", 0):
             wb["buyouts"] = finances["wb"].get("finance_buyouts", 0)
             wb["buyouts_amount"] = finances["wb"].get("finance_buyouts_amount", 0)
             costs["wb"]["cost_of_goods"] = costs["wb"].get("finance_cost_of_goods", 0)
@@ -218,7 +234,7 @@ class DashboardService:
                         coalesce(sum(seller_price),0) revenue FROM (
                             SELECT order_date,seller_price FROM wb_order_feed_orders WHERE is_mp IS TRUE
                             UNION ALL
-                            SELECT order_date,coalesce(finished_price,price_with_discount,total_price,0) FROM wb_fbo_orders
+                            SELECT order_date,coalesce(price_with_discount,finished_price,total_price,0) FROM wb_fbo_orders
                         ) wb_orders WHERE order_date>=:b AND order_date<:u GROUP BY 1
                     UNION ALL
                     SELECT in_process_at::date,'ozon',

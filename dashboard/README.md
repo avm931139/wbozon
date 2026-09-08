@@ -48,7 +48,13 @@ Marketplace cards use these definitions:
 - profit is revenue minus marketplace expenses and latest imported unit cost;
 - stock value is current available quantity multiplied by that unit cost.
 
-WB calculations use detailed realization rows. Ozon revenue is net sales and
+WB closed-period buyouts, revenue, expenses and cost of goods use detailed
+realization rows. Revenue is retail sales at the agreed seller discount net of
+returns plus compensation. Expenses are the difference between that revenue
+and the reconstructed net payout, so marketplace commission and every saved
+delivery, storage, penalty, deduction and acceptance charge are included once.
+Operational sales remain the fallback when WB has not published finance rows
+for the selected current period. Ozon revenue is net sales and
 returns from posting accrual details plus `NON_ITEM` compensation; expenses are
 the difference between that revenue and the complete daily net accrual. This
 reproduces the Seller cabinet identity: sales and returns + compensation - all
