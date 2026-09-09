@@ -26,7 +26,7 @@ class DashboardService:
         today = date.today()
         finish = date.fromisoformat(end) if end else today
         begin = date.fromisoformat(start) if start else finish
-        if begin > finish or (finish - begin).days > 730:
+        if begin > finish or finish > today or (finish - begin).days > 730:
             raise ValueError("invalid period")
         return begin, finish
 

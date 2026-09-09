@@ -10,7 +10,7 @@
     header{padding:20px 4vw;border-bottom:1px solid var(--line);display:flex;gap:20px;align-items:end;justify-content:space-between}
     h1{margin:0;font-size:24px}.muted,.hint{color:var(--muted)} nav{display:flex;gap:8px;margin-top:12px}
     nav a{color:var(--text);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:8px 12px} nav a.active{background:var(--accent);color:#061020;font-weight:700}
-    .filters{display:flex;gap:8px;flex-wrap:wrap} input,button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:10px}
+    .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:end}.field{display:grid;gap:4px}.field label{color:var(--muted);font-size:11px} input,button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:10px}
     button{background:var(--accent);color:#061020;font-weight:700;cursor:pointer} main{padding:22px 4vw 40px}.status{color:var(--muted);margin-bottom:14px}.warning{color:var(--warn);margin-top:6px}
     h2{font-size:17px;margin:24px 0 12px}.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:12px}
     .kpi,.market,section{background:var(--panel);border:1px solid var(--line);border-radius:14px}.kpi{padding:15px}.kpi-title{color:var(--muted);font-size:12px;text-transform:uppercase}.kpi-value{font-size:23px;font-weight:760;margin-top:7px}.kpi-sub{color:var(--muted);margin-top:5px;font-size:12px}.compare-list{display:flex;gap:5px;flex-wrap:wrap}
@@ -33,14 +33,15 @@
       <nav><a class="active" href="/">Оперативный</a><a href="/pnl">P&amp;L</a></nav>
     </div>
     <div class="filters">
-      <input id="from" type="date" title="Начало периода">
-      <input id="to" type="date" title="Конец периода">
-      <input id="month" type="month" title="Выбрать месяц" onchange="selectMonth()">
+      <div class="field"><label for="from">С даты</label><input id="from" type="date" title="Начало периода"></div>
+      <div class="field"><label for="to">По дату</label><input id="to" type="date" title="Конец периода"></div>
+      <div class="field"><label for="month">Быстрый выбор месяца</label><input id="month" type="month" title="Выбрать месяц" onchange="selectMonth()"></div>
       <button onclick="load()">Обновить</button>
     </div>
   </header>
   <main>
     <div id="status" class="status"></div>
+    <div class="hint">Сравнения: <span style="color:var(--good)">зелёный — улучшение</span>, <span style="color:var(--bad)">красный — ухудшение</span>, серый — изменение без самостоятельной оценки.</div>
     <h2>Главное за период / 期间核心指标</h2>
     <div id="summary" class="kpi-grid"></div>
     <h2>По площадкам / 按平台</h2>
@@ -85,7 +86,8 @@
     function selectMonth(){
       if(!monthInput.value)return;
       const [year,value]=monthInput.value.split('-').map(Number);
-      fromInput.value=`${monthInput.value}-01`;toInput.value=iso(new Date(year,value,0));load();
+      const lastDay=new Date(year,value,0);
+      fromInput.value=`${monthInput.value}-01`;toInput.value=iso(lastDay>now?now:lastDay);load();
     }
 
     async function load(){
@@ -143,7 +145,7 @@
       }catch(error){statusBox.innerHTML=`<div class="error">${error.message}</div>`}
     }
 
-    const now=new Date(),start=new Date(now);start.setDate(now.getDate()-6);fromInput.value=iso(start);toInput.value=iso(now);load();
+    const now=new Date(),start=new Date(now),today=iso(now);start.setDate(now.getDate()-6);fromInput.max=today;toInput.max=today;monthInput.max=today.slice(0,7);fromInput.value=iso(start);toInput.value=today;load();
   </script>
 </body>
 </html>

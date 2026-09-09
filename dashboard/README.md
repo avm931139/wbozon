@@ -48,6 +48,8 @@ period is 730 days.
 The operational dashboard opens on the latest seven calendar days including
 the current Moscow date. Its filter supports both an arbitrary date range and a
 month picker; selecting a month immediately loads its first through last day.
+For the current month, its end is capped at today; future dates are rejected by
+the server so they cannot distort an equal-period comparison.
 P&L opens on the previous full calendar month because closed marketplace
 finance data is usually not available for the current day. Every period metric
 is compared with the immediately preceding period of the same length. Labels

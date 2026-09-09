@@ -19,6 +19,7 @@ def test_previous_period_has_equal_length_and_precedes_current():
 def test_dashboard_rejects_reverse_or_oversized_period():
     with pytest.raises(ValueError): DashboardService.period("2026-09-02","2026-09-01")
     with pytest.raises(ValueError): DashboardService.period("2020-01-01","2026-09-01")
+    with pytest.raises(ValueError): DashboardService.period("2099-01-01", "2099-01-01")
 
 
 def test_operational_dashboard_contains_only_operational_metrics():
@@ -33,6 +34,8 @@ def test_operational_dashboard_contains_only_operational_metrics():
     assert 'id="month" type="month"' in HTML
     assert "function selectMonth()" in HTML
     assert "start.setDate(now.getDate()-6)" in HTML
+    assert "lastDay>now?now:lastDay" in HTML
+    assert "monthInput.max=today.slice(0,7)" in HTML
 
 
 def test_operational_dashboard_has_readable_semantic_comparisons_and_help():
