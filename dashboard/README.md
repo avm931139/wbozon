@@ -30,25 +30,47 @@ sudo bash deploy/install-dashboard.sh anton
 access. If omitted, `DATABASE_URL` is used. A separate read-only role is
 recommended in production.
 
-The API endpoints are `/health` and `/api/summary?from=YYYY-MM-DD&to=YYYY-MM-DD`.
-The maximum selectable period is 730 days.
+The UI is deliberately split into two pages:
 
-The dashboard opens on the current Moscow date. Every period metric is compared
-with the immediately preceding period of the same length (today with yesterday,
-seven days with the preceding seven days). Labels are bilingual Russian/Chinese.
+- `/` is the operational dashboard. It uses order feeds, postings, order status,
+  advertising statistics and current stock snapshots. It never replaces these
+  values with finance-report rows and does not calculate accounting profit;
+- `/pnl` is the closed finance view. It only exposes values reconstructed from
+  the marketplace finance reports saved in PostgreSQL. If the selected period
+  is not fully covered, the marketplace card stays unavailable instead of
+  falling back to orders or advertising attribution.
 
-Marketplace cards use these definitions:
+The API endpoints are `/health`,
+`/api/summary?from=YYYY-MM-DD&to=YYYY-MM-DD` for operations, and
+`/api/pnl?from=YYYY-MM-DD&to=YYYY-MM-DD` for finance. The maximum selectable
+period is 730 days.
+
+The operational dashboard opens on the current Moscow date. P&L opens on the
+previous full calendar month because closed marketplace finance data is usually
+not available for the current day. Every period metric is compared with the
+immediately preceding period of the same length. Labels are bilingual
+Russian/Chinese.
+
+Operational marketplace cards use these definitions:
 
 - orders and cancellations show units, product amount and cancellation rate;
-- purchased Ozon items and their amount are reconstructed from financial
-  `SaleCommission` accrual details, including returns in the selected financial
-  period; WB and Yandex use their respective saved finance/operational sources;
-- revenue is purchased-item amount plus saved compensation;
-- marketplace expenses contain finance-ledger charges but not product cost;
-- profit is revenue minus marketplace expenses and latest imported unit cost;
 - stock value is current available quantity multiplied by that unit cost.
 
-WB automatically has two display modes. If detailed realization reports cover
+P&L cards use these definitions:
+
+- WB uses only detailed realization report rows and is available only when
+  synchronized reports cover every date in the requested period;
+- Ozon uses the daily accrual ledger and posting-level `SaleCommission` rows;
+- Yandex Market uses only the official `united-netting` payment report;
+- revenue is positive financial accruals including saved compensation;
+- marketplace expenses are all financial retentions and charges, excluding
+  product cost;
+- net payout before cost is revenue minus marketplace expenses;
+- profit is net payout minus the imported product cost associated with the sold
+  units found in that same marketplace finance report.
+
+The finance calculation internally retains WB's two modes for compatibility,
+but the P&L endpoint accepts only the exact mode. If detailed realization reports cover
 the complete selected period, the card uses exact closed-period buyouts,
 revenue, expenses and cost of goods. If the period is not yet covered, the card
 title says `предварительный расчёт / 初步估算`: orders and purchases come from the
@@ -72,4 +94,6 @@ campaign metric, while attributed order amount is not labelled as accounting
 revenue. Yandex Market calculations use the official payment ledger
 (`united-netting`), where accruals are revenue and retentions are expenses.
 Until this ledger is synchronized, Yandex finance is deliberately returned as
-unavailable; order totals must not be presented as complete profit data.
+unavailable; order totals and advertising attribution are never presented as
+P&L revenue. Yandex product cost is matched from positive `Начисление`
+and negative `Возврат` product rows of the same united-netting report.

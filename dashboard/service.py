@@ -44,6 +44,55 @@ class DashboardService:
             db.rollback()
             return {"error": f"{type(exc).__name__}: {exc}"}
 
+    def _operational_period_metrics(self, db: Any, begin: date, finish: date) -> dict[str, Any]:
+        """Return only fast-changing operational facts, never finance-ledger replacements."""
+        until = finish + timedelta(days=1)
+        one = lambda sql, **params: self._one(db, sql, **params)
+        markets = {
+            "wb": one("""WITH marketplace_orders AS (
+                    SELECT srid,order_date,status,seller_price FROM wb_order_feed_orders WHERE is_mp IS TRUE
+                    UNION ALL
+                    SELECT srid,order_date,CASE WHEN is_cancel THEN 'cancel' ELSE 'active' END,
+                        coalesce(price_with_discount,finished_price,total_price,0)
+                    FROM wb_fbo_orders
+                ) SELECT count(*) orders,coalesce(sum(seller_price),0) orders_amount,
+                    count(*) FILTER (WHERE status='cancel') cancelled,
+                    coalesce(sum(seller_price) FILTER (WHERE status='cancel'),0) cancelled_amount,
+                    (SELECT count(*) FROM wb_operational_sales WHERE operation_type='sale' AND event_date>=:b AND event_date<:u) buyouts,
+                    (SELECT coalesce(sum(finished_price),0) FROM wb_operational_sales WHERE operation_type='sale' AND event_date>=:b AND event_date<:u) buyouts_amount
+                FROM marketplace_orders WHERE order_date>=:b AND order_date<:u""", b=begin, u=until),
+            "ozon": one("""WITH postings AS (SELECT order_id,order_number,posting_number,status,
+                    coalesce((SELECT sum(coalesce((p->>'quantity')::int,0)) FROM jsonb_array_elements(products::jsonb) p),0) units,
+                    coalesce((SELECT sum(coalesce((CASE WHEN jsonb_typeof(p->'price')='object' THEN coalesce(p->'price'->>'amount',p->'price'->>'value') ELSE p->>'price' END)::numeric,0)*coalesce((p->>'quantity')::int,0)) FROM jsonb_array_elements(products::jsonb) p),0) amount
+                    FROM ozon_postings WHERE in_process_at>=:b AND in_process_at<:u)
+                SELECT count(DISTINCT coalesce(order_id::text,order_number,posting_number)) orders,
+                    coalesce(sum(amount),0) orders_amount,
+                    count(*) FILTER (WHERE lower(status) IN ('cancelled','canceled')) cancelled,
+                    coalesce(sum(amount) FILTER (WHERE lower(status) IN ('cancelled','canceled')),0) cancelled_amount,
+                    coalesce(sum(units) FILTER (WHERE lower(status)='delivered'),0) buyouts,
+                    coalesce(sum(amount) FILTER (WHERE lower(status)='delivered'),0) buyouts_amount FROM postings""", b=begin, u=until),
+            "yandex_market": one("""SELECT count(*) orders,coalesce(sum(total_amount),0) orders_amount,
+                    count(*) FILTER (WHERE status='CANCELLED') cancelled,
+                    coalesce(sum(total_amount) FILTER (WHERE status='CANCELLED'),0) cancelled_amount,
+                    coalesce(sum(items_count) FILTER (WHERE status='DELIVERED'),0) buyouts,
+                    coalesce(sum(total_amount) FILTER (WHERE status='DELIVERED'),0) buyouts_amount
+                FROM yandex_market_orders WHERE created_at>=:b AND created_at<:u""", b=begin, u=until),
+        }
+        ads = {
+            "wb": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(order_sum),0) attributed_revenue FROM wb_advert_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
+            "ozon": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(orders_money),0) attributed_revenue FROM ozon_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
+            "yandex_market": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(attributed_revenue),0) attributed_revenue FROM yandex_market_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
+        }
+        for values in markets.values():
+            if "error" not in values:
+                orders = _number(values.get("orders"))
+                values["cancel_rate"] = _number(values.get("cancelled")) / orders * 100 if orders else 0
+                values["data_status"] = "operational"
+            self._convert(values)
+        for values in ads.values():
+            self._convert(values)
+        return {"marketplaces": markets, "ads": ads}
+
     def _period_metrics(self, db: Any, begin: date, finish: date) -> dict[str, Any]:
         until = finish + timedelta(days=1)
         one = lambda sql, **params: self._one(db, sql, **params)
@@ -135,7 +184,9 @@ class DashboardService:
                     sales.finance_buyouts_amount+ledger.compensation-ledger.net_accrual expenses
                 FROM ledger CROSS JOIN sales""", b=begin, e=finish),
             "yandex_market": one("""SELECT coalesce(sum(amount) FILTER (WHERE amount>0),0) revenue,
-                abs(coalesce(sum(amount) FILTER (WHERE amount<0),0)) expenses,count(*) rows
+                abs(coalesce(sum(amount) FILTER (WHERE amount<0),0)) expenses,count(*) rows,
+                coalesce(sum(CASE WHEN transaction_type='Начисление' AND amount>0 AND offer_id IS NOT NULL THEN quantity
+                    WHEN transaction_type='Возврат' AND amount<0 AND offer_id IS NOT NULL THEN -quantity ELSE 0 END),0) finance_buyouts
                 FROM yandex_market_finance_transactions WHERE transaction_at>=:b AND transaction_at<:u""", b=begin, u=until),
         }
         costs = {
@@ -168,11 +219,17 @@ class DashboardService:
                 SELECT coalesce(sum(s.quantity*coalesce(c.unit_cost,0)),0) cost_of_goods,
                     coalesce(sum(s.quantity) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
                 FROM sold s LEFT JOIN sku_master m ON m.sku=s.sku LEFT JOIN c ON c.master_product_id=m.master_product_id""", b=begin, e=finish),
-            "yandex_market": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC)
-                SELECT coalesce(sum(i.count*coalesce(c.unit_cost,0)),0) cost_of_goods,coalesce(sum(i.count) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
-                FROM yandex_market_order_items i JOIN yandex_market_orders o ON o.business_id=i.business_id AND o.order_id=i.order_id
-                LEFT JOIN marketplace_product_links l ON l.marketplace='yandex_market' AND l.active AND l.account_id=i.business_id::text AND l.external_product_id=i.offer_id
-                LEFT JOIN c ON c.master_product_id=l.master_product_id WHERE o.status='DELIVERED' AND o.created_at>=:b AND o.created_at<:u""", b=begin, u=until),
+            "yandex_market": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC),
+                sold AS (SELECT business_id,offer_id,
+                    sum(CASE WHEN transaction_type='Начисление' AND amount>0 THEN quantity
+                        WHEN transaction_type='Возврат' AND amount<0 THEN -quantity ELSE 0 END) quantity
+                    FROM yandex_market_finance_transactions
+                    WHERE transaction_at>=:b AND transaction_at<:u AND offer_id IS NOT NULL GROUP BY business_id,offer_id)
+                SELECT coalesce(sum(s.quantity*coalesce(c.unit_cost,0)),0) cost_of_goods,
+                    coalesce(sum(s.quantity) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
+                FROM sold s LEFT JOIN marketplace_product_links l ON l.marketplace='yandex_market' AND l.active
+                    AND l.account_id=s.business_id::text AND l.external_product_id=s.offer_id
+                LEFT JOIN c ON c.master_product_id=l.master_product_id""", b=begin, u=until),
         }
         ads = {
             "wb": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(order_sum),0) attributed_revenue FROM wb_advert_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
@@ -211,6 +268,9 @@ class DashboardService:
             ozon["buyouts"] = finances["ozon"].get("finance_buyouts", 0)
             ozon["buyouts_amount"] = finances["ozon"].get("finance_buyouts_amount", 0)
             ozon["buyouts_source"] = "finance_accruals"
+        if "error" not in finances["yandex_market"] and finances["yandex_market"].get("rows", 0):
+            yandex["buyouts"] = finances["yandex_market"].get("finance_buyouts", 0)
+            yandex["buyouts_source"] = "united_netting"
         for key, values in markets.items():
             self._complete(values, finances[key], costs[key])
         for item in (*markets.values(), *ads.values()):
@@ -275,22 +335,17 @@ class DashboardService:
         previous_begin, previous_finish = self.previous_period(begin, finish)
         until = finish + timedelta(days=1)
         with self.session_factory() as db:
-            current = self._period_metrics(db, begin, finish)
-            previous = self._period_metrics(db, previous_begin, previous_finish)
+            current = self._operational_period_metrics(db, begin, finish)
+            previous = self._operational_period_metrics(db, previous_begin, previous_finish)
             stocks = self._stocks(db)
             previous_stocks = self._historical_stocks(db, previous_finish)
             prices = self._one(db, "SELECT count(*) active,count(*) FILTER (WHERE in_promotion IS TRUE) promotions,count(*) FILTER (WHERE coalesce(seller_price,customer_price,list_price,0)<=0) invalid FROM marketplace_current_prices WHERE active IS TRUE")
-            if current["marketplaces"]["wb"].get("buyouts_source") == "sales_funnel":
-                wb_series = """SELECT stat_date report_day,'wb' marketplace,sum(order_count) orders,
-                        coalesce(sum(order_sum),0) revenue FROM wb_sales_funnel_daily
-                        WHERE stat_date>=:b AND stat_date<:u GROUP BY 1"""
-            else:
-                wb_series = """SELECT order_date::date report_day,'wb' marketplace,count(*) orders,
-                        coalesce(sum(seller_price),0) revenue FROM (
-                            SELECT order_date,seller_price FROM wb_order_feed_orders WHERE is_mp IS TRUE
-                            UNION ALL
-                            SELECT order_date,coalesce(price_with_discount,finished_price,total_price,0) FROM wb_fbo_orders
-                        ) wb_orders WHERE order_date>=:b AND order_date<:u GROUP BY 1"""
+            wb_series = """SELECT order_date::date report_day,'wb' marketplace,count(*) orders,
+                    coalesce(sum(seller_price),0) revenue FROM (
+                        SELECT order_date,seller_price FROM wb_order_feed_orders WHERE is_mp IS TRUE
+                        UNION ALL
+                        SELECT order_date,coalesce(price_with_discount,finished_price,total_price,0) FROM wb_fbo_orders
+                    ) wb_orders WHERE order_date>=:b AND order_date<:u GROUP BY 1"""
             series_result = self._one(db, """SELECT coalesce(json_agg(d ORDER BY report_day,marketplace),'[]'::json) data
                 FROM (SELECT report_day,marketplace,sum(orders) orders,sum(revenue) revenue FROM (
                     """ + wb_series + """
@@ -312,3 +367,50 @@ class DashboardService:
         raw = series_result.get("data", []) if "error" not in series_result else []
         series = [{**dict(row), "day": str(row["report_day"]), "revenue": _number(row["revenue"])} for row in raw]
         return {"period":{"from":begin.isoformat(),"to":finish.isoformat()},"previous_period":{"from":previous_begin.isoformat(),"to":previous_finish.isoformat()},"marketplaces":current["marketplaces"],"previous_marketplaces":previous["marketplaces"],"ads":current["ads"],"previous_ads":previous["ads"],"stocks":stocks,"previous_stocks":previous_stocks,"prices":prices,"series":series,"series_error":series_result.get("error")}
+
+    @staticmethod
+    def _pnl_view(values: dict[str, Any], marketplace: str) -> dict[str, Any]:
+        exact = "error" not in values and values.get("revenue") is not None and values.get("data_status") != "preliminary"
+        source = {
+            "wb": "детализация отчётов реализации WB",
+            "ozon": "отчёт Ozon по начислениям и начисления по отправлениям",
+            "yandex_market": "отчёт Яндекс Маркета united-netting",
+        }[marketplace]
+        if not exact:
+            return {"available": False, "source": source, "notice": values.get("finance_notice") or values.get("error") or "финансовый отчёт не покрывает весь выбранный период"}
+        revenue = _number(values.get("revenue"))
+        expenses = _number(values.get("expenses"))
+        cost = _number(values.get("cost_of_goods"))
+        return {
+            "available": True, "source": source,
+            "revenue": revenue, "compensation": values.get("compensation"),
+            "expenses": expenses, "expense_ratio": expenses / revenue * 100 if revenue else 0,
+            "net_payout": revenue - expenses, "cost_of_goods": cost,
+            "cost_missing": bool(values.get("cost_missing")),
+            "profit": revenue - expenses - cost,
+            "profit_margin": (revenue - expenses - cost) / revenue * 100 if revenue else 0,
+            "sold_units": values.get("buyouts"),
+            "finance_from": values.get("finance_from"), "finance_through": values.get("finance_through"),
+        }
+
+    def pnl(self, start: str | None, end: str | None) -> dict[str, Any]:
+        begin, finish = self.period(start, end)
+        previous_begin, previous_finish = self.previous_period(begin, finish)
+        with self.session_factory() as db:
+            current_raw = self._period_metrics(db, begin, finish)["marketplaces"]
+            previous_raw = self._period_metrics(db, previous_begin, previous_finish)["marketplaces"]
+        current = {key: self._pnl_view(values, key) for key, values in current_raw.items()}
+        previous = {key: self._pnl_view(values, key) for key, values in previous_raw.items()}
+        available = [values for values in current.values() if values.get("available")]
+        total_revenue = sum(_number(values.get("revenue")) for values in available)
+        total_expenses = sum(_number(values.get("expenses")) for values in available)
+        total_cost = sum(_number(values.get("cost_of_goods")) for values in available)
+        return {
+            "period": {"from": begin.isoformat(), "to": finish.isoformat()},
+            "previous_period": {"from": previous_begin.isoformat(), "to": previous_finish.isoformat()},
+            "marketplaces": current, "previous_marketplaces": previous,
+            "total": {"covered": len(available), "revenue": total_revenue, "expenses": total_expenses,
+                "cost_of_goods": total_cost, "net_payout": total_revenue - total_expenses,
+                "profit": total_revenue - total_expenses - total_cost,
+                "cost_missing": any(values.get("cost_missing") for values in available)},
+        }
