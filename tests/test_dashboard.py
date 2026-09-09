@@ -31,6 +31,9 @@ def test_operational_dashboard_contains_only_operational_metrics():
     assert "v.amount" in HTML
     assert "v.profit" not in HTML
     assert "v.revenue" not in HTML
+    assert 'id="month" type="month"' in HTML
+    assert "function selectMonth()" in HTML
+    assert "start.setDate(now.getDate()-6)" in HTML
 
 
 def test_pnl_dashboard_uses_only_financial_labels_and_separate_endpoint():

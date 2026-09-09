@@ -45,11 +45,13 @@ The API endpoints are `/health`,
 `/api/pnl?from=YYYY-MM-DD&to=YYYY-MM-DD` for finance. The maximum selectable
 period is 730 days.
 
-The operational dashboard opens on the current Moscow date. P&L opens on the
-previous full calendar month because closed marketplace finance data is usually
-not available for the current day. Every period metric is compared with the
-immediately preceding period of the same length. Labels are bilingual
-Russian/Chinese.
+The operational dashboard opens on the latest seven calendar days including
+the current Moscow date. Its filter supports both an arbitrary date range and a
+month picker; selecting a month immediately loads its first through last day.
+P&L opens on the previous full calendar month because closed marketplace
+finance data is usually not available for the current day. Every period metric
+is compared with the immediately preceding period of the same length. Labels
+are bilingual Russian/Chinese.
 
 Operational marketplace cards use these definitions:
 
