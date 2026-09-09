@@ -53,9 +53,30 @@ finance data is usually not available for the current day. Every period metric
 is compared with the immediately preceding period of the same length. Labels
 are bilingual Russian/Chinese.
 
+The operational page is ordered for daily sales management:
+
+1. a combined all-marketplace summary: ordered products, purchases,
+   cancellations, advertising efficiency and available stock;
+2. identical marketplace cards in the order sales, advertising, stock;
+3. the daily ordered-product chart for detecting peaks and drops.
+
+Quantity and money comparisons are displayed separately. Ordinary amounts use
+percentage change against the immediately preceding equal-length period.
+Cancellation rate and DRR are rates, so their changes are shown in percentage
+points. Growth in orders, purchases and ROAS is positive; growth in cancellation
+rate or DRR is negative. Advertising spend and stock change are neutral because
+direction alone does not establish whether the change is good. When the current
+day is included, the page explicitly warns that the incomplete day can make the
+comparison look lower. Every visible KPI has a hover/focus explanation of its
+meaning, formula, source limitation or snapshot semantics.
+
 Operational marketplace cards use these definitions:
 
-- orders and cancellations show units, product amount and cancellation rate;
+- ordered and cancelled product quantities are compared in the same unit;
+- order count is shown separately because one order can contain several items;
+- cancellation rate is cancelled items divided by ordered items;
+- purchases are sale/delivery events registered during the selected dates and
+  are not presented as a cohort conversion of orders created in those dates;
 - stock value is current available quantity multiplied by that unit cost.
 
 P&L cards use these definitions:

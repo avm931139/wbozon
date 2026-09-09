@@ -24,16 +24,38 @@ def test_dashboard_rejects_reverse_or_oversized_period():
 def test_operational_dashboard_contains_only_operational_metrics():
     assert "Выкупленные товары" in HTML
     assert "Финансовый результат" not in HTML
-    assert "v.buyouts_amount" in HTML
+    assert "value.buyouts_amount" in HTML
     assert "Оперативный дашборд" in HTML
-    assert "每日订单" in HTML
+    assert "每日订购商品" in HTML
     assert "bar.empty" in HTML
-    assert "v.amount" in HTML
-    assert "v.profit" not in HTML
-    assert "v.revenue" not in HTML
+    assert "row.amount" in HTML
+    assert ".profit" not in HTML
     assert 'id="month" type="month"' in HTML
     assert "function selectMonth()" in HTML
     assert "start.setDate(now.getDate()-6)" in HTML
+
+
+def test_operational_dashboard_has_readable_semantic_comparisons_and_help():
+    assert "Главное за период" in HTML
+    assert "По площадкам" in HTML
+    assert "сравнение с равным периодом" in HTML
+    assert "points=false,neutral=false,label=''" in HTML
+    assert "lowerBetter:true,points:true" in HTML
+    assert "neutral:true,label:'расход'" in HTML
+    assert 'data-tooltip=' in HTML
+    assert "Доля = отменённые товары ÷ заказанные товары × 100%" in HTML
+    assert "ROAS = атрибутированная сумма заказов ÷ рекламный расход" in HTML
+    assert "Сегодняшний день ещё не завершён" in HTML
+
+
+def test_operational_queries_compare_product_units_with_product_units():
+    import inspect
+
+    source = inspect.getsource(DashboardService._operational_period_metrics)
+    assert "order_items" in source
+    assert "cancelled_items" in source
+    assert 'values.get("cancelled_items")' in source
+    assert 'values.get("order_items")' in source
 
 
 def test_pnl_dashboard_uses_only_financial_labels_and_separate_endpoint():

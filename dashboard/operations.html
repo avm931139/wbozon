@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Оперативный дашборд</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#151c30;--panel2:#11182a;--line:#29334d;--text:#eef3ff;--muted:#94a3bd;--accent:#6ea8fe;--good:#38d39f;--bad:#ff6b7a;--warn:#f5c451}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,"Segoe UI",sans-serif}
+    header{padding:20px 4vw;border-bottom:1px solid var(--line);display:flex;gap:20px;align-items:end;justify-content:space-between}
+    h1{margin:0;font-size:24px}.muted,.hint{color:var(--muted)} nav{display:flex;gap:8px;margin-top:12px}
+    nav a{color:var(--text);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:8px 12px} nav a.active{background:var(--accent);color:#061020;font-weight:700}
+    .filters{display:flex;gap:8px;flex-wrap:wrap} input,button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:10px}
+    button{background:var(--accent);color:#061020;font-weight:700;cursor:pointer} main{padding:22px 4vw 40px}.status{color:var(--muted);margin-bottom:14px}.warning{color:var(--warn);margin-top:6px}
+    h2{font-size:17px;margin:24px 0 12px}.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:12px}
+    .kpi,.market,section{background:var(--panel);border:1px solid var(--line);border-radius:14px}.kpi{padding:15px}.kpi-title{color:var(--muted);font-size:12px;text-transform:uppercase}.kpi-value{font-size:23px;font-weight:760;margin-top:7px}.kpi-sub{color:var(--muted);margin-top:5px;font-size:12px}.compare-list{display:flex;gap:5px;flex-wrap:wrap}
+    .comparison{display:inline-block;margin-top:8px;padding:3px 7px;border-radius:999px;background:#252e43;color:var(--muted);font-size:11px}.comparison.good{background:#15382f;color:#72e1ba}.comparison.bad{background:#48242d;color:#ff9ba5}.comparison.neutral{background:#293247;color:#bec9dd}
+    .markets{display:grid;grid-template-columns:repeat(auto-fit,minmax(335px,1fr));gap:14px}.market{padding:17px}.market-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:13px;border-bottom:1px solid var(--line)}
+    .market h3{font-size:17px;margin:0}.market-total{text-align:right}.market-total b{display:block;font-size:20px}.market-total small{color:var(--muted)}
+    .group{padding-top:14px}.group-title{font-size:11px;text-transform:uppercase;color:var(--accent);font-weight:750;margin-bottom:8px}.metric{display:grid;grid-template-columns:1fr auto;gap:10px;padding:7px 0}.metric+.metric{border-top:1px solid rgba(41,51,77,.55)}.metric-label{color:var(--muted)}.metric-value{text-align:right;font-weight:650}.metric-value .compare-list{justify-content:flex-end}.metric-value .comparison{margin-top:4px}
+    .info{position:relative;display:inline-grid;place-items:center;width:17px;height:17px;margin-left:4px;border:1px solid #66738e;border-radius:50%;color:#b9c5dc;font-size:11px;font-weight:700;text-transform:none;cursor:help;vertical-align:middle;outline:none}.info:hover,.info:focus{border-color:var(--accent);color:var(--accent)}.info:after{content:attr(data-tooltip);position:absolute;z-index:20;left:50%;top:calc(100% + 9px);width:min(310px,75vw);padding:10px 12px;border:1px solid #415174;border-radius:9px;background:#080d19;color:var(--text);font-size:12px;font-weight:400;line-height:1.45;text-transform:none;white-space:normal;box-shadow:0 10px 30px #0008;opacity:0;visibility:hidden;transform:translate(-50%,-4px);transition:.14s}.info:hover:after,.info:focus:after{opacity:1;visibility:visible;transform:translate(-50%,0)}
+    section{padding:18px;margin-top:16px}.chart-scroll{overflow-x:auto;padding-top:42px}.bars{display:flex;align-items:end;gap:8px;height:245px;min-width:max-content;border-bottom:1px solid var(--line)}
+    .chart-item{width:74px;height:100%;display:flex;flex-direction:column;justify-content:end;align-items:center}.bar{width:56px;background:linear-gradient(180deg,var(--accent),#4169b1);border-radius:6px 6px 0 0;position:relative;min-height:8px}.bar.empty{background:#313a50;height:8px!important}.bar-value{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);white-space:nowrap;text-align:center;font-size:11px}.bar-value small{display:block;color:var(--muted);margin-top:2px}.day{height:24px;padding-top:6px;color:var(--muted);font-size:11px}.error{color:var(--bad)}
+    @media(max-width:700px){header{align-items:start;flex-direction:column}.filters{width:100%}.filters input{min-width:0;flex:1}.kpi-grid{grid-template-columns:1fr 1fr}.markets{grid-template-columns:1fr}.market-head{align-items:start}.chart-item{width:66px}.bar{width:50px}}
+    @media(max-width:430px){.kpi-grid{grid-template-columns:1fr}.metric{display:block}.metric-value{text-align:left;margin-top:3px}.metric-value .comparison{margin-left:0}}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Оперативная обстановка / 运营概览</h1>
+      <div class="muted">Что происходит с продажами прямо сейчас</div>
+      <nav><a class="active" href="/">Оперативный</a><a href="/pnl">P&amp;L</a></nav>
+    </div>
+    <div class="filters">
+      <input id="from" type="date" title="Начало периода">
+      <input id="to" type="date" title="Конец периода">
+      <input id="month" type="month" title="Выбрать месяц" onchange="selectMonth()">
+      <button onclick="load()">Обновить</button>
+    </div>
+  </header>
+  <main>
+    <div id="status" class="status"></div>
+    <h2>Главное за период / 期间核心指标</h2>
+    <div id="summary" class="kpi-grid"></div>
+    <h2>По площадкам / 按平台</h2>
+    <div id="markets" class="markets"></div>
+    <section>
+      <h2 style="margin-top:0">Заказанные товары по дням / 每日订购商品 <span class="info" tabindex="0" data-tooltip="Количество заказанных товаров и их сумма по датам создания заказов. Включает товары, которые позднее могут быть отменены или возвращены.">?</span></h2>
+      <div class="chart-scroll"><div class="bars" id="chart"></div></div>
+      <div class="hint">Суммы в этом графике — суммы оперативных заказов, а не финансовая выручка.</div>
+    </section>
+  </main>
+  <script>
+    const names={wb:'Wildberries',ozon:'Ozon',yandex_market:'Яндекс Маркет'};
+    const fromInput=document.getElementById('from'),toInput=document.getElementById('to'),monthInput=document.getElementById('month');
+    const statusBox=document.getElementById('status'),summaryBox=document.getElementById('summary'),marketsBox=document.getElementById('markets'),chartBox=document.getElementById('chart');
+    const rub=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0}).format(Number(n||0))+' ₽';
+    const num=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0}).format(Number(n||0));
+    const iso=d=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+    const sum=(rows,key)=>rows.reduce((total,row)=>total+Number(row?.[key]||0),0);
+    const ratio=(a,b)=>Number(b||0)?Number(a||0)/Number(b)*100:0;
+    const signed=value=>`${value>0?'+':''}${value.toFixed(1)}`;
+
+    const info=text=>`<span class="info" tabindex="0" data-tooltip="${text}">?</span>`;
+    const compareList=(...items)=>`<div class="compare-list">${items.join('')}</div>`;
+    const items=row=>Number(row?.order_items??row?.orders??0);
+    const cancelledItems=row=>Number(row?.cancelled_items??row?.cancelled??0);
+
+    function comparison(now,old,{lowerBetter=false,points=false,neutral=false,label=''}={}){
+      now=Number(now||0);old=Number(old||0);
+      const prefix=label?`${label}: `:'';
+      if(points){const value=now-old,good=lowerBetter?value<0:value>0;return `<span class="comparison ${value===0||neutral?'neutral':good?'good':'bad'}">${prefix}${signed(value)} п.п.</span>`}
+      if(!old)return `<span class="comparison neutral">${prefix}${now?'было 0':'без изменений'}</span>`;
+      const value=(now-old)/Math.abs(old)*100,good=lowerBetter?value<0:value>0;
+      return `<span class="comparison ${value===0||neutral?'neutral':good?'good':'bad'}">${prefix}${signed(value)}%</span>`;
+    }
+
+    function kpi(title,value,sub,compare='',help=''){
+      return `<div class="kpi"><div class="kpi-title">${title}${info(help)}</div><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div>${compare}</div>`;
+    }
+    function metric(label,value,compare='',help=''){
+      return `<div class="metric"><div class="metric-label">${label}${info(help)}</div><div class="metric-value">${value}${compare}</div></div>`;
+    }
+    function selectMonth(){
+      if(!monthInput.value)return;
+      const [year,value]=monthInput.value.split('-').map(Number);
+      fromInput.value=`${monthInput.value}-01`;toInput.value=iso(new Date(year,value,0));load();
+    }
+
+    async function load(){
+      const query=new URLSearchParams({from:fromInput.value,to:toInput.value});statusBox.textContent='Загрузка…';
+      try{
+        let response=await fetch('/api/summary?'+query);if(!response.ok)throw Error(await response.text());const data=await response.json();
+        fromInput.value=data.period.from;toInput.value=data.period.to;
+        const current=Object.values(data.marketplaces).filter(row=>!row.error),previous=Object.values(data.previous_marketplaces).filter(row=>!row.error);
+        const ads=Object.values(data.ads),previousAds=Object.values(data.previous_ads),stocks=Object.values(data.stocks),previousStocks=Object.values(data.previous_stocks);
+        const orders=sum(current,'orders'),oldOrders=sum(previous,'orders'),orderedItems=current.reduce((n,row)=>n+items(row),0),oldOrderedItems=previous.reduce((n,row)=>n+items(row),0),orderAmount=sum(current,'orders_amount'),oldOrderAmount=sum(previous,'orders_amount');
+        const cancelled=current.reduce((n,row)=>n+cancelledItems(row),0),oldCancelled=previous.reduce((n,row)=>n+cancelledItems(row),0),cancelRate=ratio(cancelled,orderedItems),oldCancelRate=ratio(oldCancelled,oldOrderedItems);
+        const buyouts=sum(current,'buyouts'),oldBuyouts=sum(previous,'buyouts'),buyoutAmount=sum(current,'buyouts_amount'),oldBuyoutAmount=sum(previous,'buyouts_amount');
+        const spend=sum(ads,'spend'),oldSpend=sum(previousAds,'spend'),attributed=sum(ads,'attributed_revenue'),oldAttributed=sum(previousAds,'attributed_revenue'),roas=spend?attributed/spend:0,oldRoas=oldSpend?oldAttributed/oldSpend:0;
+        const units=sum(stocks,'units'),oldUnits=sum(previousStocks,'units'),stockCost=sum(stocks,'cost_value'),oldStockCost=sum(previousStocks,'cost_value');
+        summaryBox.innerHTML=[
+          kpi('Заказано товаров / 订购商品',`${num(orderedItems)} шт. / ${rub(orderAmount)}`,`${num(orders)} заказов`,compareList(comparison(orderedItems,oldOrderedItems,{label:'шт.'}),comparison(orderAmount,oldOrderAmount,{label:'сумма'})),'Товары во всех созданных заказах за период, включая впоследствии отменённые. Сумма — по оперативным ценам заказа, не финансовая выручка.'),
+          kpi('Выкуплено / 已购',`${num(buyouts)} шт. / ${rub(buyoutAmount)}`,'События продажи или доставки за выбранные даты',compareList(comparison(buyouts,oldBuyouts,{label:'шт.'}),comparison(buyoutAmount,oldBuyoutAmount,{label:'сумма'})),'Товары, по которым в периоде зарегистрирована продажа или доставка. Это не когортная конверсия заказов периода: заказ мог быть создан раньше.'),
+          kpi('Отменено / 取消',`${num(cancelled)} шт. · ${cancelRate.toFixed(1)}%`,rub(sum(current,'cancelled_amount')),compareList(comparison(cancelled,oldCancelled,{lowerBetter:true,label:'шт.'}),comparison(cancelRate,oldCancelRate,{lowerBetter:true,points:true,label:'доля'})),'Отменённые товары среди заказанных товаров периода. Доля отмен = отменённые товары ÷ заказанные товары × 100%. Снижение показателя — улучшение.'),
+          kpi('Эффективность рекламы / 广告效率',roas?`ROAS ${roas.toFixed(2)}`:'ROAS —',`${rub(spend)} расход · ${rub(attributed)} атрибутировано`,compareList(comparison(roas,oldRoas,{label:'ROAS'}),comparison(spend,oldSpend,{neutral:true,label:'расход'})),'ROAS = атрибутированная рекламой сумма заказов ÷ рекламный расход. Чем выше ROAS, тем эффективнее реклама. Атрибуция у площадок различается.'),
+          kpi('Остаток / 库存',`${num(units)} шт.`,`${rub(stockCost)} по себестоимости`,compareList(comparison(units,oldUnits,{neutral:true,label:'шт.'}),comparison(stockCost,oldStockCost,{neutral:true,label:'стоимость'})),'Доступные к продаже остатки всех площадок на текущем снимке. Стоимость = количество × последняя заданная себестоимость товара.')
+        ].join('');
+
+        const errors=[];
+        marketsBox.innerHTML=Object.entries(data.marketplaces).map(([key,value])=>{
+          if(value.error){errors.push(`${names[key]}: ${value.error}`);return `<div class="market"><h3>${names[key]}</h3><p class="error">${value.error}</p></div>`}
+          const old=data.previous_marketplaces[key]||{},ad=data.ads[key]||{},oldAd=data.previous_ads[key]||{},stock=data.stocks[key]||{},oldStock=data.previous_stocks[key]||{};
+          const ordered=items(value),oldOrdered=items(old),cancelled=cancelledItems(value),currentCancelRate=ratio(cancelled,ordered),previousCancelRate=ratio(cancelledItems(old),oldOrdered),currentRoas=Number(ad.spend||0)?Number(ad.attributed_revenue||0)/Number(ad.spend):0,previousRoas=Number(oldAd.spend||0)?Number(oldAd.attributed_revenue||0)/Number(oldAd.spend):0;
+          const drr=Number(ad.attributed_revenue||0)?Number(ad.spend||0)/Number(ad.attributed_revenue)*100:0,oldDrr=Number(oldAd.attributed_revenue||0)?Number(oldAd.spend||0)/Number(oldAd.attributed_revenue)*100:0;
+          const adSpendLabel=key==='ozon'?'Рекламные кампании':'Расход на рекламу';
+          const adRevenueLabel=key==='ozon'?'Атрибутированная сумма заказов':'Атрибутировано заказов';
+          return `<article class="market"><div class="market-head"><h3>${names[key]}</h3><div class="market-total"><b>${num(ordered)} шт.</b><small>${rub(value.orders_amount)}</small></div></div>
+            <div class="group"><div class="group-title">Продажи / 销售</div>
+              ${metric('Заказано товаров',`${num(ordered)} шт. / ${rub(value.orders_amount)}`,compareList(comparison(ordered,oldOrdered,{label:'шт.'}),comparison(value.orders_amount,old.orders_amount,{label:'сумма'})),'Все товарные единицы в созданных заказах. Сумма включает заказы, которые позднее могли отменить.')}
+              ${metric('Количество заказов',num(value.orders),comparison(value.orders,old.orders,{neutral:true}),'Число уникальных заказов или отправлений площадки. Один заказ может содержать несколько товаров.')}
+              ${metric('Отменено товаров',`${num(cancelled)} шт. / ${rub(value.cancelled_amount)} · ${currentCancelRate.toFixed(1)}%`,compareList(comparison(cancelled,cancelledItems(old),{lowerBetter:true,label:'шт.'}),comparison(currentCancelRate,previousCancelRate,{lowerBetter:true,points:true,label:'доля'})),'Отменённые товарные единицы. Доля = отменённые товары ÷ заказанные товары × 100%.')}
+              ${metric('Выкупленные товары',`${num(value.buyouts)} шт. / ${rub(value.buyouts_amount)}`,compareList(comparison(value.buyouts,old.buyouts,{label:'шт.'}),comparison(value.buyouts_amount,old.buyouts_amount,{label:'сумма'})),'Продажи или доставки, зарегистрированные в выбранном периоде. Они могут относиться к заказам, созданным раньше.')}
+            </div><div class="group"><div class="group-title">Реклама / 广告</div>
+              ${metric(adSpendLabel,rub(ad.spend),comparison(ad.spend,oldAd.spend,{neutral:true}),'Расход рекламных кампаний по данным рекламного API площадки. Сам по себе рост расхода не является ни хорошим, ни плохим без оценки отдачи.')}
+              ${metric(adRevenueLabel,rub(ad.attributed_revenue),comparison(ad.attributed_revenue,oldAd.attributed_revenue),'Сумма заказов, которую площадка связала с рекламными кампаниями по своей модели атрибуции.')}
+              ${metric('ROAS',currentRoas?currentRoas.toFixed(2):'—',comparison(currentRoas,previousRoas),'ROAS = атрибутированная сумма заказов ÷ рекламный расход. Рост — улучшение.')}
+              ${metric('ДРР',ad.attributed_revenue?`${drr.toFixed(1)}%`:'—',comparison(drr,oldDrr,{lowerBetter:true,points:true}),'ДРР = рекламный расход ÷ атрибутированная сумма заказов × 100%. Снижение — улучшение.')}
+            </div><div class="group"><div class="group-title">Остатки / 库存</div>
+              ${metric('Доступно',`${num(stock.units)} шт.`,comparison(stock.units,oldStock.units,{neutral:true}),'Текущий доступный остаток площадки. Сравнение — со снимком на конец прошлого равного периода.')}
+              ${metric('В себестоимости',rub(stock.cost_value),comparison(stock.cost_value,oldStock.cost_value,{neutral:true}),'Доступный остаток × последняя загруженная себестоимость. Если у товара нет себестоимости, его количество не увеличивает эту сумму.')}
+            </div></article>`;
+        }).join('');
+
+        const days={};let cursor=new Date(data.period.from+'T00:00:00'),last=new Date(data.period.to+'T00:00:00');
+        while(cursor<=last){days[iso(cursor)]={orders:0,amount:0};cursor.setDate(cursor.getDate()+1)}
+        data.series.forEach(row=>{const item=days[row.day]||(days[row.day]={orders:0,amount:0});item.orders+=Number(row.orders||0);item.amount+=Number(row.revenue||0)});
+        const maximum=Math.max(1,...Object.values(days).map(row=>row.orders));
+        chartBox.innerHTML=Object.entries(days).map(([day,row])=>`<div class="chart-item"><div class="bar${row.orders?'':' empty'}" style="height:${row.orders?Math.max(12,row.orders/maximum*100):8}%"><div class="bar-value">${num(row.orders)} шт.<small>${rub(row.amount)}</small></div></div><div class="day">${day.slice(8,10)}.${day.slice(5,7)}</div></div>`).join('');
+        const today=iso(new Date()),partial=data.period.to===today?'<div class="warning">Сегодняшний день ещё не завершён: сравнение с прошлым периодом будет занижено.</div>':'';
+        statusBox.innerHTML=`Период: ${data.period.from} — ${data.period.to} · сравнение с равным периодом: ${data.previous_period.from} — ${data.previous_period.to}${partial}`+(errors.length?`<div class="error">Часть данных недоступна: ${errors.join('; ')}</div>`:'');
+      }catch(error){statusBox.innerHTML=`<div class="error">${error.message}</div>`}
+    }
+
+    const now=new Date(),start=new Date(now);start.setDate(now.getDate()-6);fromInput.value=iso(start);toInput.value=iso(now);load();
+  </script>
+</body>
+</html>

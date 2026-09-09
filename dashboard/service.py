@@ -55,8 +55,9 @@ class DashboardService:
                     SELECT srid,order_date,CASE WHEN is_cancel THEN 'cancel' ELSE 'active' END,
                         coalesce(price_with_discount,finished_price,total_price,0)
                     FROM wb_fbo_orders
-                ) SELECT count(*) orders,coalesce(sum(seller_price),0) orders_amount,
+                ) SELECT count(*) orders,count(*) order_items,coalesce(sum(seller_price),0) orders_amount,
                     count(*) FILTER (WHERE status='cancel') cancelled,
+                    count(*) FILTER (WHERE status='cancel') cancelled_items,
                     coalesce(sum(seller_price) FILTER (WHERE status='cancel'),0) cancelled_amount,
                     (SELECT count(*) FROM wb_operational_sales WHERE operation_type='sale' AND event_date>=:b AND event_date<:u) buyouts,
                     (SELECT coalesce(sum(finished_price),0) FROM wb_operational_sales WHERE operation_type='sale' AND event_date>=:b AND event_date<:u) buyouts_amount
@@ -66,13 +67,16 @@ class DashboardService:
                     coalesce((SELECT sum(coalesce((CASE WHEN jsonb_typeof(p->'price')='object' THEN coalesce(p->'price'->>'amount',p->'price'->>'value') ELSE p->>'price' END)::numeric,0)*coalesce((p->>'quantity')::int,0)) FROM jsonb_array_elements(products::jsonb) p),0) amount
                     FROM ozon_postings WHERE in_process_at>=:b AND in_process_at<:u)
                 SELECT count(DISTINCT coalesce(order_id::text,order_number,posting_number)) orders,
+                    coalesce(sum(units),0) order_items,
                     coalesce(sum(amount),0) orders_amount,
                     count(*) FILTER (WHERE lower(status) IN ('cancelled','canceled')) cancelled,
+                    coalesce(sum(units) FILTER (WHERE lower(status) IN ('cancelled','canceled')),0) cancelled_items,
                     coalesce(sum(amount) FILTER (WHERE lower(status) IN ('cancelled','canceled')),0) cancelled_amount,
                     coalesce(sum(units) FILTER (WHERE lower(status)='delivered'),0) buyouts,
                     coalesce(sum(amount) FILTER (WHERE lower(status)='delivered'),0) buyouts_amount FROM postings""", b=begin, u=until),
-            "yandex_market": one("""SELECT count(*) orders,coalesce(sum(total_amount),0) orders_amount,
+            "yandex_market": one("""SELECT count(*) orders,coalesce(sum(items_count),0) order_items,coalesce(sum(total_amount),0) orders_amount,
                     count(*) FILTER (WHERE status='CANCELLED') cancelled,
+                    coalesce(sum(items_count) FILTER (WHERE status='CANCELLED'),0) cancelled_items,
                     coalesce(sum(total_amount) FILTER (WHERE status='CANCELLED'),0) cancelled_amount,
                     coalesce(sum(items_count) FILTER (WHERE status='DELIVERED'),0) buyouts,
                     coalesce(sum(total_amount) FILTER (WHERE status='DELIVERED'),0) buyouts_amount
@@ -85,8 +89,8 @@ class DashboardService:
         }
         for values in markets.values():
             if "error" not in values:
-                orders = _number(values.get("orders"))
-                values["cancel_rate"] = _number(values.get("cancelled")) / orders * 100 if orders else 0
+                ordered_items = _number(values.get("order_items"))
+                values["cancel_rate"] = _number(values.get("cancelled_items")) / ordered_items * 100 if ordered_items else 0
                 values["data_status"] = "operational"
             self._convert(values)
         for values in ads.values():
@@ -351,7 +355,8 @@ class DashboardService:
                     """ + wb_series + """
                     UNION ALL
                     SELECT in_process_at::date,'ozon',
-                        count(DISTINCT coalesce(order_id::text,order_number,posting_number)),
+                        coalesce(sum((SELECT sum(coalesce((p->>'quantity')::int,0))
+                            FROM jsonb_array_elements(products::jsonb) p)),0),
                         coalesce(sum((SELECT sum(coalesce(
                             (CASE WHEN jsonb_typeof(p->'price')='object'
                                 THEN coalesce(p->'price'->>'amount',p->'price'->>'value')
@@ -360,7 +365,7 @@ class DashboardService:
                             FROM jsonb_array_elements(products::jsonb) p)),0)
                     FROM ozon_postings WHERE in_process_at>=:b AND in_process_at<:u GROUP BY 1
                     UNION ALL
-                    SELECT created_at::date,'yandex_market',count(*),coalesce(sum(total_amount),0)
+                    SELECT created_at::date,'yandex_market',coalesce(sum(items_count),0),coalesce(sum(total_amount),0)
                     FROM yandex_market_orders WHERE created_at>=:b AND created_at<:u GROUP BY 1
                 ) x GROUP BY report_day,marketplace) d""", b=begin, u=until)
         self._convert(prices)

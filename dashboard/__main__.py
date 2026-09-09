@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from app.config import DASHBOARD_HOST, DASHBOARD_PORT
@@ -44,8 +45,10 @@ async function load(){let q=new URLSearchParams({from:from.value,to:to.value});s
 let now=new Date(),first=new Date(now.getFullYear(),now.getMonth()-1,1),last=new Date(now.getFullYear(),now.getMonth(),0),iso=d=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');from.value=iso(first);to.value=iso(last);load();
 </script></body></html>'''
 
-# Backward-compatible export used by tests and local integrations.
-HTML = OPERATIONAL_HTML
+# Kept as a public constant for tests and local integrations.  The operational
+# page lives in a separate file so its layout and metric explanations remain
+# maintainable without touching the HTTP server implementation.
+HTML = Path(__file__).with_name("operations.html").read_text(encoding="utf-8")
 
 
 class Handler(BaseHTTPRequestHandler):
