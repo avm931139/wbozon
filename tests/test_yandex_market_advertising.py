@@ -148,3 +148,32 @@ def test_business_id_is_discovered_from_identity_data():
         api=object(), session_factory=factory, business_id=None
     )
     assert service._business_id() == 216673578
+
+
+def test_automatic_advertising_sync_backfills_newest_missing_day(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    with factory() as session:
+        for source in YandexMarketAdvertisingService.SOURCES:
+            session.add(YandexMarketAdDailyStat(
+                stat_date=date(2026, 9, 6),
+                source=source,
+                business_id=777,
+                campaign_id="total",
+                fetched_at=datetime(2026, 9, 6, tzinfo=timezone.utc),
+            ))
+        session.commit()
+
+    monkeypatch.setattr(
+        "yandex_market.services.advertising_service.YANDEX_MARKET_HISTORY_FROM",
+        "2026-09-01",
+    )
+    monkeypatch.setattr(
+        "yandex_market.services.advertising_service.YANDEX_MARKET_AD_HISTORY_DAYS", 90
+    )
+    service = YandexMarketAdvertisingService(
+        api=object(), session_factory=factory, business_id=777
+    )
+
+    assert service._target_date(date(2026, 9, 6)) == date(2026, 9, 5)

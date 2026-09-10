@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import PurePosixPath
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import distinct, func
+
 from app.config import (
     YANDEX_MARKET_AD_POLL_ATTEMPTS,
     YANDEX_MARKET_AD_POLL_SECONDS,
+    YANDEX_MARKET_AD_HISTORY_DAYS,
+    YANDEX_MARKET_AD_REFRESH_DAYS,
     YANDEX_MARKET_BUSINESS_ID,
+    YANDEX_MARKET_HISTORY_FROM,
     YANDEX_MARKET_TIMEZONE,
 )
 from app.db import SessionLocal
@@ -41,7 +46,8 @@ class YandexMarketAdvertisingService:
 
     def sync(self, *, stat_date: date | None = None) -> dict[str, Any]:
         business_id = self._business_id()
-        stat_date = stat_date or datetime.now(ZoneInfo(YANDEX_MARKET_TIMEZONE)).date()
+        today = datetime.now(ZoneInfo(YANDEX_MARKET_TIMEZONE)).date()
+        stat_date = stat_date or self._target_date(today)
         results: dict[str, Any] = {}
         errors: list[str] = []
         for source in self.SOURCES:
@@ -69,6 +75,52 @@ class YandexMarketAdvertisingService:
         if errors:
             raise RuntimeError("; ".join(errors))
         return {"date": stat_date.isoformat(), "sources": results}
+
+    def _target_date(self, today: date) -> date:
+        """Backfill one day per run, then continuously refresh recent attribution."""
+        if YANDEX_MARKET_AD_HISTORY_DAYS < 1:
+            raise ValueError("YANDEX_MARKET_AD_HISTORY_DAYS must be positive")
+        if YANDEX_MARKET_AD_REFRESH_DAYS < 1:
+            raise ValueError("YANDEX_MARKET_AD_REFRESH_DAYS must be positive")
+        history_from = max(
+            date.fromisoformat(YANDEX_MARKET_HISTORY_FROM),
+            today - timedelta(days=YANDEX_MARKET_AD_HISTORY_DAYS - 1),
+        )
+        with self.session_factory() as session:
+            complete = {
+                day
+                for day, count in (
+                    session.query(
+                        YandexMarketAdDailyStat.stat_date,
+                        func.count(distinct(YandexMarketAdDailyStat.source)),
+                    )
+                    .filter(YandexMarketAdDailyStat.stat_date.between(history_from, today))
+                    .group_by(YandexMarketAdDailyStat.stat_date)
+                    .all()
+                )
+                if count == len(self.SOURCES)
+            }
+            # Newest-first makes the operational dashboard useful while older
+            # history is being filled in the background.
+            cursor = today
+            while cursor >= history_from:
+                if cursor not in complete:
+                    return cursor
+                cursor -= timedelta(days=1)
+            refresh_from = max(
+                history_from, today - timedelta(days=YANDEX_MARKET_AD_REFRESH_DAYS - 1)
+            )
+            oldest = (
+                session.query(
+                    YandexMarketAdDailyStat.stat_date,
+                    func.min(YandexMarketAdDailyStat.fetched_at),
+                )
+                .filter(YandexMarketAdDailyStat.stat_date.between(refresh_from, today))
+                .group_by(YandexMarketAdDailyStat.stat_date)
+                .order_by(func.min(YandexMarketAdDailyStat.fetched_at))
+                .first()
+            )
+        return oldest[0] if oldest else today
 
     def _business_id(self) -> int:
         if self.business_id:

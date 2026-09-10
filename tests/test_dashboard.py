@@ -92,6 +92,19 @@ def test_operational_service_does_not_query_finance_ledgers():
     assert 'values["data_status"] = "operational"' in source
 
 
+def test_yandex_advertising_uses_actual_marketing_charges_and_checks_coverage():
+    import inspect
+
+    source = inspect.getsource(DashboardService._advertising_metrics)
+    assert "yandex_market_finance_transactions" in source
+    assert "product_or_service ILIKE" in source
+    assert "marketing_finance" in source
+    assert "coverage_days" in source
+    assert "attribution_complete" in source
+    assert "attributionComplete" in HTML
+    assert "атрибуция загружается" in HTML
+
+
 def test_dashboard_uses_historical_marketplace_order_sources():
     import inspect
 

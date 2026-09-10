@@ -37,6 +37,8 @@ YANDEX_MARKET_TIMEZONE=Europe/Moscow
 YANDEX_MARKET_REQUIRED_TASKS=identity,catalog,orders,advertising,finances
 YANDEX_MARKET_AD_POLL_SECONDS=5
 YANDEX_MARKET_AD_POLL_ATTEMPTS=36
+YANDEX_MARKET_AD_HISTORY_DAYS=90
+YANDEX_MARKET_AD_REFRESH_DAYS=14
 YANDEX_MARKET_AD_MAX_AGE_SECONDS=7200
 YANDEX_MARKET_FINANCE_MAX_AGE_SECONDS=7200
 ```
@@ -60,11 +62,20 @@ python -m inventory_sync --marketplace yandex_market --once
 ```
 
 `advertising` независимо получает статистику буста продаж, буста показов и
-охватного продвижения за текущую московскую дату. Для API-ключа нужен доступ
+охватного продвижения. Почасовой запуск сначала заполняет по одному самому новому
+пропущенному дню за окно `YANDEX_MARKET_AD_HISTORY_DAYS` (по умолчанию 90 дней),
+а после полного заполнения повторно обновляет последние
+`YANDEX_MARKET_AD_REFRESH_DAYS` дней: атрибуция рекламы может дозревать после
+первого получения отчёта. Для API-ключа нужен доступ
 `promotion:read-only`, `finance-and-accounting` либо полный read-only доступ.
 Асинхронные JSON-отчёты опрашиваются до готовности; ошибка задачи не откатывает
 заказы, каталог или остатки. Если `YANDEX_MARKET_BUSINESS_ID` не задан, задача
 использует единственный кабинет, ранее сохранённый заданием `identity`.
+
+В оперативном дашборде расход Яндекс Маркета берётся не из неполного рекламного
+среза, а из фактических рекламных списаний и удержаний отчёта
+`united-netting`. Атрибутированная сумма заказов, ROAS и ДРР показываются только
+когда все три рекламных отчёта покрывают каждый день выбранного периода.
 
 `finances` каждый час формирует официальный JSON-отчёт по платежам
 `/v2/reports/united-netting/generate`, сохраняет каждое начисление положительной

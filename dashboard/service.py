@@ -44,6 +44,42 @@ class DashboardService:
             db.rollback()
             return {"error": f"{type(exc).__name__}: {exc}"}
 
+    def _advertising_metrics(self, db: Any, begin: date, finish: date) -> dict[str, Any]:
+        """Return performance attribution and the actual Yandex marketing charge."""
+        one = lambda sql, **params: self._one(db, sql, **params)
+        result = {
+            "wb": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(order_sum),0) attributed_revenue FROM wb_advert_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
+            "ozon": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(orders_money),0) attributed_revenue FROM ozon_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
+            "yandex_market": one("""WITH daily_coverage AS (
+                    SELECT stat_date,count(DISTINCT source) sources
+                    FROM yandex_market_ad_daily_stats
+                    WHERE stat_date>=:b AND stat_date<=:e GROUP BY stat_date
+                ), performance AS (
+                    SELECT coalesce(sum(attributed_revenue),0) attributed_revenue
+                    FROM yandex_market_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e
+                ), expense AS (
+                    SELECT greatest(coalesce(-sum(amount),0),0) spend
+                    FROM yandex_market_finance_transactions
+                    WHERE transaction_at>=:b AND transaction_at<CAST(:e AS date)+1
+                      AND (product_or_service ILIKE '%буст%'
+                           OR product_or_service ILIKE '%реклам%'
+                           OR product_or_service ILIKE '%продвиж%'
+                           OR product_or_service ILIKE '%полк%')
+                ) SELECT expense.spend,performance.attributed_revenue,
+                    coalesce((SELECT count(*) FROM daily_coverage WHERE sources=3),0) coverage_days,
+                    CAST(:e AS date)-CAST(:b AS date)+1 expected_days,
+                    coalesce((SELECT count(*) FROM daily_coverage WHERE sources=3),0)
+                        = CAST(:e AS date)-CAST(:b AS date)+1 attribution_complete,
+                    'marketing_finance' spend_source,'marketing_reports' attribution_source
+                FROM expense CROSS JOIN performance""", b=begin, e=finish),
+        }
+        for key in ("wb", "ozon"):
+            if "error" not in result[key]:
+                result[key]["attribution_complete"] = True
+        for values in result.values():
+            self._convert(values)
+        return result
+
     def _operational_period_metrics(self, db: Any, begin: date, finish: date) -> dict[str, Any]:
         """Return only fast-changing operational facts, never finance-ledger replacements."""
         until = finish + timedelta(days=1)
@@ -82,18 +118,12 @@ class DashboardService:
                     coalesce(sum(total_amount) FILTER (WHERE status='DELIVERED'),0) buyouts_amount
                 FROM yandex_market_orders WHERE created_at>=:b AND created_at<:u""", b=begin, u=until),
         }
-        ads = {
-            "wb": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(order_sum),0) attributed_revenue FROM wb_advert_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
-            "ozon": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(orders_money),0) attributed_revenue FROM ozon_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
-            "yandex_market": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(attributed_revenue),0) attributed_revenue FROM yandex_market_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
-        }
+        ads = self._advertising_metrics(db, begin, finish)
         for values in markets.values():
             if "error" not in values:
                 ordered_items = _number(values.get("order_items"))
                 values["cancel_rate"] = _number(values.get("cancelled_items")) / ordered_items * 100 if ordered_items else 0
                 values["data_status"] = "operational"
-            self._convert(values)
-        for values in ads.values():
             self._convert(values)
         return {"marketplaces": markets, "ads": ads}
 
@@ -235,11 +265,7 @@ class DashboardService:
                     AND l.account_id=s.business_id::text AND l.external_product_id=s.offer_id
                 LEFT JOIN c ON c.master_product_id=l.master_product_id""", b=begin, u=until),
         }
-        ads = {
-            "wb": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(order_sum),0) attributed_revenue FROM wb_advert_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
-            "ozon": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(orders_money),0) attributed_revenue FROM ozon_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
-            "yandex_market": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(attributed_revenue),0) attributed_revenue FROM yandex_market_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
-        }
+        ads = self._advertising_metrics(db, begin, finish)
         markets = {"wb": wb, "ozon": ozon, "yandex_market": yandex}
         wb_finance_exact = "error" not in finances["wb"] and bool(finances["wb"].get("covered"))
         if wb_finance_exact:

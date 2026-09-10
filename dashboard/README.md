@@ -81,6 +81,13 @@ Operational marketplace cards use these definitions:
   are not presented as a cohort conversion of orders created in those dates;
 - stock value is current available quantity multiplied by that unit cost.
 
+For Yandex Market, operational advertising spend is the net amount of actual
+marketing charges in the synchronized `united-netting` finance ledger. The
+marketing reports remain the source of attributed order amount. Because report
+attribution can arrive later, attributed amount, ROAS and DRR are hidden until
+all three report sources cover every calendar day selected; the card shows the
+current coverage instead of presenting a partial value as final.
+
 Order cards identify their operational sources: WB Order Feed plus FBO Orders,
 Ozon Postings, and Yandex Market Orders API. Marketplace cabinet funnel exports
 are cohort analytics and can be recalculated after order creation, so they are

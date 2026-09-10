@@ -63,6 +63,11 @@ sudo systemctl enable --now \
 `yandex_market_sync_runs`. Почасовой групповой Telegram-отчёт читает сохранённые
 заказы и не обращается к API Маркета.
 
+После включения `wbozon-yandex-market-advertising.timer` удалите прежний запуск
+`python -m yandex_market --task advertising` из пользовательского `crontab`.
+Одновременный cron и systemd timer создают два запроса отчёта и приводят к
+ошибкам лимита API. Остальные строки crontab удалять не нужно.
+
 ## Основные сервисы и Telegram
 
 ```bash
