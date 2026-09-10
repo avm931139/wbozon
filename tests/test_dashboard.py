@@ -27,9 +27,9 @@ def test_operational_dashboard_contains_only_operational_metrics():
     assert "Финансовый результат" not in HTML
     assert "value.buyouts_amount" in HTML
     assert "Оперативный дашборд" in HTML
-    assert "每日订购商品" in HTML
+    assert "每日各平台订单额" in HTML
     assert "bar.empty" in HTML
-    assert "row.amount" in HTML
+    assert "value.amount" in HTML
     assert ".profit" not in HTML
     assert 'id="month" type="month"' in HTML
     assert "function selectMonth()" in HTML
@@ -49,6 +49,17 @@ def test_operational_dashboard_has_readable_semantic_comparisons_and_help():
     assert "Доля = отменённые товары ÷ заказанные товары × 100%" in HTML
     assert "ROAS = атрибутированная сумма заказов ÷ рекламный расход" in HTML
     assert "Сегодняшний день ещё не завершён" in HTML
+    assert "Доля общих заказов" in HTML
+    assert "Средняя цена товара" in HTML
+    assert "Среднее в день" in HTML
+    assert "Прогноз заказов месяца" in HTML
+    assert "function monthProjection" in HTML
+    assert ".bar.wb" in HTML
+    assert "marketKeys=['wb','ozon','yandex_market']" in HTML
+    assert "height:${height}%" in HTML
+    assert "WB Order Feed и FBO Orders" in HTML
+    assert "Ozon Postings" in HTML
+    assert "Yandex Market Orders API" in HTML
 
 
 def test_operational_queries_compare_product_units_with_product_units():

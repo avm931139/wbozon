@@ -81,6 +81,17 @@ Operational marketplace cards use these definitions:
   are not presented as a cohort conversion of orders created in those dates;
 - stock value is current available quantity multiplied by that unit cost.
 
+Order cards identify their operational sources: WB Order Feed plus FBO Orders,
+Ozon Postings, and Yandex Market Orders API. Marketplace cabinet funnel exports
+are cohort analytics and can be recalculated after order creation, so they are
+used for reconciliation rather than silently mixed into the realtime series.
+The marketplace share is calculated independently for units and money. Average
+product price is order amount divided by ordered units; daily average includes
+all calendar days in the selected range. Monthly projection is the average
+daily order amount in the selected part of the end month multiplied by that
+month's calendar-day count. It is an operational run-rate, not revenue or a
+sales plan.
+
 P&L cards use these definitions:
 
 - WB uses only detailed realization report rows and is available only when

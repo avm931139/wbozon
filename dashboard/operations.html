@@ -19,9 +19,9 @@
     .market h3{font-size:17px;margin:0}.market-total{text-align:right}.market-total b{display:block;font-size:20px}.market-total small{color:var(--muted)}
     .group{padding-top:14px}.group-title{font-size:11px;text-transform:uppercase;color:var(--accent);font-weight:750;margin-bottom:8px}.metric{display:grid;grid-template-columns:1fr auto;gap:10px;padding:7px 0}.metric+.metric{border-top:1px solid rgba(41,51,77,.55)}.metric-label{color:var(--muted)}.metric-value{text-align:right;font-weight:650}.metric-value .compare-list{justify-content:flex-end}.metric-value .comparison{margin-top:4px}
     .info{position:relative;display:inline-grid;place-items:center;width:17px;height:17px;margin-left:4px;border:1px solid #66738e;border-radius:50%;color:#b9c5dc;font-size:11px;font-weight:700;text-transform:none;cursor:help;vertical-align:middle;outline:none}.info:hover,.info:focus{border-color:var(--accent);color:var(--accent)}.info:after{content:attr(data-tooltip);position:absolute;z-index:20;left:50%;top:calc(100% + 9px);width:min(310px,75vw);padding:10px 12px;border:1px solid #415174;border-radius:9px;background:#080d19;color:var(--text);font-size:12px;font-weight:400;line-height:1.45;text-transform:none;white-space:normal;box-shadow:0 10px 30px #0008;opacity:0;visibility:hidden;transform:translate(-50%,-4px);transition:.14s}.info:hover:after,.info:focus:after{opacity:1;visibility:visible;transform:translate(-50%,0)}
-    section{padding:18px;margin-top:16px}.chart-scroll{overflow-x:auto;padding-top:42px}.bars{display:flex;align-items:end;gap:8px;height:245px;min-width:max-content;border-bottom:1px solid var(--line)}
-    .chart-item{width:74px;height:100%;display:flex;flex-direction:column;justify-content:end;align-items:center}.bar{width:56px;background:linear-gradient(180deg,var(--accent),#4169b1);border-radius:6px 6px 0 0;position:relative;min-height:8px}.bar.empty{background:#313a50;height:8px!important}.bar-value{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);white-space:nowrap;text-align:center;font-size:11px}.bar-value small{display:block;color:var(--muted);margin-top:2px}.day{height:24px;padding-top:6px;color:var(--muted);font-size:11px}.error{color:var(--bad)}
-    @media(max-width:700px){header{align-items:start;flex-direction:column}.filters{width:100%}.filters input{min-width:0;flex:1}.kpi-grid{grid-template-columns:1fr 1fr}.markets{grid-template-columns:1fr}.market-head{align-items:start}.chart-item{width:66px}.bar{width:50px}}
+    section{padding:18px;margin-top:16px}.chart-scroll{overflow-x:auto;padding-top:52px}.bars{display:flex;align-items:end;gap:12px;height:270px;min-width:max-content;border-bottom:1px solid var(--line)}
+    .chart-item{width:148px;height:100%;display:flex;flex-direction:column;justify-content:end;align-items:center}.bar-group{width:100%;height:calc(100% - 24px);display:flex;align-items:end;justify-content:center;gap:5px}.bar{width:42px;border-radius:6px 6px 0 0;position:relative;min-height:8px}.bar.wb{background:#8d57d9}.bar.ozon{background:#2878f0}.bar.yandex_market{background:#f0b429}.bar.empty{background:#313a50;height:8px!important}.bar-value{position:absolute;bottom:calc(100% + 5px);left:50%;transform:translateX(-50%);white-space:nowrap;text-align:center;font-size:10px}.bar-value small{display:block;color:var(--muted);margin-top:1px}.day{height:24px;padding-top:6px;color:var(--muted);font-size:11px}.chart-legend{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0 7px;color:var(--muted)}.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px}.dot.wb{background:#8d57d9}.dot.ozon{background:#2878f0}.dot.yandex_market{background:#f0b429}.error{color:var(--bad)}
+    @media(max-width:700px){header{align-items:start;flex-direction:column}.filters{width:100%}.filters input{min-width:0;flex:1}.kpi-grid{grid-template-columns:1fr 1fr}.markets{grid-template-columns:1fr}.market-head{align-items:start}.chart-item{width:136px}.bar{width:38px}}
     @media(max-width:430px){.kpi-grid{grid-template-columns:1fr}.metric{display:block}.metric-value{text-align:left;margin-top:3px}.metric-value .comparison{margin-left:0}}
   </style>
 </head>
@@ -47,13 +47,15 @@
     <h2>По площадкам / 按平台</h2>
     <div id="markets" class="markets"></div>
     <section>
-      <h2 style="margin-top:0">Заказанные товары по дням / 每日订购商品 <span class="info" tabindex="0" data-tooltip="Количество заказанных товаров и их сумма по датам создания заказов. Включает товары, которые позднее могут быть отменены или возвращены.">?</span></h2>
+      <h2 style="margin-top:0">Сумма заказанных товаров по дням и площадкам / 每日各平台订单额 <span class="info" tabindex="0" data-tooltip="Высота столбика соответствует сумме заказанных товаров площадки за день. Над столбиком указаны сумма и количество товаров. Включены заказы, которые позднее могут быть отменены или возвращены.">?</span></h2>
       <div class="chart-scroll"><div class="bars" id="chart"></div></div>
+      <div class="chart-legend"><span><i class="dot wb"></i>Wildberries</span><span><i class="dot ozon"></i>Ozon</span><span><i class="dot yandex_market"></i>Яндекс Маркет</span></div>
       <div class="hint">Суммы в этом графике — суммы оперативных заказов, а не финансовая выручка.</div>
     </section>
   </main>
   <script>
     const names={wb:'Wildberries',ozon:'Ozon',yandex_market:'Яндекс Маркет'};
+    const orderSources={wb:'WB Order Feed и FBO Orders',ozon:'Ozon Postings',yandex_market:'Yandex Market Orders API'};
     const fromInput=document.getElementById('from'),toInput=document.getElementById('to'),monthInput=document.getElementById('month');
     const statusBox=document.getElementById('status'),summaryBox=document.getElementById('summary'),marketsBox=document.getElementById('markets'),chartBox=document.getElementById('chart');
     const rub=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0}).format(Number(n||0))+' ₽';
@@ -62,6 +64,8 @@
     const sum=(rows,key)=>rows.reduce((total,row)=>total+Number(row?.[key]||0),0);
     const ratio=(a,b)=>Number(b||0)?Number(a||0)/Number(b)*100:0;
     const signed=value=>`${value>0?'+':''}${value.toFixed(1)}`;
+    const dayCount=(start,end)=>Math.round((new Date(end+'T00:00:00')-new Date(start+'T00:00:00'))/86400000)+1;
+    const shortRub=value=>new Intl.NumberFormat('ru-RU',{notation:'compact',maximumFractionDigits:1}).format(Number(value||0))+' ₽';
 
     const info=text=>`<span class="info" tabindex="0" data-tooltip="${text}">?</span>`;
     const compareList=(...items)=>`<div class="compare-list">${items.join('')}</div>`;
@@ -89,6 +93,12 @@
       const lastDay=new Date(year,value,0);
       fromInput.value=`${monthInput.value}-01`;toInput.value=iso(lastDay>now?now:lastDay);load();
     }
+    function monthProjection(rows,marketplace,period){
+      const month=period.to.slice(0,7),monthStart=`${month}-01`,sampleStart=period.from>monthStart?period.from:monthStart;
+      const [year,value]=month.split('-').map(Number),monthDays=new Date(year,value,0).getDate(),sampleDays=dayCount(sampleStart,period.to);
+      const actual=rows.filter(row=>row.day.startsWith(month)&&(!marketplace||row.marketplace===marketplace)).reduce((total,row)=>total+Number(row.revenue||0),0);
+      return {value:sampleDays?actual/sampleDays*monthDays:0,sampleDays,monthDays};
+    }
 
     async function load(){
       const query=new URLSearchParams({from:fromInput.value,to:toInput.value});statusBox.textContent='Загрузка…';
@@ -101,12 +111,14 @@
         const cancelled=current.reduce((n,row)=>n+cancelledItems(row),0),oldCancelled=previous.reduce((n,row)=>n+cancelledItems(row),0),cancelRate=ratio(cancelled,orderedItems),oldCancelRate=ratio(oldCancelled,oldOrderedItems);
         const buyouts=sum(current,'buyouts'),oldBuyouts=sum(previous,'buyouts'),buyoutAmount=sum(current,'buyouts_amount'),oldBuyoutAmount=sum(previous,'buyouts_amount');
         const spend=sum(ads,'spend'),oldSpend=sum(previousAds,'spend'),attributed=sum(ads,'attributed_revenue'),oldAttributed=sum(previousAds,'attributed_revenue'),roas=spend?attributed/spend:0,oldRoas=oldSpend?oldAttributed/oldSpend:0;
-        const units=sum(stocks,'units'),oldUnits=sum(previousStocks,'units'),stockCost=sum(stocks,'cost_value'),oldStockCost=sum(previousStocks,'cost_value');
+        const units=sum(stocks,'units'),oldUnits=sum(previousStocks,'units'),stockCost=sum(stocks,'cost_value'),oldStockCost=sum(previousStocks,'cost_value'),days=dayCount(data.period.from,data.period.to);
+        const totalProjection=monthProjection(data.series,null,data.period),oldProjection=oldOrderAmount/days*totalProjection.monthDays;
         summaryBox.innerHTML=[
           kpi('Заказано товаров / 订购商品',`${num(orderedItems)} шт. / ${rub(orderAmount)}`,`${num(orders)} заказов`,compareList(comparison(orderedItems,oldOrderedItems,{label:'шт.'}),comparison(orderAmount,oldOrderAmount,{label:'сумма'})),'Товары во всех созданных заказах за период, включая впоследствии отменённые. Сумма — по оперативным ценам заказа, не финансовая выручка.'),
           kpi('Выкуплено / 已购',`${num(buyouts)} шт. / ${rub(buyoutAmount)}`,'События продажи или доставки за выбранные даты',compareList(comparison(buyouts,oldBuyouts,{label:'шт.'}),comparison(buyoutAmount,oldBuyoutAmount,{label:'сумма'})),'Товары, по которым в периоде зарегистрирована продажа или доставка. Это не когортная конверсия заказов периода: заказ мог быть создан раньше.'),
           kpi('Отменено / 取消',`${num(cancelled)} шт. · ${cancelRate.toFixed(1)}%`,rub(sum(current,'cancelled_amount')),compareList(comparison(cancelled,oldCancelled,{lowerBetter:true,label:'шт.'}),comparison(cancelRate,oldCancelRate,{lowerBetter:true,points:true,label:'доля'})),'Отменённые товары среди заказанных товаров периода. Доля отмен = отменённые товары ÷ заказанные товары × 100%. Снижение показателя — улучшение.'),
           kpi('Эффективность рекламы / 广告效率',roas?`ROAS ${roas.toFixed(2)}`:'ROAS —',`${rub(spend)} расход · ${rub(attributed)} атрибутировано`,compareList(comparison(roas,oldRoas,{label:'ROAS'}),comparison(spend,oldSpend,{neutral:true,label:'расход'})),'ROAS = атрибутированная рекламой сумма заказов ÷ рекламный расход. Чем выше ROAS, тем эффективнее реклама. Атрибуция у площадок различается.'),
+          kpi('Прогноз заказов месяца / 月度预测',rub(totalProjection.value),`по темпу ${totalProjection.sampleDays} дн. из ${totalProjection.monthDays}`,comparison(totalProjection.value,oldProjection,{label:'к прошлому темпу'}),'Расчётный объём заказов в рублях = средняя дневная сумма заказов выбранной части месяца × число календарных дней месяца. Сравнение использует дневной темп равного прошлого периода. Это прогноз, не финансовая выручка и не план.'),
           kpi('Остаток / 库存',`${num(units)} шт.`,`${rub(stockCost)} по себестоимости`,compareList(comparison(units,oldUnits,{neutral:true,label:'шт.'}),comparison(stockCost,oldStockCost,{neutral:true,label:'стоимость'})),'Доступные к продаже остатки всех площадок на текущем снимке. Стоимость = количество × последняя заданная себестоимость товара.')
         ].join('');
 
@@ -116,12 +128,17 @@
           const old=data.previous_marketplaces[key]||{},ad=data.ads[key]||{},oldAd=data.previous_ads[key]||{},stock=data.stocks[key]||{},oldStock=data.previous_stocks[key]||{};
           const ordered=items(value),oldOrdered=items(old),cancelled=cancelledItems(value),currentCancelRate=ratio(cancelled,ordered),previousCancelRate=ratio(cancelledItems(old),oldOrdered),currentRoas=Number(ad.spend||0)?Number(ad.attributed_revenue||0)/Number(ad.spend):0,previousRoas=Number(oldAd.spend||0)?Number(oldAd.attributed_revenue||0)/Number(oldAd.spend):0;
           const drr=Number(ad.attributed_revenue||0)?Number(ad.spend||0)/Number(ad.attributed_revenue)*100:0,oldDrr=Number(oldAd.attributed_revenue||0)?Number(oldAd.spend||0)/Number(oldAd.attributed_revenue)*100:0;
+          const shareItems=ratio(ordered,orderedItems),oldShareItems=ratio(oldOrdered,oldOrderedItems),shareAmount=ratio(value.orders_amount,orderAmount),oldShareAmount=ratio(old.orders_amount,oldOrderAmount),averagePrice=ordered?Number(value.orders_amount||0)/ordered:0,oldAveragePrice=oldOrdered?Number(old.orders_amount||0)/oldOrdered:0,projection=monthProjection(data.series,key,data.period),oldProjection=Number(old.orders_amount||0)/days*projection.monthDays;
           const adSpendLabel=key==='ozon'?'Рекламные кампании':'Расход на рекламу';
           const adRevenueLabel=key==='ozon'?'Атрибутированная сумма заказов':'Атрибутировано заказов';
           return `<article class="market"><div class="market-head"><h3>${names[key]}</h3><div class="market-total"><b>${num(ordered)} шт.</b><small>${rub(value.orders_amount)}</small></div></div>
             <div class="group"><div class="group-title">Продажи / 销售</div>
-              ${metric('Заказано товаров',`${num(ordered)} шт. / ${rub(value.orders_amount)}`,compareList(comparison(ordered,oldOrdered,{label:'шт.'}),comparison(value.orders_amount,old.orders_amount,{label:'сумма'})),'Все товарные единицы в созданных заказах. Сумма включает заказы, которые позднее могли отменить.')}
+              ${metric('Заказано товаров',`${num(ordered)} шт. / ${rub(value.orders_amount)}`,compareList(comparison(ordered,oldOrdered,{label:'шт.'}),comparison(value.orders_amount,old.orders_amount,{label:'сумма'})),`Источник: ${orderSources[key]}. Все товарные единицы в созданных заказах. Сумма включает заказы, которые позднее могли отменить, и может отличаться от аналитического отчёта кабинета из-за его ценовой модели и времени пересчёта.`)}
               ${metric('Количество заказов',num(value.orders),comparison(value.orders,old.orders,{neutral:true}),'Число уникальных заказов или отправлений площадки. Один заказ может содержать несколько товаров.')}
+              ${metric('Доля общих заказов',`${shareItems.toFixed(1)}% шт. / ${shareAmount.toFixed(1)}% ₽`,compareList(comparison(shareItems,oldShareItems,{points:true,neutral:true,label:'шт.'}),comparison(shareAmount,oldShareAmount,{points:true,neutral:true,label:'сумма'})),'Доля площадки = её заказанные товары или сумма ÷ соответствующий итог всех трёх площадок × 100%. Изменение показано в процентных пунктах и окрашено нейтрально.')}
+              ${metric('Средняя цена товара',rub(averagePrice),comparison(averagePrice,oldAveragePrice,{neutral:true}),'Средняя цена заказанного товара = сумма заказанных товаров ÷ количество заказанных товарных единиц. Изменение цены само по себе оценивается нейтрально.')}
+              ${metric('Среднее в день',`${(ordered/days).toFixed(1)} шт. / ${rub(Number(value.orders_amount||0)/days)}`,compareList(comparison(ordered/days,oldOrdered/days,{label:'шт.'}),comparison(Number(value.orders_amount||0)/days,Number(old.orders_amount||0)/days,{label:'сумма'})),'Заказанные товары и их сумма ÷ число календарных дней выбранного периода, включая дни без заказов.')}
+              ${metric('Прогноз заказов месяца',rub(projection.value),comparison(projection.value,oldProjection,{label:'к прошлому темпу'}),`Средняя дневная сумма за ${projection.sampleDays} выбранных дней месяца × ${projection.monthDays} календарных дней. Сравнение — с дневным темпом равного прошлого периода. Это прогноз оперативных заказов, а не финансовой выручки.`)}
               ${metric('Отменено товаров',`${num(cancelled)} шт. / ${rub(value.cancelled_amount)} · ${currentCancelRate.toFixed(1)}%`,compareList(comparison(cancelled,cancelledItems(old),{lowerBetter:true,label:'шт.'}),comparison(currentCancelRate,previousCancelRate,{lowerBetter:true,points:true,label:'доля'})),'Отменённые товарные единицы. Доля = отменённые товары ÷ заказанные товары × 100%.')}
               ${metric('Выкупленные товары',`${num(value.buyouts)} шт. / ${rub(value.buyouts_amount)}`,compareList(comparison(value.buyouts,old.buyouts,{label:'шт.'}),comparison(value.buyouts_amount,old.buyouts_amount,{label:'сумма'})),'Продажи или доставки, зарегистрированные в выбранном периоде. Они могут относиться к заказам, созданным раньше.')}
             </div><div class="group"><div class="group-title">Реклама / 广告</div>
@@ -135,11 +152,11 @@
             </div></article>`;
         }).join('');
 
-        const days={};let cursor=new Date(data.period.from+'T00:00:00'),last=new Date(data.period.to+'T00:00:00');
-        while(cursor<=last){days[iso(cursor)]={orders:0,amount:0};cursor.setDate(cursor.getDate()+1)}
-        data.series.forEach(row=>{const item=days[row.day]||(days[row.day]={orders:0,amount:0});item.orders+=Number(row.orders||0);item.amount+=Number(row.revenue||0)});
-        const maximum=Math.max(1,...Object.values(days).map(row=>row.orders));
-        chartBox.innerHTML=Object.entries(days).map(([day,row])=>`<div class="chart-item"><div class="bar${row.orders?'':' empty'}" style="height:${row.orders?Math.max(12,row.orders/maximum*100):8}%"><div class="bar-value">${num(row.orders)} шт.<small>${rub(row.amount)}</small></div></div><div class="day">${day.slice(8,10)}.${day.slice(5,7)}</div></div>`).join('');
+        const daily={};let cursor=new Date(data.period.from+'T00:00:00'),last=new Date(data.period.to+'T00:00:00'),marketKeys=['wb','ozon','yandex_market'];
+        while(cursor<=last){daily[iso(cursor)]=Object.fromEntries(marketKeys.map(key=>[key,{orders:0,amount:0}]));cursor.setDate(cursor.getDate()+1)}
+        data.series.forEach(row=>{const item=daily[row.day]?.[row.marketplace];if(item){item.orders+=Number(row.orders||0);item.amount+=Number(row.revenue||0)}});
+        const maximum=Math.max(1,...Object.values(daily).flatMap(row=>marketKeys.map(key=>row[key].amount)));
+        chartBox.innerHTML=Object.entries(daily).map(([day,row])=>`<div class="chart-item"><div class="bar-group">${marketKeys.map(key=>{const value=row[key],height=value.amount?Math.max(12,value.amount/maximum*100):8;return `<div class="bar ${key}${value.amount?'':' empty'}" style="height:${height}%" title="${names[key]}: ${num(value.orders)} шт. / ${rub(value.amount)}"><div class="bar-value">${shortRub(value.amount)}<small>${num(value.orders)} шт.</small></div></div>`}).join('')}</div><div class="day">${day.slice(8,10)}.${day.slice(5,7)}</div></div>`).join('');
         const today=iso(new Date()),partial=data.period.to===today?'<div class="warning">Сегодняшний день ещё не завершён: сравнение с прошлым периодом будет занижено.</div>':'';
         statusBox.innerHTML=`Период: ${data.period.from} — ${data.period.to} · сравнение с равным периодом: ${data.previous_period.from} — ${data.previous_period.to}${partial}`+(errors.length?`<div class="error">Часть данных недоступна: ${errors.join('; ')}</div>`:'');
       }catch(error){statusBox.innerHTML=`<div class="error">${error.message}</div>`}
