@@ -93,8 +93,9 @@ Ozon Postings, and Yandex Market Orders API. Marketplace cabinet funnel exports
 are cohort analytics and can be recalculated after order creation, so they are
 shown as a separate cabinet-analytics group rather than silently mixed into the
 realtime series. WB uses its hourly seven-day Sales Funnel history. Yandex
-Market uses the official daily `shows-sales` report and refreshes the available
-90-day history so late delivery, cancellation and return attribution matures.
+Market uses the official daily `shows-sales` report and refreshes a rolling
+40-day window so late delivery, cancellation and return attribution matures;
+older rows remain available as local history.
 Incomplete cabinet coverage is labelled and its totals are hidden. Ozon shows
 realized quantity, amount and average realized unit price from
 `accrual/postings.seller_price`, separately from the posting price at order time.

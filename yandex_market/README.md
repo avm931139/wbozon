@@ -37,7 +37,7 @@ YANDEX_MARKET_TIMEZONE=Europe/Moscow
 YANDEX_MARKET_REQUIRED_TASKS=identity,catalog,orders,advertising,finances,analytics
 YANDEX_MARKET_AD_POLL_SECONDS=5
 YANDEX_MARKET_AD_POLL_ATTEMPTS=36
-YANDEX_MARKET_ANALYTICS_HISTORY_DAYS=90
+YANDEX_MARKET_ANALYTICS_HISTORY_DAYS=40
 YANDEX_MARKET_ANALYTICS_MAX_AGE_SECONDS=129600
 YANDEX_MARKET_AD_HISTORY_DAYS=90
 YANDEX_MARKET_AD_REFRESH_DAYS=14
@@ -89,8 +89,9 @@ python -m inventory_sync --marketplace yandex_market --once
 
 `analytics` раз в сутки формирует официальный JSON-отчёт «Аналитика продаж»
 `/v2/reports/shows-sales/generate` с группировкой `OFFERS`. По умолчанию каждый
-запуск полностью обновляет последние 90 дней, поэтому поздние доставки, отмены
-и возвраты попадают к исходной дате заказа. Данные хранятся в
+запуск полностью обновляет последние 40 дней, поэтому поздние доставки, отмены
+и возвраты попадают к исходной дате заказа. Старые строки сохраняются как
+локальная история. Данные хранятся в
 `yandex_market_sales_analytics_daily` и показываются в дашборде отдельным
 кабинетным слоем; они не подменяют оперативные заказы.
 
