@@ -36,10 +36,12 @@ def _integer(value: Any) -> int:
 def _stat_date(row: dict[str, Any]) -> date | None:
     value = row.get("day")
     if value:
-        try:
-            return date.fromisoformat(str(value)[:10])
-        except ValueError:
-            pass
+        text = str(value).strip()
+        for pattern in ("%Y-%m-%d", "%d.%m.%Y", "%d-%m-%Y"):
+            try:
+                return datetime.strptime(text[:10], pattern).date()
+            except ValueError:
+                continue
     month = row.get("month")
     year = row.get("year")
     if month and year:
@@ -158,8 +160,14 @@ class YandexMarketSalesAnalyticsService:
             target["raw_rows"].append(source)
 
         if rows and not aggregates:
+            signatures = sorted({
+                ",".join(sorted(str(key) for key in row))
+                for row in rows[:20]
+                if isinstance(row, dict)
+            })
             raise YandexMarketParseError(
-                "Yandex Market sales analytics report has no daily offer rows"
+                "Yandex Market sales analytics report has no daily offer rows; "
+                f"row keys: {' | '.join(signatures[:3]) or 'none'}"
             )
         fetched_at = datetime.now(timezone.utc)
         with self.session_factory() as session:

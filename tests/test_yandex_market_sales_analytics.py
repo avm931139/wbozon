@@ -50,7 +50,7 @@ def test_sales_analytics_service_replaces_daily_offer_rows_idempotently():
         api=object(), session_factory=factory, business_id=216673578
     )
     source = {
-        "day": "2026-09-06", "offerId": "NVL0040", "offerName": "Lamp",
+        "day": "06.09.2026", "offerId": "NVL0040", "offerName": "Lamp",
         "shows": 100, "clicks": 20, "toCart": 10,
         "orderItems": 4, "orderItemsTotalAmount": 4000,
         "orderItemsDeliveredCount": 3, "orderItemsDeliveredTotalAmount": 3000,
