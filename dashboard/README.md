@@ -38,12 +38,18 @@ The UI is deliberately split into two pages:
 - `/pnl` is the closed finance view. It only exposes values reconstructed from
   the marketplace finance reports saved in PostgreSQL. If the selected period
   is not fully covered, the marketplace card stays unavailable instead of
-  falling back to orders or advertising attribution.
+  falling back to orders or advertising attribution;
+- `/stocks` is the product stock view. It shows local main images in the fixed
+  WB → Ozon → Yandex order, quantity and database refresh time. Today uses the
+  current stock tables; a past date uses the latest daily snapshot on or before
+  that date and clearly displays the actual snapshot date.
 
 The API endpoints are `/health`,
-`/api/summary?from=YYYY-MM-DD&to=YYYY-MM-DD` for operations, and
-`/api/pnl?from=YYYY-MM-DD&to=YYYY-MM-DD` for finance. The maximum selectable
-period is 730 days.
+`/api/summary?from=YYYY-MM-DD&to=YYYY-MM-DD` for operations,
+`/api/pnl?from=YYYY-MM-DD&to=YYYY-MM-DD` for finance, and
+`/api/stocks?date=YYYY-MM-DD` for product stocks. Images are served only from
+verified local media records through `/api/product-image?id=...`. The maximum
+selectable period is 730 days.
 
 The operational dashboard opens on the latest seven calendar days including
 the current Moscow date. Its filter supports both an arbitrary date range and a

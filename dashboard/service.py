@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+import mimetypes
+from pathlib import Path
 from typing import Any, Callable
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from app.config import DASHBOARD_DATABASE_URL
+from app.config import DASHBOARD_DATABASE_URL, PRODUCT_MEDIA_STORAGE_DIR
 
 
 def _number(value: Any) -> float:
@@ -35,6 +37,165 @@ class DashboardService:
         days = (finish - begin).days + 1
         previous_finish = begin - timedelta(days=1)
         return previous_finish - timedelta(days=days - 1), previous_finish
+
+    def stock_details(self, value: str | None) -> dict[str, Any]:
+        """Return one product row with WB, Ozon and Yandex stock as of a date."""
+        requested = date.fromisoformat(value) if value else date.today()
+        if requested > date.today():
+            raise ValueError("stock date cannot be in the future")
+        current = requested == date.today()
+        if current:
+            sources = {
+                "wb": """SELECT p.nm_id::text external_id,p.vendor_code source_article,
+                        p.title source_name,x.quantity units,x.updated_at refreshed_at,
+                        CAST(:d AS date) data_date
+                    FROM wb_fbs_stocks x JOIN wb_product_sizes z ON z.id=x.size_id
+                    JOIN wb_products p ON p.id=z.product_id
+                    UNION ALL
+                    SELECT p.nm_id::text,p.vendor_code,p.title,x.quantity,x.updated_at,
+                        CAST(:d AS date)
+                    FROM wb_fbo_stocks x JOIN wb_product_sizes z ON z.id=x.size_id
+                    JOIN wb_products p ON p.id=z.product_id""",
+                "ozon": """SELECT x.product_id::text external_id,p.offer_id source_article,
+                        p.name source_name,x.present units,x.fetched_at refreshed_at,
+                        CAST(:d AS date) data_date
+                    FROM ozon_stocks x LEFT JOIN ozon_products p ON p.product_id=x.product_id""",
+                "yandex_market": """SELECT x.offer_id external_id,x.offer_id source_article,
+                        o.name source_name,x.count units,x.fetched_at refreshed_at,
+                        CAST(:d AS date) data_date
+                    FROM yandex_market_stocks x
+                    LEFT JOIN yandex_market_campaigns c ON c.campaign_id=x.campaign_id
+                    LEFT JOIN yandex_market_offers o ON o.offer_id=x.offer_id
+                        AND o.business_id=c.business_id
+                    WHERE x.stock_type='AVAILABLE'""",
+            }
+        else:
+            sources = {
+                "wb": """SELECT p.nm_id::text external_id,p.vendor_code source_article,
+                        p.title source_name,x.quantity units,x.captured_at refreshed_at,
+                        x.snapshot_date data_date
+                    FROM wb_fbs_stock_snapshots x JOIN wb_product_sizes z ON z.id=x.size_id
+                    JOIN wb_products p ON p.id=z.product_id
+                    WHERE x.snapshot_date=(SELECT max(snapshot_date) FROM wb_fbs_stock_snapshots WHERE snapshot_date<=:d)
+                    UNION ALL
+                    SELECT p.nm_id::text,p.vendor_code,p.title,x.quantity,x.captured_at,x.snapshot_date
+                    FROM wb_fbo_stock_snapshots x JOIN wb_product_sizes z ON z.id=x.size_id
+                    JOIN wb_products p ON p.id=z.product_id
+                    WHERE x.snapshot_date=(SELECT max(snapshot_date) FROM wb_fbo_stock_snapshots WHERE snapshot_date<=:d)""",
+                "ozon": """SELECT x.product_id::text external_id,p.offer_id source_article,
+                        p.name source_name,x.present units,x.captured_at refreshed_at,
+                        x.snapshot_date data_date
+                    FROM ozon_stock_snapshots x LEFT JOIN ozon_products p ON p.product_id=x.product_id
+                    WHERE x.snapshot_date=(SELECT max(snapshot_date) FROM ozon_stock_snapshots WHERE snapshot_date<=:d)""",
+                "yandex_market": """SELECT x.offer_id external_id,x.offer_id source_article,
+                        o.name source_name,x.count units,x.captured_at refreshed_at,
+                        x.snapshot_date data_date
+                    FROM yandex_market_stock_snapshots x
+                    LEFT JOIN yandex_market_campaigns c ON c.campaign_id=x.campaign_id
+                    LEFT JOIN yandex_market_offers o ON o.offer_id=x.offer_id
+                        AND o.business_id=c.business_id
+                    WHERE x.stock_type='AVAILABLE'
+                      AND x.snapshot_date=(SELECT max(snapshot_date) FROM yandex_market_stock_snapshots WHERE snapshot_date<=:d)""",
+            }
+        grouped = []
+        for marketplace, source in sources.items():
+            grouped.append(f"""{marketplace}_raw AS ({source}),
+                {marketplace} AS (
+                    SELECT coalesce('m:'||link.master_product_id::text,'{marketplace}:'||r.external_id) row_key,
+                        link.master_product_id,min(r.external_id) external_id,
+                        max(r.source_article) source_article,max(r.source_name) source_name,
+                        coalesce(sum(r.units),0)::bigint units,max(r.refreshed_at) refreshed_at,
+                        max(r.data_date) data_date
+                    FROM {marketplace}_raw r
+                    LEFT JOIN LATERAL (
+                        SELECT master_product_id FROM marketplace_product_links l
+                        WHERE l.marketplace='{marketplace}' AND l.active
+                          AND l.external_product_id=r.external_id LIMIT 1
+                    ) link ON TRUE
+                    GROUP BY row_key,link.master_product_id
+                )""")
+        sql = "WITH " + ",".join(grouped) + """,
+            product_keys AS (
+                SELECT 'm:'||id::text row_key,id master_product_id FROM master_products WHERE active
+                UNION SELECT row_key,master_product_id FROM wb
+                UNION SELECT row_key,master_product_id FROM ozon
+                UNION SELECT row_key,master_product_id FROM yandex_market
+            ), media_ranked AS (
+                SELECT pm.id,pm.marketplace,
+                    coalesce('m:'||pm.master_product_id::text,
+                             pm.marketplace||':'||pm.external_product_id) row_key,
+                    row_number() OVER (
+                        PARTITION BY pm.marketplace,
+                            coalesce('m:'||pm.master_product_id::text,
+                                     pm.marketplace||':'||pm.external_product_id)
+                        ORDER BY CASE WHEN lower(pm.role) IN ('main','primary','cover')
+                                      THEN 0 ELSE 1 END,pm.position,pm.id
+                    ) rank
+                FROM marketplace_product_media pm
+                WHERE pm.media_type='image' AND pm.active
+                  AND pm.download_status='downloaded' AND pm.local_path IS NOT NULL
+            ), images AS (
+                SELECT id,marketplace,row_key FROM media_ranked WHERE rank=1
+            )
+            SELECT k.row_key,coalesce(mp.article,wb.source_article,ozon.source_article,
+                       yandex_market.source_article) article,
+                   coalesce(mp.name,wb.source_name,ozon.source_name,yandex_market.source_name) name,
+                   wb.units wb_units,wb.refreshed_at wb_updated_at,wb.data_date wb_data_date,
+                   ozon.units ozon_units,ozon.refreshed_at ozon_updated_at,ozon.data_date ozon_data_date,
+                   yandex_market.units yandex_units,yandex_market.refreshed_at yandex_updated_at,
+                   yandex_market.data_date yandex_data_date,
+                   wb_image.id wb_image_id,ozon_image.id ozon_image_id,
+                   yandex_image.id yandex_image_id
+            FROM product_keys k LEFT JOIN master_products mp ON mp.id=k.master_product_id
+            LEFT JOIN wb ON wb.row_key=k.row_key LEFT JOIN ozon ON ozon.row_key=k.row_key
+            LEFT JOIN yandex_market ON yandex_market.row_key=k.row_key
+            LEFT JOIN images wb_image ON wb_image.row_key=k.row_key AND wb_image.marketplace='wb'
+            LEFT JOIN images ozon_image ON ozon_image.row_key=k.row_key AND ozon_image.marketplace='ozon'
+            LEFT JOIN images yandex_image ON yandex_image.row_key=k.row_key
+                AND yandex_image.marketplace='yandex_market'
+            ORDER BY coalesce(mp.article,wb.source_article,ozon.source_article,
+                              yandex_market.source_article),k.row_key"""
+        with self.session_factory() as db:
+            records = [dict(row) for row in db.execute(text(sql), {"d": requested}).mappings().all()]
+        rows = []
+        for record in records:
+            row = {"key": record["row_key"], "article": record.get("article") or "—",
+                   "name": record.get("name") or ""}
+            for marketplace, prefix in (("wb", "wb"), ("ozon", "ozon"),
+                                        ("yandex_market", "yandex")):
+                image_id = record.get(f"{prefix}_image_id")
+                row[marketplace] = {
+                    "quantity": int(record.get(f"{prefix}_units") or 0),
+                    "updated_at": record.get(f"{prefix}_updated_at"),
+                    "data_date": record.get(f"{prefix}_data_date"),
+                    "image_url": f"/api/product-image?id={image_id}" if image_id else None,
+                }
+            rows.append(row)
+        totals = {
+            marketplace: {
+                "quantity": sum(row[marketplace]["quantity"] for row in rows),
+                "updated_at": max((row[marketplace]["updated_at"] for row in rows
+                                   if row[marketplace]["updated_at"]), default=None),
+                "data_date": max((row[marketplace]["data_date"] for row in rows
+                                  if row[marketplace]["data_date"]), default=None),
+            }
+            for marketplace in ("wb", "ozon", "yandex_market")
+        }
+        return {"requested_date": requested, "current": current, "totals": totals, "rows": rows}
+
+    def product_image(self, media_id: int) -> tuple[Path, str]:
+        with self.session_factory() as db:
+            row = db.execute(text("""SELECT local_path,content_type FROM marketplace_product_media
+                WHERE id=:id AND active AND media_type='image' AND download_status='downloaded'
+                  AND local_path IS NOT NULL"""), {"id": media_id}).mappings().one_or_none()
+        if row is None:
+            raise FileNotFoundError("product image not found")
+        root = Path(PRODUCT_MEDIA_STORAGE_DIR).expanduser().resolve()
+        target = (root / row["local_path"]).resolve(strict=True)
+        if target == root or root not in target.parents or not target.is_file():
+            raise FileNotFoundError("product image not found")
+        content_type = row["content_type"] or mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        return target, content_type
 
     @staticmethod
     def _one(db: Any, sql: str, **params: Any) -> dict[str, Any]:

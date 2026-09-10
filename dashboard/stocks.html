@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Остатки по площадкам</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#151c30;--line:#29334d;--text:#eef3ff;--muted:#94a3bd;--accent:#6ea8fe;--wb:#a56de2;--ozon:#438cf4;--ym:#f0b429}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,"Segoe UI",sans-serif}
+    header{padding:20px 4vw;border-bottom:1px solid var(--line);display:flex;gap:20px;align-items:end;justify-content:space-between}h1{margin:0;font-size:24px}.muted{color:var(--muted)}
+    nav{display:flex;gap:8px;margin-top:12px}nav a{color:var(--text);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:8px 12px}nav a.active{background:var(--accent);color:#061020;font-weight:700}
+    .filters{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.field{display:grid;gap:4px}.field label{font-size:11px;color:var(--muted)}input,button{background:#11182a;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:10px}button{background:var(--accent);color:#061020;font-weight:700;cursor:pointer}
+    main{padding:22px 4vw 40px}.status{color:var(--muted);margin-bottom:14px}.totals{display:grid;grid-template-columns:repeat(3,minmax(190px,1fr));gap:12px;margin-bottom:16px}.total{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}.total b{display:block;font-size:22px;margin:5px 0}.total small{color:var(--muted)}
+    .toolbar{display:flex;gap:10px;align-items:center;margin:12px 0}.toolbar input{min-width:260px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:13px;background:var(--panel);max-height:calc(100vh - 310px)}table{width:100%;border-collapse:separate;border-spacing:0;min-width:1120px}th,td{padding:10px;border-bottom:1px solid var(--line);vertical-align:middle}th{position:sticky;top:0;z-index:3;background:#11182a;text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase}tbody tr:hover{background:#1a2339}.article{font-weight:750}.name{color:var(--muted);font-size:12px;margin-top:3px;max-width:260px}.photo-cell{width:76px;text-align:center}.photo{width:52px;height:68px;border-radius:8px;object-fit:contain;background:#fff;border:1px solid #3a4662}.placeholder{display:inline-grid;place-items:center;width:52px;height:68px;border:1px dashed #485570;border-radius:8px;color:var(--muted);font-size:11px}.qty{font-size:18px;font-weight:750}.updated{color:var(--muted);font-size:11px;margin-top:4px;white-space:nowrap}.wb{color:var(--wb)}.ozon{color:var(--ozon)}.ym{color:var(--ym)}.empty{color:#66738e}.hidden{display:none}.notice{color:#f5c451;margin-top:6px}
+    @media(max-width:760px){header{align-items:start;flex-direction:column}.totals{grid-template-columns:1fr}.toolbar{align-items:stretch;flex-direction:column}.toolbar input{min-width:0;width:100%}.table-wrap{max-height:none}}
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>Остатки по площадкам / 平台库存</h1><div class="muted">Товар, главное фото каждого кабинета, количество и время обновления в БД</div>
+      <nav><a href="/">Оперативный</a><a href="/pnl">P&amp;L</a><a class="active" href="/stocks">Остатки</a></nav>
+    </div>
+    <div class="filters"><div class="field"><label for="stock-date">Остатки на дату</label><input id="stock-date" type="date"></div><button onclick="loadStocks()">Показать</button></div>
+  </header>
+  <main>
+    <div id="status" class="status">Загрузка…</div><div id="totals" class="totals"></div>
+    <div class="toolbar"><input id="search" type="search" placeholder="Поиск по артикулу или названию" oninput="renderRows()"><label><input id="nonzero" type="checkbox" onchange="renderRows()"> только товары с остатком</label></div>
+    <div class="table-wrap"><table><thead><tr><th>Товар</th><th class="photo-cell wb">Фото WB</th><th class="photo-cell ozon">Фото Ozon</th><th class="photo-cell ym">Фото Яндекс</th><th class="wb">WB · остаток / обновлено</th><th class="ozon">Ozon · остаток / обновлено</th><th class="ym">Яндекс · остаток / обновлено</th></tr></thead><tbody id="rows"></tbody></table></div>
+  </main>
+  <script>
+    const names={wb:'Wildberries',ozon:'Ozon',yandex_market:'Яндекс Маркет'};
+    const dateInput=document.getElementById('stock-date'),statusBox=document.getElementById('status'),totalsBox=document.getElementById('totals'),rowsBox=document.getElementById('rows');let data=null;
+    const num=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0}).format(Number(n||0));
+    const dateOnly=value=>value?new Intl.DateTimeFormat('ru-RU').format(new Date(String(value).slice(0,10)+'T00:00:00')):'нет снимка';
+    const stamp=value=>value?new Intl.DateTimeFormat('ru-RU',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Moscow'}).format(new Date(value)):'нет данных';
+    const marketCell=(value,requested)=>`<div class="qty ${value.quantity?'':'empty'}">${num(value.quantity)} шт.</div><div class="updated">БД: ${stamp(value.updated_at)}</div>${value.data_date&&String(value.data_date).slice(0,10)!==requested?`<div class="notice">снимок на ${dateOnly(value.data_date)}</div>`:''}`;
+    const photo=(value,label)=>value.image_url?`<img class="photo" src="${value.image_url}" alt="${label}" loading="lazy">`:`<span class="placeholder">нет фото</span>`;
+    function renderRows(){if(!data)return;let query=document.getElementById('search').value.trim().toLowerCase(),nonzero=document.getElementById('nonzero').checked;let rows=data.rows.filter(row=>(!query||`${row.article} ${row.name}`.toLowerCase().includes(query))&&(!nonzero||row.wb.quantity||row.ozon.quantity||row.yandex_market.quantity));rowsBox.innerHTML=rows.map(row=>`<tr><td><div class="article">${escapeHtml(row.article)}</div><div class="name">${escapeHtml(row.name)}</div></td><td class="photo-cell">${photo(row.wb,'WB '+row.article)}</td><td class="photo-cell">${photo(row.ozon,'Ozon '+row.article)}</td><td class="photo-cell">${photo(row.yandex_market,'Яндекс '+row.article)}</td><td>${marketCell(row.wb,data.requested_date)}</td><td>${marketCell(row.ozon,data.requested_date)}</td><td>${marketCell(row.yandex_market,data.requested_date)}</td></tr>`).join('');statusBox.textContent=`Дата: ${dateOnly(data.requested_date)} · показано ${rows.length} из ${data.rows.length} товаров${data.current?' · текущие остатки':' · дневные снимки'}`}
+    function escapeHtml(value){return String(value||'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]))}
+    async function loadStocks(){statusBox.textContent='Загрузка…';try{let response=await fetch('/api/stocks?date='+encodeURIComponent(dateInput.value));if(!response.ok)throw Error(await response.text());data=await response.json();dateInput.value=data.requested_date;totalsBox.innerHTML=['wb','ozon','yandex_market'].map(key=>{let value=data.totals[key];return `<div class="total"><span>${names[key]}</span><b>${num(value.quantity)} шт.</b><small>Снимок: ${dateOnly(value.data_date)}<br>БД: ${stamp(value.updated_at)}</small></div>`}).join('');renderRows()}catch(error){statusBox.innerHTML=`<span class="notice">${escapeHtml(error.message)}</span>`}}
+    const now=new Date();dateInput.value=[now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-');dateInput.max=dateInput.value;loadStocks();
+  </script>
+</body>
+</html>

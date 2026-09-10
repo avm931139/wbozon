@@ -1,5 +1,5 @@
 import pytest
-from dashboard.__main__ import HTML, PNL_HTML
+from dashboard.__main__ import HTML, PNL_HTML, STOCKS_HTML
 from dashboard.service import DashboardService
 
 def test_dashboard_period_defaults_to_current_day():
@@ -95,6 +95,33 @@ def test_pnl_dashboard_uses_only_financial_labels_and_separate_endpoint():
     assert "v.revenue" in PNL_HTML
     assert "ROAS" not in PNL_HTML
     assert "v.orders_amount" not in PNL_HTML
+
+
+def test_stock_dashboard_has_three_market_images_and_refresh_dates():
+    assert "/api/stocks?date=" in STOCKS_HTML
+    assert "Фото WB" in STOCKS_HTML
+    assert "Фото Ozon" in STOCKS_HTML
+    assert "Фото Яндекс" in STOCKS_HTML
+    assert "WB · остаток / обновлено" in STOCKS_HTML
+    assert "Ozon · остаток / обновлено" in STOCKS_HTML
+    assert "Яндекс · остаток / обновлено" in STOCKS_HTML
+    assert "только товары с остатком" in STOCKS_HTML
+    assert 'href="/stocks"' in HTML
+    assert 'href="/stocks"' in PNL_HTML
+
+
+def test_stock_details_uses_current_rows_and_historical_snapshots():
+    import inspect
+
+    source = inspect.getsource(DashboardService.stock_details)
+    assert "wb_fbs_stocks" in source
+    assert "ozon_stocks" in source
+    assert "yandex_market_stocks" in source
+    assert "wb_fbs_stock_snapshots" in source
+    assert "ozon_stock_snapshots" in source
+    assert "yandex_market_stock_snapshots" in source
+    assert "snapshot_date<=:d" in source
+    assert "marketplace_product_media" in source
 
 
 def test_operational_service_does_not_query_finance_ledgers():
