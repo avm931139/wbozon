@@ -65,13 +65,19 @@ class DashboardService:
                 FROM (SELECT coalesce(sum(spend),0) performance_spend,
                         coalesce(sum(orders_money),0) attributed_revenue
                     FROM ozon_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e) performance
-                CROSS JOIN (SELECT greatest(coalesce(-sum(a.amount),0),0) finance_spend
+                CROSS JOIN (SELECT greatest(coalesce(-sum(
+                        (fee->'accrued'->>'amount')::numeric
+                    ),0),0) finance_spend
                     FROM ozon_finance_accruals a
-                    LEFT JOIN ozon_finance_accrual_types t ON t.type_id=CASE
-                        WHEN coalesce(a.raw_data->>'type_id','') ~ '^[0-9]+$'
-                        THEN (a.raw_data->>'type_id')::integer END
+                    CROSS JOIN LATERAL jsonb_path_query(
+                        a.raw_data::jsonb,
+                        'strict $.** ? (exists(@.type_id) && exists(@.accrued))'
+                    ) fee
+                    JOIN ozon_finance_accrual_types t
+                      ON t.type_id=(fee->>'type_id')::integer
                     WHERE a.accrual_date BETWEEN :b AND :e
-                      AND t.name IN ('PayPerClick','Promotion')) finance""",
+                      AND t.name IN ('PayPerClick','Promotion')
+                ) finance""",
                 b=begin, e=finish),
             "yandex_market": one("""WITH daily_coverage AS (
                     SELECT stat_date,count(DISTINCT source) sources
