@@ -192,3 +192,23 @@ def test_automatic_advertising_sync_backfills_newest_missing_day(monkeypatch):
     )
 
     assert service._target_date(date(2026, 9, 6)) == date(2026, 9, 5)
+
+
+def test_advertising_backfill_requests_only_missing_sources():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    with factory() as session:
+        for source in ("sales_boost", "shows_boost", "banners"):
+            session.add(YandexMarketAdDailyStat(
+                stat_date=date(2026, 9, 5), source=source, business_id=777,
+                campaign_id=0, fetched_at=datetime(2026, 9, 6, tzinfo=timezone.utc),
+            ))
+        session.commit()
+
+    service = YandexMarketAdvertisingService(
+        api=object(), session_factory=factory, business_id=777
+    )
+
+    assert service._sources_for_date(date(2026, 9, 5)) == ("shelves",)
+    assert service._sources_for_date(date(2026, 9, 4)) == service.SOURCES

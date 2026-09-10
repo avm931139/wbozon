@@ -50,7 +50,8 @@ class YandexMarketAdvertisingService:
         stat_date = stat_date or self._target_date(today)
         results: dict[str, Any] = {}
         errors: list[str] = []
-        for source in self.SOURCES:
+        sources = self._sources_for_date(stat_date)
+        for source in sources:
             try:
                 report_id = self.api.generate(
                     source, business_id=business_id, stat_date=stat_date
@@ -75,6 +76,17 @@ class YandexMarketAdvertisingService:
         if errors:
             raise RuntimeError("; ".join(errors))
         return {"date": stat_date.isoformat(), "sources": results}
+
+    def _sources_for_date(self, stat_date: date) -> tuple[str, ...]:
+        """Backfill only missing reports; refresh all sources on a complete day."""
+        with self.session_factory() as session:
+            present = {
+                source for source, in session.query(
+                    distinct(YandexMarketAdDailyStat.source)
+                ).filter(YandexMarketAdDailyStat.stat_date == stat_date).all()
+            }
+        missing = tuple(source for source in self.SOURCES if source not in present)
+        return missing or self.SOURCES
 
     def _target_date(self, today: date) -> date:
         """Backfill one day per run, then continuously refresh recent attribution."""
