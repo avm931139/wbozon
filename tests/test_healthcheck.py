@@ -108,9 +108,10 @@ def test_collect_checks_targets_independent_workers_instead_of_cron(monkeypatch)
     monkeypatch.setattr("healthcheck.__main__.OPERATIONS_TG_BOT_TOKEN", None)
     monkeypatch.setattr("healthcheck.__main__.OPERATIONS_TG_CHAT_ID", None)
     monkeypatch.setattr("healthcheck.__main__.WB_DOCUMENT_SYNC_REQUIRED", False)
+    monkeypatch.setattr("healthcheck.__main__.PRODUCT_CATALOG_SYNC_REQUIRED", False)
     monkeypatch.setattr("healthcheck.__main__.OZON_REQUIRED_TASKS", ())
 
-    collect_checks(
+    checks = collect_checks(
         now=datetime(2026, 8, 20, 0, 1, tzinfo=ZoneInfo("Europe/Moscow")),
         systemctl=lambda unit: calls.append(unit) or (True, "active"),
     )
@@ -122,6 +123,7 @@ def test_collect_checks_targets_independent_workers_instead_of_cron(monkeypatch)
         "wbozon-wb-order-feed.timer",
         "wbozon-wb-sales-funnel.timer",
     ]
+    assert all(check.name != "product catalog media sync" for check in checks)
 
 
 def test_collect_checks_monitors_required_wb_document_worker(monkeypatch):
@@ -146,6 +148,7 @@ def test_collect_checks_monitors_required_wb_document_worker(monkeypatch):
     monkeypatch.setattr("healthcheck.__main__.OPERATIONS_TG_BOT_TOKEN", None)
     monkeypatch.setattr("healthcheck.__main__.OPERATIONS_TG_CHAT_ID", None)
     monkeypatch.setattr("healthcheck.__main__.WB_DOCUMENT_SYNC_REQUIRED", True)
+    monkeypatch.setattr("healthcheck.__main__.PRODUCT_CATALOG_SYNC_REQUIRED", False)
     monkeypatch.setattr("healthcheck.__main__.OZON_REQUIRED_TASKS", ())
 
     checks = collect_checks(

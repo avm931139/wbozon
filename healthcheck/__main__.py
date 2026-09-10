@@ -18,6 +18,7 @@ from app.config import (
     OPERATIONS_TG_CHAT_ID,
     PRICE_SYNC_MAX_AGE_SECONDS,
     PRODUCT_CATALOG_MAX_AGE_SECONDS,
+    PRODUCT_CATALOG_SYNC_REQUIRED,
     PRODUCT_MAPPING_MAX_AGE_SECONDS,
     OZON_ADS_MAX_AGE_SECONDS,
     OZON_ACCOUNTING_MAX_AGE_SECONDS,
@@ -418,7 +419,8 @@ def collect_checks(
             checks.extend(_yandex_market_task_checks(session, current))
         checks.extend(_price_sync_checks(session, current))
         checks.append(_product_mapping_check(session, current))
-        checks.append(_product_catalog_check(session, current))
+        if PRODUCT_CATALOG_SYNC_REQUIRED:
+            checks.append(_product_catalog_check(session, current))
 
         if WB_DOCUMENT_SYNC_REQUIRED:
             latest_documents = session.query(WBDocumentSyncRun).order_by(

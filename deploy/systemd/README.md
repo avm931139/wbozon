@@ -158,6 +158,10 @@ sudo systemctl start wbozon-product-catalog.service
 journalctl -u wbozon-product-catalog.service -n 100 --no-pager
 ```
 
+После установки timer задайте `PRODUCT_CATALOG_SYNC_REQUIRED=true` в `.env`.
+Пока timer не установлен, оставьте `false`: разовая старая запись `partial` не
+будет ошибочно удерживать общий healthcheck в аварийном состоянии.
+
 Файлы размещаются в `PRODUCT_MEDIA_STORAGE_DIR`, по умолчанию `/home/wbozon/wbozon/data/product_media`. Не включайте timer одновременно с production cron-строкой той же команды.
 
 Он читает журналы БД и не является зависимостью WB/Ozon/inventory. Ошибка Telegram оставляет события в очереди и не меняет статус исходной синхронизации.
