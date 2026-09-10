@@ -48,14 +48,38 @@ class DashboardService:
         """Return performance attribution and the actual Yandex marketing charge."""
         one = lambda sql, **params: self._one(db, sql, **params)
         result = {
-            "wb": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(order_sum),0) attributed_revenue FROM wb_advert_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
-            "ozon": one("SELECT coalesce(sum(spend),0) spend,coalesce(sum(orders_money),0) attributed_revenue FROM ozon_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e", b=begin, e=finish),
+            "wb": one("""SELECT performance.performance_spend,
+                    performance.performance_spend spend,performance.attributed_revenue,
+                    finance.finance_spend,'promotion_fullstats' spend_source,
+                    'promotion_expenses' finance_spend_source
+                FROM (SELECT coalesce(sum(spend),0) performance_spend,
+                        coalesce(sum(order_sum),0) attributed_revenue
+                    FROM wb_advert_daily_stats WHERE stat_date>=:b AND stat_date<CAST(:e AS date)+1) performance
+                CROSS JOIN (SELECT greatest(coalesce(sum(amount),0),0) finance_spend
+                    FROM wb_advert_expenses WHERE expense_time>=:b AND expense_time<CAST(:e AS date)+1) finance""",
+                b=begin, e=finish),
+            "ozon": one("""SELECT performance.performance_spend,
+                    performance.performance_spend spend,performance.attributed_revenue,
+                    finance.finance_spend,'performance_daily' spend_source,
+                    'finance_accrual_by_day' finance_spend_source
+                FROM (SELECT coalesce(sum(spend),0) performance_spend,
+                        coalesce(sum(orders_money),0) attributed_revenue
+                    FROM ozon_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e) performance
+                CROSS JOIN (SELECT greatest(coalesce(-sum(a.amount),0),0) finance_spend
+                    FROM ozon_finance_accruals a
+                    LEFT JOIN ozon_finance_accrual_types t ON t.type_id=CASE
+                        WHEN coalesce(a.raw_data->>'type_id','') ~ '^[0-9]+$'
+                        THEN (a.raw_data->>'type_id')::integer END
+                    WHERE a.accrual_date BETWEEN :b AND :e
+                      AND t.name IN ('PayPerClick','Promotion')) finance""",
+                b=begin, e=finish),
             "yandex_market": one("""WITH daily_coverage AS (
                     SELECT stat_date,count(DISTINCT source) sources
                     FROM yandex_market_ad_daily_stats
                     WHERE stat_date>=:b AND stat_date<=:e GROUP BY stat_date
                 ), performance AS (
-                    SELECT coalesce(sum(attributed_revenue),0) attributed_revenue
+                    SELECT coalesce(sum(spend),0) performance_spend,
+                        coalesce(sum(attributed_revenue),0) attributed_revenue
                     FROM yandex_market_ad_daily_stats WHERE stat_date>=:b AND stat_date<=:e
                 ), expense AS (
                     SELECT greatest(coalesce(-sum(amount),0),0) spend
@@ -65,12 +89,15 @@ class DashboardService:
                            OR product_or_service ILIKE '%реклам%'
                            OR product_or_service ILIKE '%продвиж%'
                            OR product_or_service ILIKE '%полк%')
-                ) SELECT expense.spend,performance.attributed_revenue,
-                    coalesce((SELECT count(*) FROM daily_coverage WHERE sources=3),0) coverage_days,
+                ) SELECT performance.performance_spend,
+                    performance.performance_spend spend,performance.attributed_revenue,
+                    expense.spend finance_spend,
+                    coalesce((SELECT count(*) FROM daily_coverage WHERE sources=4),0) coverage_days,
                     CAST(:e AS date)-CAST(:b AS date)+1 expected_days,
-                    coalesce((SELECT count(*) FROM daily_coverage WHERE sources=3),0)
+                    coalesce((SELECT count(*) FROM daily_coverage WHERE sources=4),0)
                         = CAST(:e AS date)-CAST(:b AS date)+1 attribution_complete,
-                    'marketing_finance' spend_source,'marketing_reports' attribution_source
+                    'marketing_reports' spend_source,'marketing_reports' attribution_source,
+                    'marketing_finance' finance_spend_source
                 FROM expense CROSS JOIN performance""", b=begin, e=finish),
         }
         for key in ("wb", "ozon"):
@@ -132,28 +159,33 @@ class DashboardService:
         one = lambda sql, **params: self._one(db, sql, **params)
         expected_days = (finish - begin).days + 1
         result = {
-            "wb": one("""WITH metrics AS (
-                    SELECT coalesce(sum(open_count),0) views,
-                        coalesce(sum(cart_count),0) to_cart,
-                        coalesce(sum(order_count),0) ordered_items,
-                        coalesce(sum(order_sum),0) ordered_amount,
-                        coalesce(sum(buyout_count),0) purchased_items,
-                        coalesce(sum(buyout_sum),0) purchased_amount
+            "wb": one("""WITH product_metrics AS (
+                    SELECT coalesce(sum(open_count),0) product_views,
+                        coalesce(sum(order_count),0) product_ordered_items,
+                        coalesce(sum(order_sum),0) product_ordered_amount
                     FROM wb_sales_funnel_daily WHERE stat_date BETWEEN :b AND :e
-                ), coverage AS (
-                    SELECT count(*) coverage_days FROM generate_series(
-                        CAST(:b AS date),CAST(:e AS date),interval '1 day'
-                    ) day WHERE EXISTS (
-                        SELECT 1 FROM wb_sales_funnel_sync_runs run
-                        WHERE run.status='completed'
-                          AND day::date BETWEEN run.period_from AND run.period_to
-                    )
-                ) SELECT metrics.*,coverage.coverage_days,
+                ), account_metrics AS (
+                    SELECT coalesce(sum(open_count),0) views,coalesce(sum(cart_count),0) to_cart,
+                        coalesce(sum(order_count),0) ordered_items,coalesce(sum(order_sum),0) ordered_amount,
+                        coalesce(sum(buyout_count),0) purchased_items,coalesce(sum(buyout_sum),0) purchased_amount,
+                        count(DISTINCT stat_date) coverage_days
+                    FROM wb_sales_funnel_account_daily WHERE stat_date BETWEEN :b AND :e
+                ) SELECT account_metrics.*,product_metrics.*,
+                    account_metrics.ordered_items-product_metrics.product_ordered_items item_delta,
+                    account_metrics.ordered_amount-product_metrics.product_ordered_amount amount_delta,
                     CAST(:e AS date)-CAST(:b AS date)+1 expected_days,
-                    coverage.coverage_days=CAST(:e AS date)-CAST(:b AS date)+1 complete,
-                    'WB Sales Funnel' source
-                FROM metrics CROSS JOIN coverage""", b=begin, e=finish),
-            "ozon": one("""SELECT
+                    account_metrics.coverage_days=CAST(:e AS date)-CAST(:b AS date)+1 complete,
+                    'WB Sales Funnel grouped/history' source
+                FROM product_metrics CROSS JOIN account_metrics""", b=begin, e=finish),
+            "ozon": one("""WITH analytics AS (
+                    SELECT coalesce(sum(ordered_units),0) ordered_items,
+                        coalesce(sum(revenue),0) ordered_amount,
+                        coalesce(sum(delivered_units),0) delivered_items,
+                        coalesce(sum(returns),0) analytics_returns,
+                        coalesce(sum(cancellations),0) cancelled_items,
+                        count(DISTINCT sale_date) coverage_days
+                    FROM ozon_daily_sales WHERE sale_date BETWEEN :b AND :e
+                ), realization AS (SELECT
                     coalesce(sum(coalesce(p.quantity,0)) FILTER (WHERE p.seller_price>0),0) realized_items,
                     coalesce(sum(p.seller_price*coalesce(p.quantity,0)) FILTER (WHERE p.seller_price>0),0) realized_amount,
                     coalesce(sum(coalesce(p.quantity,0)) FILTER (WHERE p.seller_price<0),0) returned_items,
@@ -161,12 +193,15 @@ class DashboardService:
                         THEN sum(p.seller_price*coalesce(p.quantity,0)) FILTER (WHERE p.seller_price>0)
                             /sum(coalesce(p.quantity,0)) FILTER (WHERE p.seller_price>0)
                         ELSE 0 END average_realized_price,
-                    min(p.accrual_date) data_from,max(p.accrual_date) data_to,
-                    'Ozon accrual/postings · seller_price' source
+                    min(p.accrual_date) data_from,max(p.accrual_date) data_to
                 FROM ozon_finance_posting_accruals p
                 JOIN ozon_finance_accrual_types t ON t.type_id=p.type_id
-                WHERE t.name='SaleCommission' AND p.accrual_date BETWEEN :b AND :e""",
-                b=begin, e=finish),
+                WHERE t.name='SaleCommission' AND p.accrual_date BETWEEN :b AND :e)
+                SELECT analytics.*,realization.*,
+                    CAST(:e AS date)-CAST(:b AS date)+1 expected_days,
+                    analytics.coverage_days=CAST(:e AS date)-CAST(:b AS date)+1 complete,
+                    'Ozon analytics/data + accrual/postings' source
+                FROM analytics CROSS JOIN realization""", b=begin, e=finish),
             "yandex_market": one("""WITH metrics AS (
                     SELECT coalesce(sum(shows),0) views,coalesce(sum(clicks),0) clicks,
                         coalesce(sum(to_cart),0) to_cart,
@@ -191,11 +226,7 @@ class DashboardService:
                     'Yandex Market Sales Analytics' source
                 FROM metrics CROSS JOIN coverage""", b=begin, e=finish),
         }
-        for key, values in result.items():
-            if key == "ozon" and "error" not in values:
-                values["complete"] = bool(values.get("data_from"))
-                values["coverage_days"] = expected_days if values["complete"] else 0
-                values["expected_days"] = expected_days
+        for values in result.values():
             self._convert(values)
         return result
 

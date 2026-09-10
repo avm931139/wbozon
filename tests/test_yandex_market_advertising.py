@@ -67,7 +67,17 @@ def test_advertising_api_generates_waits_and_reads_json_archive():
     assert download.calls[0][1]["allow_redirects"] is False
 
 
-def test_advertising_service_persists_three_sources(monkeypatch):
+def test_shelves_report_uses_click_attribution():
+    client = FakeClient()
+    api = YandexMarketAdvertisingAPI(client, download_session=object())
+
+    api.generate("shelves", business_id=777, stat_date=date(2026, 9, 6))
+
+    assert client.calls[0][1] == "/v2/reports/shelf-statistics/generate"
+    assert client.calls[0][2]["json_body"]["attributionType"] == "CLICKS"
+
+
+def test_advertising_service_persists_four_sources(monkeypatch):
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, future=True)
@@ -83,6 +93,7 @@ def test_advertising_service_persists_three_sources(monkeypatch):
             names = {
                 "sales_boost": "business_boost_consolidated.json",
                 "shows_boost": "business_shows_boost_consolidated_campaigns.json",
+                "shelves": "shelfs_statistics_summary.json",
                 "banners": "banners_statistics_report_consolidated.json",
             }
             rows = {
@@ -96,6 +107,10 @@ def test_advertising_service_persists_three_sources(monkeypatch):
                     "shows": 30, "clicks": 5, "orderedCount": 3,
                     "realCost": 200, "orderedAmount": 2000,
                 }],
+                "shelves": [{
+                    "campaignId": 30, "shows": 5, "clicks": 1,
+                    "orderedCount": 1, "realCost": 50, "orderedAmount": 400,
+                }],
                 "banners": [],
             }
             return {"status": "DONE", "rows": [(names[report_id], rows[report_id])]}
@@ -105,15 +120,15 @@ def test_advertising_service_persists_three_sources(monkeypatch):
     )
     result = service.sync(stat_date=date(2026, 9, 6))
 
-    assert set(result["sources"]) == {"sales_boost", "shows_boost", "banners"}
+    assert set(result["sources"]) == {"sales_boost", "shows_boost", "shelves", "banners"}
     with factory() as session:
         rows = session.query(YandexMarketAdDailyStat).all()
-        assert len(rows) == 3
-        assert sum(row.views for row in rows) == 40
-        assert sum(row.clicks for row in rows) == 9
-        assert sum(row.orders for row in rows) == 5
-        assert sum(row.spend for row in rows) == 300
-        assert sum(row.attributed_revenue for row in rows) == 3000
+        assert len(rows) == 4
+        assert sum(row.views for row in rows) == 45
+        assert sum(row.clicks for row in rows) == 10
+        assert sum(row.orders for row in rows) == 6
+        assert sum(row.spend for row in rows) == 350
+        assert sum(row.attributed_revenue for row in rows) == 3400
 
 
 def test_no_data_report_is_saved_as_zero_day():

@@ -117,7 +117,9 @@ def test_yandex_advertising_uses_actual_marketing_charges_and_checks_coverage():
     assert "coverage_days" in source
     assert "attribution_complete" in source
     assert "attributionComplete" in HTML
-    assert "атрибуция загружается" in HTML
+    assert "рекламные отчёты загружаются" in HTML
+    assert "Списано по финансовым данным" in HTML
+    assert "sources=4" in source
 
 
 def test_dashboard_uses_historical_marketplace_order_sources():
@@ -165,5 +167,17 @@ def test_dashboard_uses_ozon_finance_accruals_for_buyouts_and_profit():
 
 
 def test_dashboard_labels_ozon_advertising_without_calling_it_revenue():
-    assert "Рекламные кампании" in HTML
+    assert "Расход рекламного API" in HTML
     assert "Атрибутированная сумма заказов" in HTML
+
+
+def test_dashboard_uses_cabinet_wide_wb_and_ozon_order_analytics():
+    import inspect
+
+    source = inspect.getsource(DashboardService._cabinet_analytics)
+    assert "wb_sales_funnel_account_daily" in source
+    assert "item_delta" in source
+    assert "FROM ozon_daily_sales" in source
+    assert "ordered_units" in source
+    assert "Сверка итога с товарами" in HTML
+    assert "Заказано по аналитике" in HTML

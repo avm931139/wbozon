@@ -343,7 +343,7 @@ read-only-доступа к товарам и карточкам либо общ
   `DBS`, `Express`).
 - `POST /v2/reports/documents/shipment-list/generate` — лист сборки (`FBS`).
 - `POST /v2/reports/shelf-statistics/generate` — статистика по полкам (`FBY`,
-  `FBS`, `DBS`, `Express`).
+  `FBS`, `DBS`, `Express`) — **РЕАЛИЗОВАНО**.
 - `POST /v2/reports/documents/labels/generate` — массовые ярлыки коробок (`FBS`,
   `DBS`, `Express`).
 - `POST /v2/reports/goods-feedback/generate` — отзывы о товарах (`FBY`, `FBS`,

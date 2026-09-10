@@ -40,7 +40,7 @@ class YandexMarketAdvertisingAPI:
             "dateFrom": stat_date.isoformat(),
             "dateTo": stat_date.isoformat(),
         }
-        if source == "shows_boost":
+        if source in {"shows_boost", "shelves"}:
             body["attributionType"] = "CLICKS"
         payload = self.client.post(
             path,

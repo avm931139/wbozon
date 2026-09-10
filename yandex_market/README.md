@@ -14,6 +14,7 @@
 - `POST /v2/campaigns/{campaignId}/offers/stocks` — остатки по складам.
 - `POST /v2/reports/boost-consolidated/generate` — буст продаж;
 - `POST /v2/reports/shows-boost/generate` — буст показов;
+- `POST /v2/reports/shelf-statistics/generate` — полки;
 - `POST /v2/reports/banners-statistics/generate` — охватное продвижение;
 - `GET /v2/reports/info/{reportId}` — готовность и загрузка отчёта.
 
@@ -64,8 +65,8 @@ python -m yandex_market --task analytics
 python -m inventory_sync --marketplace yandex_market --once
 ```
 
-`advertising` независимо получает статистику буста продаж, буста показов и
-охватного продвижения. Почасовой запуск сначала заполняет по одному самому новому
+`advertising` независимо получает статистику буста продаж, буста показов, полок
+и охватного продвижения. Почасовой запуск сначала заполняет по одному самому новому
 пропущенному дню за окно `YANDEX_MARKET_AD_HISTORY_DAYS` (по умолчанию 90 дней),
 а после полного заполнения повторно обновляет последние
 `YANDEX_MARKET_AD_REFRESH_DAYS` дней: атрибуция рекламы может дозревать после
@@ -78,7 +79,7 @@ python -m inventory_sync --marketplace yandex_market --once
 В оперативном дашборде расход Яндекс Маркета берётся не из неполного рекламного
 среза, а из фактических рекламных списаний и удержаний отчёта
 `united-netting`. Атрибутированная сумма заказов, ROAS и ДРР показываются только
-когда все три рекламных отчёта покрывают каждый день выбранного периода.
+когда все четыре рекламных отчёта покрывают каждый день выбранного периода.
 
 `finances` каждый час формирует официальный JSON-отчёт по платежам
 `/v2/reports/united-netting/generate`, сохраняет каждое начисление положительной

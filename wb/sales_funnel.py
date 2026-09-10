@@ -50,3 +50,30 @@ class SalesFunnelAPI:
                 raise WBParseError("WB Sales Funnel response is not a list")
             result.extend(item for item in page if isinstance(item, dict))
         return result
+
+    def pause(self) -> None:
+        """Observe the shared Analytics API interval before a different report."""
+        if self.request_interval_seconds:
+            self.sleeper(self.request_interval_seconds)
+
+    def grouped_history(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
+        if date_from > date_to:
+            raise ValueError("date_from must not be later than date_to")
+        if (date_to - date_from).days > 6:
+            raise ValueError("WB grouped Sales Funnel history supports no more than seven days")
+        payload = self.client.post(
+            "/api/analytics/v3/sales-funnel/grouped/history",
+            json_body={
+                "selectedPeriod": {"start": date_from.isoformat(), "end": date_to.isoformat()},
+                "brandNames": [],
+                "subjectIds": [],
+                "tagIds": [],
+                "aggregationLevel": "day",
+                "skipDeletedNm": False,
+            },
+            retries=3,
+        )
+        page = payload.get("data") if isinstance(payload, dict) else payload
+        if not isinstance(page, list):
+            raise WBParseError("WB grouped Sales Funnel response is not a list")
+        return [item for item in page if isinstance(item, dict)]

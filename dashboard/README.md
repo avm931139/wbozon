@@ -99,6 +99,14 @@ older rows remain available as local history.
 Incomplete cabinet coverage is labelled and its totals are hidden. Ozon shows
 realized quantity, amount and average realized unit price from
 `accrual/postings.seller_price`, separately from the posting price at order time.
+Ozon cabinet analytics also shows `ordered_units` and `revenue` from
+`/v1/analytics/data`; product units are not labelled as unique orders. WB uses
+the cabinet-wide `grouped/history` total and audits it against the sum of
+`products/history` rows.
+Advertising keeps two money layers separate: performance API spend is paired
+with attributed orders and ROAS, while actual finance charges are displayed on
+a separate line. Yandex attribution is complete only when sales boost, shows
+boost, shelves and banner reports cover every selected day.
 The marketplace share is calculated independently for units and money. Average
 product price is order amount divided by ordered units; daily average includes
 all calendar days in the selected range. Monthly projection is the average

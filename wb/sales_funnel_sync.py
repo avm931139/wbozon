@@ -10,7 +10,12 @@ from zoneinfo import ZoneInfo
 
 from app.config import WB_LOG_DIR, WB_LOG_LEVEL, WB_SALES_FUNNEL_LOOKBACK_DAYS, WB_TG_TIMEZONE
 from app.db import SessionLocal
-from app.models import WBProduct, WBSalesFunnelDaily, WBSalesFunnelSyncRun
+from app.models import (
+    WBProduct,
+    WBSalesFunnelAccountDaily,
+    WBSalesFunnelDaily,
+    WBSalesFunnelSyncRun,
+)
 from wb.exceptions import WBParseError
 from wb.sales_funnel import SalesFunnelAPI
 from wb.sync_logging import configure_wb_logging, install_context_filter
@@ -57,9 +62,13 @@ class SalesFunnelSyncService:
         try:
             payload = self.api.history(period_from, period_to, nm_ids)
             received, upserted = self._persist(payload, current)
+            self.api.pause()
+            account_payload = self.api.grouped_history(period_from, period_to)
+            account_rows = self._persist_account(account_payload, current)
             self._finish(run_id, "completed", received, upserted, None, datetime.now(self.timezone))
             return {"run_id": run_id, "status": "completed", "period_from": period_from,
-                    "period_to": period_to, "rows_received": received, "rows_upserted": upserted}
+                    "period_to": period_to, "rows_received": received, "rows_upserted": upserted,
+                    "account_rows_upserted": account_rows}
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             self._finish(run_id, "failed", 0, 0, error, datetime.now(self.timezone))
@@ -115,6 +124,45 @@ class SalesFunnelSyncService:
                 row.fetched_at = fetched_at
             session.commit()
         return len(parsed), len(parsed)
+
+    def _persist_account(self, payload: list[dict[str, Any]], fetched_at: datetime) -> int:
+        totals: dict[date, dict[str, Any]] = {}
+        for group in payload:
+            history = group.get("history")
+            if not isinstance(history, list):
+                raise WBParseError("WB grouped Sales Funnel item has no history")
+            currency = group.get("currency")
+            currency_code = currency.get("name") if isinstance(currency, dict) else currency
+            for item in history:
+                if not isinstance(item, dict) or not item.get("date"):
+                    raise WBParseError("WB grouped Sales Funnel history has no date")
+                day = date.fromisoformat(str(item["date"])[:10])
+                row = totals.setdefault(day, {
+                    "currency": str(currency_code) if currency_code else None,
+                    "open_count": 0, "cart_count": 0,
+                    "order_count": 0, "order_sum": Decimal(0),
+                    "buyout_count": 0, "buyout_sum": Decimal(0), "groups": [],
+                })
+                row["open_count"] += int(item.get("openCount") or 0)
+                row["cart_count"] += int(item.get("cartCount") or 0)
+                row["order_count"] += int(item.get("orderCount") or 0)
+                row["order_sum"] += _money(item.get("orderSum"))
+                row["buyout_count"] += int(item.get("buyoutCount") or 0)
+                row["buyout_sum"] += _money(item.get("buyoutSum"))
+                row["groups"].append({"group": group.get("group"), "metrics": item})
+        with self.session_factory() as session:
+            for day, item in totals.items():
+                row = session.get(WBSalesFunnelAccountDaily, day)
+                if row is None:
+                    row = WBSalesFunnelAccountDaily(stat_date=day)
+                    session.add(row)
+                for field in ("currency", "open_count", "cart_count", "order_count",
+                              "order_sum", "buyout_count", "buyout_sum"):
+                    setattr(row, field, item[field])
+                row.raw_data = {"groups": item["groups"]}
+                row.fetched_at = fetched_at
+            session.commit()
+        return len(totals)
 
     def _finish(self, run_id: str, status: str, received: int, upserted: int,
                 error: str | None, finished_at: datetime) -> None:

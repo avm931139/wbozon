@@ -31,7 +31,7 @@ def _decimal(value: Any) -> Decimal:
 
 
 class YandexMarketAdvertisingService:
-    SOURCES = ("sales_boost", "shows_boost", "banners")
+    SOURCES = ("sales_boost", "shows_boost", "shelves", "banners")
 
     def __init__(
         self,
@@ -145,6 +145,7 @@ class YandexMarketAdvertisingService:
         expected = {
             "sales_boost": "business_boost_consolidated",
             "shows_boost": "business_shows_boost_consolidated_campaigns",
+            "shelves": "shelfs_statistics_summary",
             "banners": "banners_statistics_report_consolidated",
         }[source]
         for filename, rows in files:

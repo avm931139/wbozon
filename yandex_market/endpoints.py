@@ -7,6 +7,7 @@ REPORT_INFO = "/v2/reports/info/{report_id}"
 AD_REPORT_PATHS = {
     "sales_boost": "/v2/reports/boost-consolidated/generate",
     "shows_boost": "/v2/reports/shows-boost/generate",
+    "shelves": "/v2/reports/shelf-statistics/generate",
     "banners": "/v2/reports/banners-statistics/generate",
 }
 

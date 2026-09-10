@@ -967,6 +967,23 @@ class WBSalesFunnelDaily(Base):
     fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class WBSalesFunnelAccountDaily(Base):
+    """Cabinet-wide WB Sales Funnel totals used to audit product completeness."""
+
+    __tablename__ = "wb_sales_funnel_account_daily"
+
+    stat_date = Column(Date, primary_key=True)
+    currency = Column(String(10), nullable=True)
+    open_count = Column(Integer, nullable=False, default=0)
+    cart_count = Column(Integer, nullable=False, default=0)
+    order_count = Column(Integer, nullable=False, default=0)
+    order_sum = Column(Numeric(20, 6), nullable=False, default=0)
+    buyout_count = Column(Integer, nullable=False, default=0)
+    buyout_sum = Column(Numeric(20, 6), nullable=False, default=0)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class WBSalesFunnelSyncRun(Base):
     __tablename__ = "wb_sales_funnel_sync_runs"
 
