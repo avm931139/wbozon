@@ -83,6 +83,7 @@ def test_cabinet_analytics_is_separate_and_exposes_ozon_realization_price():
     summary = inspect.getsource(DashboardService.summary)
     assert '"cabinet_analytics":cabinet' in summary
     assert "Кабинетная аналитика" in HTML
+    assert "cabinetComparable=cabinet.complete&&oldCabinet.complete" in HTML
     assert "Реализовано по начислениям" in HTML
 
 
