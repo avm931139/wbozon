@@ -5,10 +5,11 @@ from yandex_market.services.advertising_service import YandexMarketAdvertisingSe
 from yandex_market.services.identity_service import YandexMarketIdentityService
 from yandex_market.services.finance_service import YandexMarketFinanceService
 from yandex_market.services.order_service import YandexMarketOrderService
+from yandex_market.services.sales_analytics_service import YandexMarketSalesAnalyticsService
 
 
 class YandexMarketSyncService:
-    TASK_NAMES = ("identity", "catalog", "orders", "advertising", "finances")
+    TASK_NAMES = ("identity", "catalog", "orders", "advertising", "finances", "analytics")
 
     def __init__(self) -> None:
         self.identity_service = YandexMarketIdentityService()
@@ -16,6 +17,7 @@ class YandexMarketSyncService:
         self.order_service = YandexMarketOrderService()
         self.advertising_service = YandexMarketAdvertisingService()
         self.finance_service = YandexMarketFinanceService()
+        self.sales_analytics_service = YandexMarketSalesAnalyticsService()
 
     @classmethod
     def task_names(cls) -> tuple[str, ...]:
@@ -28,6 +30,7 @@ class YandexMarketSyncService:
             "orders": self.order_service.sync,
             "advertising": self.advertising_service.sync,
             "finances": self.finance_service.sync,
+            "analytics": self.sales_analytics_service.sync,
         }
         try:
             return callbacks[task]()

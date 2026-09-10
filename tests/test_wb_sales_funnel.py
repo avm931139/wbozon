@@ -45,6 +45,7 @@ class FakeSalesFunnelAPI:
             "product": {"nmId": 101, "vendorCode": "SKU-101", "title": "Товар"},
             "currency": {"name": "RUB"},
             "history": [{
+                "openCount": 10, "cartCount": 5,
                 "date": "2026-09-08", "orderCount": 4, "orderSum": 12000,
                 "buyoutCount": 2, "buyoutSum": 5500,
             }],
@@ -66,6 +67,8 @@ def test_sales_funnel_sync_upserts_daily_preliminary_metrics():
 
     with session_factory() as session:
         row = session.query(WBSalesFunnelDaily).one()
+        assert row.open_count == 10
+        assert row.cart_count == 5
         assert row.order_count == 4
         assert row.buyout_count == 2
         assert row.cancel_count == 0

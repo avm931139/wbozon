@@ -34,9 +34,11 @@ YANDEX_MARKET_TIMEOUT_SECONDS=10
 YANDEX_MARKET_HISTORY_FROM=2026-01-01
 YANDEX_MARKET_ORDER_LOOKBACK_DAYS=30
 YANDEX_MARKET_TIMEZONE=Europe/Moscow
-YANDEX_MARKET_REQUIRED_TASKS=identity,catalog,orders,advertising,finances
+YANDEX_MARKET_REQUIRED_TASKS=identity,catalog,orders,advertising,finances,analytics
 YANDEX_MARKET_AD_POLL_SECONDS=5
 YANDEX_MARKET_AD_POLL_ATTEMPTS=36
+YANDEX_MARKET_ANALYTICS_HISTORY_DAYS=90
+YANDEX_MARKET_ANALYTICS_MAX_AGE_SECONDS=129600
 YANDEX_MARKET_AD_HISTORY_DAYS=90
 YANDEX_MARKET_AD_REFRESH_DAYS=14
 YANDEX_MARKET_AD_MAX_AGE_SECONDS=7200
@@ -58,6 +60,7 @@ python -m yandex_market --task catalog
 python -m yandex_market --task orders
 python -m yandex_market --task advertising
 python -m yandex_market --task finances
+python -m yandex_market --task analytics
 python -m inventory_sync --marketplace yandex_market --once
 ```
 
@@ -84,6 +87,13 @@ python -m inventory_sync --marketplace yandex_market --once
 90 дней. Данные находятся в `yandex_market_finance_transactions` и являются
 источником выручки и расходов Яндекс Маркета в дашборде.
 
+`analytics` раз в сутки формирует официальный JSON-отчёт «Аналитика продаж»
+`/v2/reports/shows-sales/generate` с группировкой `OFFERS`. По умолчанию каждый
+запуск полностью обновляет последние 90 дней, поэтому поздние доставки, отмены
+и возвраты попадают к исходной дате заказа. Данные хранятся в
+`yandex_market_sales_analytics_daily` и показываются в дашборде отдельным
+кабинетным слоем; они не подменяют оперативные заказы.
+
 Первый запуск заказов загружает данные с `YANDEX_MARKET_HISTORY_FROM` отрезками
 не более 30 дней между границами запроса. `date_to` бизнес-метода фактически не
 включается в многодневную выдачу, поэтому соседние отрезки перекрываются этой
@@ -108,6 +118,7 @@ python -m inventory_sync --marketplace yandex_market --once
 - `yandex_market_order_items` — позиции заказов;
 - `yandex_market_sync_runs` — независимый журнал задач;
 - `yandex_market_ad_daily_stats` — дневные показатели рекламы по источнику и кампании;
+- `yandex_market_sales_analytics_daily` — кабинетная воронка продаж по дню заказа и SKU;
 - `yandex_market_finance_transactions` — начисления и удержания отчёта по платежам;
 - `yandex_market_stocks` и `yandex_market_stock_snapshots` — остатки.
 

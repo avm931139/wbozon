@@ -955,6 +955,8 @@ class WBSalesFunnelDaily(Base):
     vendor_code = Column(String, nullable=True, index=True)
     title = Column(String, nullable=True)
     currency = Column(String(10), nullable=True)
+    open_count = Column(Integer, nullable=False, default=0)
+    cart_count = Column(Integer, nullable=False, default=0)
     order_count = Column(Integer, nullable=False, default=0)
     order_sum = Column(Numeric(20, 6), nullable=False, default=0)
     buyout_count = Column(Integer, nullable=False, default=0)
@@ -1500,6 +1502,39 @@ class YandexMarketAdDailyStat(Base):
     orders = Column(Integer, nullable=False, default=0)
     spend = Column(Numeric(20, 6), nullable=False, default=0)
     attributed_revenue = Column(Numeric(20, 6), nullable=False, default=0)
+    raw_data = Column(JSON, nullable=False, default=dict)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class YandexMarketSalesAnalyticsDaily(Base):
+    """Cabinet sales-funnel facts grouped by order day and seller offer."""
+
+    __tablename__ = "yandex_market_sales_analytics_daily"
+    __table_args__ = (
+        UniqueConstraint(
+            "business_id", "stat_date", "offer_id",
+            name="uq_yandex_market_sales_analytics_daily",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    business_id = Column(BigInteger, nullable=False, index=True)
+    stat_date = Column(Date, nullable=False, index=True)
+    offer_id = Column(String, nullable=False, index=True)
+    offer_name = Column(String, nullable=True)
+    category_name = Column(String, nullable=True)
+    brand_name = Column(String, nullable=True)
+    shows = Column(Integer, nullable=False, default=0)
+    clicks = Column(Integer, nullable=False, default=0)
+    to_cart = Column(Integer, nullable=False, default=0)
+    order_items = Column(Integer, nullable=False, default=0)
+    order_items_amount = Column(Numeric(20, 6), nullable=False, default=0)
+    delivered_items = Column(Integer, nullable=False, default=0)
+    delivered_amount = Column(Numeric(20, 6), nullable=False, default=0)
+    delivered_from_ordered_items = Column(Integer, nullable=False, default=0)
+    delivered_from_ordered_amount = Column(Numeric(20, 6), nullable=False, default=0)
+    cancelled_items = Column(Integer, nullable=False, default=0)
+    returned_items = Column(Integer, nullable=False, default=0)
     raw_data = Column(JSON, nullable=False, default=dict)
     fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
 

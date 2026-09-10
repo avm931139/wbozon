@@ -101,6 +101,8 @@ class SalesFunnelSyncService:
                 row.vendor_code = product.get("vendorCode")
                 row.title = product.get("title")
                 row.currency = str(currency) if currency else None
+                row.open_count = int(item.get("openCount") or 0)
+                row.cart_count = int(item.get("cartCount") or 0)
                 row.order_count = int(item.get("orderCount") or 0)
                 row.order_sum = _money(item.get("orderSum"))
                 row.buyout_count = int(item.get("buyoutCount") or 0)

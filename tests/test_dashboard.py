@@ -72,6 +72,20 @@ def test_operational_queries_compare_product_units_with_product_units():
     assert 'values.get("order_items")' in source
 
 
+def test_cabinet_analytics_is_separate_and_exposes_ozon_realization_price():
+    import inspect
+
+    source = inspect.getsource(DashboardService._cabinet_analytics)
+    assert "wb_sales_funnel_daily" in source
+    assert "yandex_market_sales_analytics_daily" in source
+    assert "seller_price*coalesce(p.quantity,0)" in source
+    assert "average_realized_price" in source
+    summary = inspect.getsource(DashboardService.summary)
+    assert '"cabinet_analytics":cabinet' in summary
+    assert "Кабинетная аналитика" in HTML
+    assert "Реализовано по начислениям" in HTML
+
+
 def test_pnl_dashboard_uses_only_financial_labels_and_separate_endpoint():
     assert "/api/pnl" in PNL_HTML
     assert "Только финансовые отчёты" in PNL_HTML

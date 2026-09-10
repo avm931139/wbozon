@@ -91,7 +91,13 @@ current coverage instead of presenting a partial value as final.
 Order cards identify their operational sources: WB Order Feed plus FBO Orders,
 Ozon Postings, and Yandex Market Orders API. Marketplace cabinet funnel exports
 are cohort analytics and can be recalculated after order creation, so they are
-used for reconciliation rather than silently mixed into the realtime series.
+shown as a separate cabinet-analytics group rather than silently mixed into the
+realtime series. WB uses its hourly seven-day Sales Funnel history. Yandex
+Market uses the official daily `shows-sales` report and refreshes the available
+90-day history so late delivery, cancellation and return attribution matures.
+Incomplete cabinet coverage is labelled and its totals are hidden. Ozon shows
+realized quantity, amount and average realized unit price from
+`accrual/postings.seller_price`, separately from the posting price at order time.
 The marketplace share is calculated independently for units and money. Average
 product price is order amount divided by ordered units; daily average includes
 all calendar days in the selected range. Monthly projection is the average

@@ -193,7 +193,7 @@ YANDEX_MARKET_TIMEZONE = os.getenv("YANDEX_MARKET_TIMEZONE", "Europe/Moscow")
 YANDEX_MARKET_REQUIRED_TASKS = tuple(
     value.strip()
     for value in os.getenv(
-        "YANDEX_MARKET_REQUIRED_TASKS", "identity,catalog,orders,advertising,finances"
+        "YANDEX_MARKET_REQUIRED_TASKS", "identity,catalog,orders,advertising,finances,analytics"
     ).split(",")
     if value.strip()
 )
@@ -210,6 +210,12 @@ YANDEX_MARKET_AD_POLL_SECONDS = float(os.getenv("YANDEX_MARKET_AD_POLL_SECONDS",
 YANDEX_MARKET_AD_POLL_ATTEMPTS = int(os.getenv("YANDEX_MARKET_AD_POLL_ATTEMPTS", "36"))
 YANDEX_MARKET_AD_HISTORY_DAYS = int(os.getenv("YANDEX_MARKET_AD_HISTORY_DAYS", "90"))
 YANDEX_MARKET_AD_REFRESH_DAYS = int(os.getenv("YANDEX_MARKET_AD_REFRESH_DAYS", "14"))
+YANDEX_MARKET_ANALYTICS_HISTORY_DAYS = int(
+    os.getenv("YANDEX_MARKET_ANALYTICS_HISTORY_DAYS", "90")
+)
+YANDEX_MARKET_ANALYTICS_MAX_AGE_SECONDS = int(
+    os.getenv("YANDEX_MARKET_ANALYTICS_MAX_AGE_SECONDS", "129600")
+)
 YANDEX_MARKET_AD_MAX_AGE_SECONDS = int(
     os.getenv("YANDEX_MARKET_AD_MAX_AGE_SECONDS", "7200")
 )

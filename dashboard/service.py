@@ -127,6 +127,78 @@ class DashboardService:
             self._convert(values)
         return {"marketplaces": markets, "ads": ads}
 
+    def _cabinet_analytics(self, db: Any, begin: date, finish: date) -> dict[str, Any]:
+        """Return cohort/cabinet facts beside, never instead of, operational orders."""
+        one = lambda sql, **params: self._one(db, sql, **params)
+        expected_days = (finish - begin).days + 1
+        result = {
+            "wb": one("""WITH metrics AS (
+                    SELECT coalesce(sum(open_count),0) views,
+                        coalesce(sum(cart_count),0) to_cart,
+                        coalesce(sum(order_count),0) ordered_items,
+                        coalesce(sum(order_sum),0) ordered_amount,
+                        coalesce(sum(buyout_count),0) purchased_items,
+                        coalesce(sum(buyout_sum),0) purchased_amount
+                    FROM wb_sales_funnel_daily WHERE stat_date BETWEEN :b AND :e
+                ), coverage AS (
+                    SELECT count(*) coverage_days FROM generate_series(
+                        CAST(:b AS date),CAST(:e AS date),interval '1 day'
+                    ) day WHERE EXISTS (
+                        SELECT 1 FROM wb_sales_funnel_sync_runs run
+                        WHERE run.status='completed'
+                          AND day::date BETWEEN run.period_from AND run.period_to
+                    )
+                ) SELECT metrics.*,coverage.coverage_days,
+                    CAST(:e AS date)-CAST(:b AS date)+1 expected_days,
+                    coverage.coverage_days=CAST(:e AS date)-CAST(:b AS date)+1 complete,
+                    'WB Sales Funnel' source
+                FROM metrics CROSS JOIN coverage""", b=begin, e=finish),
+            "ozon": one("""SELECT
+                    coalesce(sum(coalesce(p.quantity,0)) FILTER (WHERE p.seller_price>0),0) realized_items,
+                    coalesce(sum(p.seller_price*coalesce(p.quantity,0)) FILTER (WHERE p.seller_price>0),0) realized_amount,
+                    coalesce(sum(coalesce(p.quantity,0)) FILTER (WHERE p.seller_price<0),0) returned_items,
+                    CASE WHEN coalesce(sum(coalesce(p.quantity,0)) FILTER (WHERE p.seller_price>0),0)>0
+                        THEN sum(p.seller_price*coalesce(p.quantity,0)) FILTER (WHERE p.seller_price>0)
+                            /sum(coalesce(p.quantity,0)) FILTER (WHERE p.seller_price>0)
+                        ELSE 0 END average_realized_price,
+                    min(p.accrual_date) data_from,max(p.accrual_date) data_to,
+                    'Ozon accrual/postings · seller_price' source
+                FROM ozon_finance_posting_accruals p
+                JOIN ozon_finance_accrual_types t ON t.type_id=p.type_id
+                WHERE t.name='SaleCommission' AND p.accrual_date BETWEEN :b AND :e""",
+                b=begin, e=finish),
+            "yandex_market": one("""WITH metrics AS (
+                    SELECT coalesce(sum(shows),0) views,coalesce(sum(clicks),0) clicks,
+                        coalesce(sum(to_cart),0) to_cart,
+                        coalesce(sum(order_items),0) ordered_items,
+                        coalesce(sum(order_items_amount),0) ordered_amount,
+                        coalesce(sum(delivered_from_ordered_items),0) purchased_items,
+                        coalesce(sum(delivered_from_ordered_amount),0) purchased_amount,
+                        coalesce(sum(cancelled_items),0) cancelled_items,
+                        coalesce(sum(returned_items),0) returned_items
+                    FROM yandex_market_sales_analytics_daily
+                    WHERE stat_date BETWEEN :b AND :e
+                ), coverage AS (
+                    SELECT EXISTS (
+                        SELECT 1 FROM yandex_market_sync_runs run
+                        WHERE run.task='analytics' AND run.status='completed'
+                          AND CAST(run.result->>'date_from' AS date)<=CAST(:b AS date)
+                          AND CAST(run.result->>'date_to' AS date)>=CAST(:e AS date)
+                    ) complete
+                ) SELECT metrics.*,
+                    CASE WHEN coverage.complete THEN CAST(:e AS date)-CAST(:b AS date)+1 ELSE 0 END coverage_days,
+                    CAST(:e AS date)-CAST(:b AS date)+1 expected_days,coverage.complete,
+                    'Yandex Market Sales Analytics' source
+                FROM metrics CROSS JOIN coverage""", b=begin, e=finish),
+        }
+        for key, values in result.items():
+            if key == "ozon" and "error" not in values:
+                values["complete"] = bool(values.get("data_from"))
+                values["coverage_days"] = expected_days if values["complete"] else 0
+                values["expected_days"] = expected_days
+            self._convert(values)
+        return result
+
     def _period_metrics(self, db: Any, begin: date, finish: date) -> dict[str, Any]:
         until = finish + timedelta(days=1)
         one = lambda sql, **params: self._one(db, sql, **params)
@@ -367,6 +439,8 @@ class DashboardService:
         with self.session_factory() as db:
             current = self._operational_period_metrics(db, begin, finish)
             previous = self._operational_period_metrics(db, previous_begin, previous_finish)
+            cabinet = self._cabinet_analytics(db, begin, finish)
+            previous_cabinet = self._cabinet_analytics(db, previous_begin, previous_finish)
             stocks = self._stocks(db)
             previous_stocks = self._historical_stocks(db, previous_finish)
             prices = self._one(db, "SELECT count(*) active,count(*) FILTER (WHERE in_promotion IS TRUE) promotions,count(*) FILTER (WHERE coalesce(seller_price,customer_price,list_price,0)<=0) invalid FROM marketplace_current_prices WHERE active IS TRUE")
@@ -397,7 +471,7 @@ class DashboardService:
         self._convert(prices)
         raw = series_result.get("data", []) if "error" not in series_result else []
         series = [{**dict(row), "day": str(row["report_day"]), "revenue": _number(row["revenue"])} for row in raw]
-        return {"period":{"from":begin.isoformat(),"to":finish.isoformat()},"previous_period":{"from":previous_begin.isoformat(),"to":previous_finish.isoformat()},"marketplaces":current["marketplaces"],"previous_marketplaces":previous["marketplaces"],"ads":current["ads"],"previous_ads":previous["ads"],"stocks":stocks,"previous_stocks":previous_stocks,"prices":prices,"series":series,"series_error":series_result.get("error")}
+        return {"period":{"from":begin.isoformat(),"to":finish.isoformat()},"previous_period":{"from":previous_begin.isoformat(),"to":previous_finish.isoformat()},"marketplaces":current["marketplaces"],"previous_marketplaces":previous["marketplaces"],"cabinet_analytics":cabinet,"previous_cabinet_analytics":previous_cabinet,"ads":current["ads"],"previous_ads":previous["ads"],"stocks":stocks,"previous_stocks":previous_stocks,"prices":prices,"series":series,"series_error":series_result.get("error")}
 
     @staticmethod
     def _pnl_view(values: dict[str, Any], marketplace: str) -> dict[str, Any]:

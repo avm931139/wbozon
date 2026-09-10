@@ -332,7 +332,7 @@ read-only-доступа к товарам и карточкам либо общ
   партнерских складах (`FBS`, `DBS`, `Express`).
 - `POST /v2/reports/goods-movement/generate` — движение товаров (`FBY`, `LaaS`).
 - `POST /v2/reports/shows-sales/generate` — «Аналитика продаж» (`FBY`, `FBS`,
-  `DBS`, `Express`).
+  `DBS`, `Express`) — **РЕАЛИЗОВАНО** (ежедневный кабинетный слой за 90 дней).
 - `POST /v2/reports/competitors-position/generate` — «Конкурентная позиция»
   (`FBY`, `FBS`, `DBS`, `Express`).
 - `POST /v2/reports/goods-prices/generate` — «Цены» (`FBY`, `FBS`, `DBS`,

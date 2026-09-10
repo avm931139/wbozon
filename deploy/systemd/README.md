@@ -43,6 +43,7 @@ sudo systemctl enable --now \
 ./.venv/bin/python -m yandex_market --task orders
 ./.venv/bin/python -m yandex_market --task advertising
 ./.venv/bin/python -m yandex_market --task finances
+./.venv/bin/python -m yandex_market --task analytics
 ```
 
 Первый запуск `orders` загружает историю с `YANDEX_MARKET_HISTORY_FROM` блоками
@@ -55,11 +56,15 @@ sudo systemctl enable --now \
   wbozon-yandex-market-catalog.timer \
   wbozon-yandex-market-orders.timer \
   wbozon-yandex-market-advertising.timer \
-  wbozon-yandex-market-finances.timer
+  wbozon-yandex-market-finances.timer \
+  wbozon-yandex-market-analytics.timer
 ```
 
 Кабинет и магазины обновляются ежедневно, каталог — каждые шесть часов, заказы —
-каждые 15 минут, реклама и финансовые операции — каждый час. Каждый запуск использует отдельный advisory lock и строку в
+каждые 15 минут, реклама и финансовые операции — каждый час, кабинетная
+аналитика продаж — ежедневно в 03:05 МСК. Реклама запускается на 20-й минуте,
+финансы — на 45-й: отчётные задачи не должны одновременно занимать лимит
+генерации отчётов Яндекс Маркета. Каждый запуск использует отдельный advisory lock и строку в
 `yandex_market_sync_runs`. Почасовой групповой Telegram-отчёт читает сохранённые
 заказы и не обращается к API Маркета.
 
