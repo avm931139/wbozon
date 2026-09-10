@@ -120,6 +120,22 @@ class DashboardService:
                 UNION SELECT row_key,master_product_id FROM wb
                 UNION SELECT row_key,master_product_id FROM ozon
                 UNION SELECT row_key,master_product_id FROM yandex_market
+            ), media_ranked AS (
+                SELECT pm.id,pm.marketplace,
+                    coalesce('m:'||pm.master_product_id::text,
+                             pm.marketplace||':'||pm.external_product_id) row_key,
+                    row_number() OVER (
+                        PARTITION BY pm.marketplace,
+                            coalesce('m:'||pm.master_product_id::text,
+                                     pm.marketplace||':'||pm.external_product_id)
+                        ORDER BY CASE WHEN lower(pm.role) IN ('main','primary','cover')
+                                      THEN 0 ELSE 1 END,pm.position,pm.id
+                    ) rank
+                FROM marketplace_product_media pm
+                WHERE pm.media_type='image' AND pm.active
+                  AND pm.download_status='downloaded' AND pm.local_path IS NOT NULL
+            ), images AS (
+                SELECT id,marketplace,row_key FROM media_ranked WHERE rank=1
             )
             SELECT k.row_key,coalesce(mp.article,wb.source_article,ozon.source_article,
                        yandex_market.source_article) article,
@@ -128,30 +144,15 @@ class DashboardService:
                    ozon.units ozon_units,ozon.refreshed_at ozon_updated_at,ozon.data_date ozon_data_date,
                    yandex_market.units yandex_units,yandex_market.refreshed_at yandex_updated_at,
                    yandex_market.data_date yandex_data_date,
-                   (SELECT pm.id FROM marketplace_product_media pm
-                    WHERE pm.marketplace='wb' AND pm.media_type='image' AND pm.active
-                      AND pm.download_status='downloaded' AND pm.local_path IS NOT NULL
-                      AND (pm.master_product_id=k.master_product_id OR
-                           (k.master_product_id IS NULL AND pm.external_product_id=wb.external_id))
-                    ORDER BY CASE WHEN lower(pm.role) IN ('main','primary','cover') THEN 0 ELSE 1 END,
-                             pm.position,pm.id LIMIT 1) wb_image_id,
-                   (SELECT pm.id FROM marketplace_product_media pm
-                    WHERE pm.marketplace='ozon' AND pm.media_type='image' AND pm.active
-                      AND pm.download_status='downloaded' AND pm.local_path IS NOT NULL
-                      AND (pm.master_product_id=k.master_product_id OR
-                           (k.master_product_id IS NULL AND pm.external_product_id=ozon.external_id))
-                    ORDER BY CASE WHEN lower(pm.role) IN ('main','primary','cover') THEN 0 ELSE 1 END,
-                             pm.position,pm.id LIMIT 1) ozon_image_id,
-                   (SELECT pm.id FROM marketplace_product_media pm
-                    WHERE pm.marketplace='yandex_market' AND pm.media_type='image' AND pm.active
-                      AND pm.download_status='downloaded' AND pm.local_path IS NOT NULL
-                      AND (pm.master_product_id=k.master_product_id OR
-                           (k.master_product_id IS NULL AND pm.external_product_id=yandex_market.external_id))
-                    ORDER BY CASE WHEN lower(pm.role) IN ('main','primary','cover') THEN 0 ELSE 1 END,
-                             pm.position,pm.id LIMIT 1) yandex_image_id
+                   wb_image.id wb_image_id,ozon_image.id ozon_image_id,
+                   yandex_image.id yandex_image_id
             FROM product_keys k LEFT JOIN master_products mp ON mp.id=k.master_product_id
             LEFT JOIN wb ON wb.row_key=k.row_key LEFT JOIN ozon ON ozon.row_key=k.row_key
             LEFT JOIN yandex_market ON yandex_market.row_key=k.row_key
+            LEFT JOIN images wb_image ON wb_image.row_key=k.row_key AND wb_image.marketplace='wb'
+            LEFT JOIN images ozon_image ON ozon_image.row_key=k.row_key AND ozon_image.marketplace='ozon'
+            LEFT JOIN images yandex_image ON yandex_image.row_key=k.row_key
+                AND yandex_image.marketplace='yandex_market'
             ORDER BY coalesce(mp.article,wb.source_article,ozon.source_article,
                               yandex_market.source_article),k.row_key"""
         with self.session_factory() as db:
