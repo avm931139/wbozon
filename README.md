@@ -148,6 +148,15 @@ python -m alembic upgrade head
 python -m pytest
 ```
 
+Обычный запуск выполняет только изолированные unit-тесты и не использует API
+маркетплейсов или БД из `.env`. PostgreSQL integration-тесты запускаются явно
+и требуют отдельную БД, в имени которой есть `test`:
+
+```bash
+TEST_DATABASE_URL=postgresql+psycopg://.../wbozon_test \
+  python -m pytest -m integration -o addopts=
+```
+
 ## Независимый запуск процессов
 
 Wildberries и Telegram имеют разные точки запуска:

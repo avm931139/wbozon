@@ -165,6 +165,7 @@ def test_daily_snapshot_updates_current_rows_and_zeroes_missing_inventory(invent
     service = InventorySyncService(
         wb_fbs_api=FBSAPI(), wb_fbo_api=FBOAPI(), ozon_api=OzonAPI(),
         ozon_warehouse_api=OzonWarehouseAPI(),
+        yandex_market_campaign_ids=(),
         session_factory=inventory_db, request_pause_seconds=0, sleeper=lambda value: None,
     )
     snapshot_day = date(2026, 8, 16)
@@ -354,6 +355,7 @@ def test_duplicate_ozon_warehouse_rows_fail_before_inventory_is_changed(inventor
         wb_fbo_api=FBOAPI(),
         ozon_api=OzonAPI(),
         ozon_warehouse_api=DuplicateOzonWarehouseAPI(),
+        yandex_market_campaign_ids=(),
         session_factory=inventory_db,
         request_pause_seconds=0,
         sleeper=lambda value: None,
@@ -374,6 +376,7 @@ def test_analytics_metadata_failure_does_not_block_stock_quantities(inventory_db
         wb_fbo_api=FBOAPI(),
         ozon_api=OzonAPI(),
         ozon_warehouse_api=MetadataFailureOzonWarehouseAPI(),
+        yandex_market_campaign_ids=(),
         session_factory=inventory_db,
         request_pause_seconds=0,
         sleeper=lambda value: None,
