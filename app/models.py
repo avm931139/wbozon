@@ -1230,12 +1230,15 @@ class OzonStockSnapshot(Base):
 
 class OzonWarehouse(Base):
     __tablename__ = "ozon_warehouses"
-    __table_args__ = {
-        "comment": "Справочник физических складов Ozon для остатков FBO/FBS."
-    }
+    __table_args__ = (
+        UniqueConstraint(
+            "ozon_warehouse_id", name="uq_ozon_warehouses_ozon_warehouse_id"
+        ),
+        {"comment": "Справочник физических складов Ozon для остатков FBO/FBS."},
+    )
 
     id = Column(Integer, primary_key=True)
-    ozon_warehouse_id = Column(BigInteger, nullable=False, unique=True, index=True)
+    ozon_warehouse_id = Column(BigInteger, nullable=False, index=True)
     name = Column(String, nullable=True)
     cluster_id = Column(BigInteger, nullable=True, index=True)
     cluster_name = Column(String, nullable=True)
