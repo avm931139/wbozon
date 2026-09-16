@@ -260,7 +260,7 @@ class WBFBSStockSnapshot(Base):
     __tablename__ = "wb_fbs_stock_snapshots"
     __table_args__ = (
         UniqueConstraint("snapshot_date", "sku", "warehouse_id", name="uq_wb_fbs_stock_snapshot"),
-        {"comment": "Ежедневные срезы FBS-остатков Wildberries на 00:00 по Москве."},
+        {"comment": "Ежедневные срезы FBS-остатков Wildberries на 01:00 по Москве."},
     )
 
     id = Column(Integer, primary_key=True)
@@ -277,7 +277,7 @@ class WBFboStockSnapshot(Base):
     __tablename__ = "wb_fbo_stock_snapshots"
     __table_args__ = (
         UniqueConstraint("snapshot_date", "size_id", "warehouse_id", name="uq_wb_fbo_stock_snapshot"),
-        {"comment": "Ежедневные срезы FBO-остатков Wildberries на 00:00 по Москве."},
+        {"comment": "Ежедневные срезы FBO-остатков Wildberries на 01:00 по Москве."},
     )
 
     id = Column(Integer, primary_key=True)
@@ -629,9 +629,10 @@ class WBFinanceBalanceSnapshot(Base):
 
 class WBDocumentCategory(Base):
     __tablename__ = "wb_document_categories"
+    __table_args__ = (UniqueConstraint("name", name="uq_wb_document_categories_name"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False, unique=True, index=True)
+    name = Column(String, nullable=False, index=True)
     title = Column(String, nullable=True)
     raw_data = Column(JSON, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
@@ -639,9 +640,10 @@ class WBDocumentCategory(Base):
 
 class WBDocument(Base):
     __tablename__ = "wb_documents"
+    __table_args__ = (UniqueConstraint("service_name", name="uq_wb_documents_service_name"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    service_name = Column(String, nullable=False, unique=True, index=True)
+    service_name = Column(String, nullable=False, index=True)
     category = Column(String, nullable=True, index=True)
     title = Column(String, nullable=True)
     extensions = Column(JSON, nullable=False, default=list)
@@ -836,6 +838,7 @@ class WBPromotionAccountSnapshot(Base):
 
 class WBPromotionPayment(Base):
     __tablename__ = "wb_promotion_payments"
+    __table_args__ = (UniqueConstraint("source_hash"),)
 
     id = Column(Integer, primary_key=True, index=True)
     source_hash = Column(String(64), nullable=False, unique=True, index=True)
@@ -908,9 +911,10 @@ class WBOrderFeedOrder(Base):
     """Complete realtime WB order feed used for order reporting."""
 
     __tablename__ = "wb_order_feed_orders"
+    __table_args__ = (UniqueConstraint("srid", name="uq_wb_order_feed_orders_srid"),)
 
     id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
-    srid = Column(String, nullable=False, unique=True, index=True)
+    srid = Column(String, nullable=False, index=True)
     product_id = Column(Integer, ForeignKey("wb_products.id"), nullable=True, index=True)
     nm_id = Column(BigInteger, nullable=True, index=True)
     chrt_id = Column(BigInteger, nullable=True, index=True)
@@ -1169,10 +1173,13 @@ class WBAdvertProductDailyStat(Base):
 
 class OzonProduct(Base):
     __tablename__ = "ozon_products"
-    __table_args__ = {"comment": "Товары кабинета Ozon Seller."}
+    __table_args__ = (
+        UniqueConstraint("product_id"),
+        {"comment": "Товары кабинета Ozon Seller."},
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    product_id = Column(BigInteger, nullable=False, unique=True, index=True)
+    product_id = Column(BigInteger, nullable=False, index=True)
     offer_id = Column(String, nullable=True, index=True)
     name = Column(String, nullable=True)
     sku = Column(BigInteger, nullable=True, index=True)
@@ -1207,7 +1214,7 @@ class OzonStockSnapshot(Base):
     __tablename__ = "ozon_stock_snapshots"
     __table_args__ = (
         UniqueConstraint("snapshot_date", "product_id", "stock_type", name="uq_ozon_stock_snapshot"),
-        {"comment": "Ежедневные срезы остатков Ozon на 00:00 по Москве."},
+        {"comment": "Ежедневные срезы остатков Ozon на 01:00 по Москве."},
     )
 
     id = Column(Integer, primary_key=True)
@@ -1227,7 +1234,7 @@ class OzonWarehouse(Base):
         "comment": "Справочник физических складов Ozon для остатков FBO/FBS."
     }
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     ozon_warehouse_id = Column(BigInteger, nullable=False, unique=True, index=True)
     name = Column(String, nullable=True)
     cluster_id = Column(BigInteger, nullable=True, index=True)
@@ -1256,7 +1263,7 @@ class OzonWarehouseStock(Base):
         {"comment": "Текущие остатки Ozon в разрезе физического склада и схемы хранения."},
     )
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     product_id = Column(BigInteger, nullable=False, index=True)
     offer_id = Column(String, nullable=True, index=True)
     sku = Column(BigInteger, nullable=False, index=True)
@@ -1283,7 +1290,7 @@ class OzonWarehouseStockSnapshot(Base):
             "stock_type",
             name="uq_ozon_warehouse_stock_snapshot",
         ),
-        {"comment": "Ежедневные срезы складских остатков Ozon на 00:00 по Москве."},
+        {"comment": "Ежедневные срезы складских остатков Ozon на 01:00 по Москве."},
     )
 
     id = Column(Integer, primary_key=True)
@@ -1317,7 +1324,7 @@ class YandexMarketStock(Base):
         {"comment": "Текущие остатки Яндекс Маркета по магазину, складу, SKU и типу."},
     )
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     campaign_id = Column(BigInteger, nullable=False, index=True)
     warehouse_id = Column(BigInteger, nullable=False, index=True)
     offer_id = Column(String, nullable=False, index=True)
@@ -1534,7 +1541,7 @@ class YandexMarketSalesAnalyticsDaily(Base):
         ),
     )
 
-    id = Column(Integer, primary_key=True)
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
     business_id = Column(BigInteger, nullable=False, index=True)
     stat_date = Column(Date, nullable=False, index=True)
     offer_id = Column(String, nullable=False, index=True)
@@ -1558,9 +1565,14 @@ class YandexMarketSalesAnalyticsDaily(Base):
 
 class YandexMarketFinanceTransaction(Base):
     __tablename__ = "yandex_market_finance_transactions"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_hash", name="uq_yandex_market_finance_source_hash"
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
-    source_hash = Column(String(64), nullable=False, unique=True, index=True)
+    source_hash = Column(String(64), nullable=False, index=True)
     business_id = Column(BigInteger, nullable=False, index=True)
     partner_id = Column(BigInteger, nullable=True, index=True)
     transaction_at = Column(DateTime(timezone=True), nullable=False, index=True)
@@ -1606,9 +1618,12 @@ class ProductMappingRun(Base):
 
 class MasterProduct(Base):
     __tablename__ = "master_products"
+    __table_args__ = (
+        UniqueConstraint("article", name="uq_master_products_article"),
+    )
 
     id = Column(Integer, primary_key=True)
-    article = Column(String, nullable=False, unique=True, index=True)
+    article = Column(String, nullable=False, index=True)
     name = Column(String, nullable=True)
     active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
@@ -1886,8 +1901,9 @@ class OzonPosting(Base):
 
 class OzonSupply(Base):
     __tablename__ = "ozon_supplies"
+    __table_args__ = (UniqueConstraint("supply_order_id"),)
     id = Column(Integer, primary_key=True)
-    supply_order_id = Column(BigInteger, nullable=False, unique=True, index=True)
+    supply_order_id = Column(BigInteger, nullable=False, index=True)
     supply_order_number = Column(String, nullable=True, index=True)
     state = Column(String, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=True, index=True)
@@ -1932,11 +1948,14 @@ class OzonFBOSupplyDeclaredItem(Base):
 
 class OzonFBOSupplyAct(Base):
     __tablename__ = "ozon_fbo_supply_acts"
+    __table_args__ = (
+        UniqueConstraint("act_id", name="uq_ozon_fbo_supply_acts_act_id"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     supply_order_id = Column(BigInteger, nullable=False, index=True)
     supply_id = Column(BigInteger, nullable=False, index=True)
-    act_id = Column(BigInteger, nullable=False, unique=True, index=True)
+    act_id = Column(BigInteger, nullable=False, index=True)
     act_number = Column(String, nullable=True, index=True)
     act_type = Column(String, nullable=False, index=True)
     act_state = Column(String, nullable=True, index=True)
@@ -1983,8 +2002,9 @@ class OzonFBOSupplyActItem(Base):
 
 class OzonQuestion(Base):
     __tablename__ = "ozon_questions"
+    __table_args__ = (UniqueConstraint("question_id"),)
     id = Column(Integer, primary_key=True)
-    question_id = Column(String, nullable=False, unique=True, index=True)
+    question_id = Column(String, nullable=False, index=True)
     sku = Column(BigInteger, nullable=True, index=True)
     text = Column(Text, nullable=False, default="")
     status = Column(String, nullable=True, index=True)
@@ -1997,8 +2017,9 @@ class OzonQuestion(Base):
 
 class OzonReview(Base):
     __tablename__ = "ozon_reviews"
+    __table_args__ = (UniqueConstraint("review_id"),)
     id = Column(Integer, primary_key=True)
-    review_id = Column(String, nullable=False, unique=True, index=True)
+    review_id = Column(String, nullable=False, index=True)
     sku = Column(BigInteger, nullable=True, index=True)
     text = Column(Text, nullable=False, default="")
     rating = Column(Integer, nullable=True, index=True)
@@ -2054,9 +2075,14 @@ class OzonFinanceAccrualType(Base):
 
 class OzonFinancePostingAccrual(Base):
     __tablename__ = "ozon_finance_posting_accruals"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_hash", name="uq_ozon_finance_posting_accrual_hash"
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
-    source_hash = Column(String(64), nullable=False, unique=True, index=True)
+    source_hash = Column(String(64), nullable=False, index=True)
     posting_number = Column(String, nullable=False, index=True)
     accrual_date = Column(Date, nullable=True, index=True)
     type_id = Column(Integer, ForeignKey("ozon_finance_accrual_types.type_id"), nullable=False, index=True)
@@ -2073,13 +2099,14 @@ class OzonAccountingReportRequest(Base):
     __tablename__ = "ozon_accounting_report_requests"
     __table_args__ = (
         UniqueConstraint("report_type", "period_start", name="uq_ozon_accounting_request_period"),
+        UniqueConstraint("report_code", name="uq_ozon_accounting_report_requests_code"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     report_type = Column(String(50), nullable=False, index=True)
     period_start = Column(Date, nullable=False, index=True)
     period_end = Column(Date, nullable=False)
-    report_code = Column(String, nullable=False, unique=True, index=True)
+    report_code = Column(String, nullable=False, index=True)
     status = Column(String(30), nullable=False, index=True)
     raw_data = Column(JSON, nullable=False)
     requested_at = Column(DateTime(timezone=True), nullable=False, index=True)
@@ -2088,9 +2115,12 @@ class OzonAccountingReportRequest(Base):
 
 class OzonAccountingReport(Base):
     __tablename__ = "ozon_accounting_reports"
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_ozon_accounting_reports_code"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    code = Column(String, nullable=False, unique=True, index=True)
+    code = Column(String, nullable=False, index=True)
     report_type = Column(String(50), nullable=False, index=True)
     status = Column(String(30), nullable=False, index=True)
     error = Column(Text, nullable=True)
@@ -2112,13 +2142,17 @@ class OzonAccountingReport(Base):
 
 class OzonAccountingReportFile(Base):
     __tablename__ = "ozon_accounting_report_files"
+    __table_args__ = (
+        UniqueConstraint(
+            "report_id", name="uq_ozon_accounting_report_files_report_id"
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
     report_id = Column(
         Integer,
         ForeignKey("ozon_accounting_reports.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True,
         index=True,
     )
     local_path = Column(String, nullable=False)
@@ -2186,8 +2220,9 @@ class FinanceReconciliationRun(Base):
 
 class OzonAdCampaign(Base):
     __tablename__ = "ozon_ad_campaigns"
+    __table_args__ = (UniqueConstraint("campaign_id"),)
     id = Column(Integer, primary_key=True)
-    campaign_id = Column(BigInteger, nullable=False, unique=True, index=True)
+    campaign_id = Column(BigInteger, nullable=False, index=True)
     title = Column(String, nullable=True)
     state = Column(String, nullable=True, index=True)
     campaign_type = Column(String, nullable=True, index=True)
