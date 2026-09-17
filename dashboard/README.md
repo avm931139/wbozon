@@ -65,6 +65,20 @@ finance data is usually not available for the current day. Every period metric
 is compared with the immediately preceding period of the same length. Labels
 are bilingual Russian/Chinese.
 
+P&L starts with a consolidated result and then shows each marketplace. Revenue,
+marketplace expenses, payout before cost, cost of goods, profit and their
+revenue ratios are compared with the preceding equal-length period. Expense
+rows preserve the source operation names inside each marketplace card; the
+consolidated card maps them to common commission, logistics, returns, storage,
+acceptance, advertising, payment, partner-service, penalty and other groups.
+Every amount has a share of financial revenue. A reconciliation adjustment is
+shown explicitly when detailed fields do not fully explain the authoritative
+finance-report total, so the breakdown always remains auditable and equal to
+the headline expense. Question-mark tooltips document formulas, exclusions and
+sources; the card footer identifies the API/report, PostgreSQL table, coverage
+dates and last database refresh. Operational orders and advertising attribution
+are never used as a P&L fallback.
+
 The operational page is ordered for daily sales management:
 
 1. a combined all-marketplace summary: ordered products, purchases,

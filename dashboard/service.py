@@ -206,6 +206,14 @@ class DashboardService:
             db.rollback()
             return {"error": f"{type(exc).__name__}: {exc}"}
 
+    @staticmethod
+    def _many(db: Any, sql: str, **params: Any) -> list[dict[str, Any]]:
+        try:
+            return [dict(row) for row in db.execute(text(sql), params).mappings().all()]
+        except Exception as exc:
+            db.rollback()
+            return [{"error": f"{type(exc).__name__}: {exc}"}]
+
     def _advertising_metrics(self, db: Any, begin: date, finish: date) -> dict[str, Any]:
         """Return performance attribution and the actual Yandex marketing charge."""
         one = lambda sql, **params: self._one(db, sql, **params)
@@ -499,7 +507,8 @@ class DashboardService:
                 FROM ledger CROSS JOIN coverage""", b=begin, e=finish, u=until),
             "ozon": one("""WITH ledger AS (
                     SELECT count(*) rows,coalesce(sum(amount),0) net_accrual,
-                        coalesce(sum(amount) FILTER (WHERE accrual_type='NON_ITEM' AND amount>0),0) compensation
+                        coalesce(sum(amount) FILTER (WHERE accrual_type='NON_ITEM' AND amount>0),0) compensation,
+                        min(accrual_date) finance_from,max(accrual_date) finance_through
                     FROM ozon_finance_accruals WHERE accrual_date>=:b AND accrual_date<=:e
                 ), sales AS (
                     SELECT coalesce(sum(CASE WHEN p.seller_price<0 THEN -coalesce(p.quantity,0) ELSE coalesce(p.quantity,0) END),0) finance_buyouts,
@@ -510,12 +519,14 @@ class DashboardService:
                 ) SELECT ledger.rows,sales.finance_buyouts,sales.finance_buyouts_amount,
                     ledger.compensation,
                     sales.finance_buyouts_amount+ledger.compensation revenue,
-                    sales.finance_buyouts_amount+ledger.compensation-ledger.net_accrual expenses
+                    sales.finance_buyouts_amount+ledger.compensation-ledger.net_accrual expenses,
+                    ledger.finance_from,ledger.finance_through
                 FROM ledger CROSS JOIN sales""", b=begin, e=finish),
             "yandex_market": one("""SELECT coalesce(sum(amount) FILTER (WHERE amount>0),0) revenue,
                 abs(coalesce(sum(amount) FILTER (WHERE amount<0),0)) expenses,count(*) rows,
                 coalesce(sum(CASE WHEN transaction_type='Начисление' AND amount>0 AND offer_id IS NOT NULL THEN quantity
-                    WHEN transaction_type='Возврат' AND amount<0 AND offer_id IS NOT NULL THEN -quantity ELSE 0 END),0) finance_buyouts
+                    WHEN transaction_type='Возврат' AND amount<0 AND offer_id IS NOT NULL THEN -quantity ELSE 0 END),0) finance_buyouts,
+                min(transaction_at)::date finance_from,max(transaction_at)::date finance_through
                 FROM yandex_market_finance_transactions WHERE transaction_at>=:b AND transaction_at<:u""", b=begin, u=until),
         }
         costs = {
@@ -610,6 +621,11 @@ class DashboardService:
         buyouts = _number(values.get("buyouts"))
         values["cancel_rate"] = _number(values.get("cancelled")) / orders * 100 if orders else 0
         values.update(costs)
+        values.update({
+            "finance_rows": finance.get("rows"),
+            "finance_from": finance.get("finance_from"),
+            "finance_through": finance.get("finance_through"),
+        })
         values["cost_coverage"] = _number(costs.get("costed_units")) / buyouts * 100 if buyouts else 100
         values["cost_missing"] = buyouts > _number(costs.get("costed_units"))
         if values.get("data_status") == "preliminary":
@@ -711,7 +727,8 @@ class DashboardService:
         cost = _number(values.get("cost_of_goods"))
         return {
             "available": True, "source": source,
-            "revenue": revenue, "compensation": values.get("compensation"),
+            "revenue": revenue, "sales_revenue": revenue - _number(values.get("compensation")),
+            "compensation": _number(values.get("compensation")),
             "expenses": expenses, "expense_ratio": expenses / revenue * 100 if revenue else 0,
             "net_payout": revenue - expenses, "cost_of_goods": cost,
             "cost_missing": bool(values.get("cost_missing")),
@@ -721,24 +738,203 @@ class DashboardService:
             "finance_from": values.get("finance_from"), "finance_through": values.get("finance_through"),
         }
 
+    @staticmethod
+    def _expense_category(label: str) -> tuple[str, str]:
+        normalized = label.casefold()
+        categories = (
+            ("advertising", "Реклама и продвижение", ("реклам", "продвиж", "буст", "promotion", "payperclick")),
+            ("returns", "Возвраты и обратная логистика", ("возврат", "return", "обратн")),
+            ("logistics", "Логистика и доставка", ("логист", "достав", "delivery", "перевоз")),
+            ("storage", "Хранение", ("хран", "storage")),
+            ("acceptance", "Приёмка", ("прием", "приём", "acceptance")),
+            ("commission", "Комиссия и вознаграждение площадки", ("комисс", "вознагражд", "commission", "agency")),
+            ("acquiring", "Эквайринг и платежи", ("эквайр", "платеж", "payment", "acquiring")),
+            ("partner_services", "Услуги партнёров", ("партнер", "партнёр", "partner")),
+            ("penalties", "Штрафы", ("штраф", "penalt")),
+        )
+        for key, title, patterns in categories:
+            if any(pattern in normalized for pattern in patterns):
+                return key, title
+        return "other", "Прочие услуги и корректировки"
+
+    @staticmethod
+    def _expense_lines(
+        rows: list[dict[str, Any]],
+        *,
+        revenue: float,
+        expected_total: float,
+        source: str,
+    ) -> list[dict[str, Any]]:
+        lines: list[dict[str, Any]] = []
+        allocated = 0.0
+        for index, row in enumerate(rows):
+            if row.get("error"):
+                continue
+            amount = _number(row.get("amount"))
+            if abs(amount) < 0.005:
+                continue
+            label = str(row.get("label") or "Прочая операция")
+            category, category_label = DashboardService._expense_category(label)
+            allocated += amount
+            lines.append({
+                "key": str(row.get("key") or f"line-{index}"),
+                "label": label,
+                "category": category,
+                "category_label": category_label,
+                "amount": amount,
+                "share_percent": amount / revenue * 100 if revenue else 0,
+                "source": source,
+            })
+        residual = expected_total - allocated
+        if abs(residual) >= 0.01:
+            lines.append({
+                "key": "reconciliation_adjustment",
+                "label": "Нераспределённая финансовая корректировка",
+                "category": "other",
+                "category_label": "Прочие услуги и корректировки",
+                "amount": residual,
+                "share_percent": residual / revenue * 100 if revenue else 0,
+                "source": "расчётная сверка с итогом финансового отчёта",
+            })
+        return lines
+
+    def _pnl_expense_breakdowns(
+        self,
+        db: Any,
+        begin: date,
+        finish: date,
+        views: dict[str, dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        until = finish + timedelta(days=1)
+        wb = self._one(db, """SELECT
+            coalesce(sum(delivery_service+rebill_logistic_cost),0) logistics,
+            coalesce(sum(paid_storage),0) storage,
+            coalesce(sum(paid_acceptance),0) acceptance,
+            coalesce(sum(acquiring_fee),0) acquiring,
+            coalesce(sum(penalty),0) penalties,
+            coalesce(sum(deduction),0) deductions,
+            max(r.details_synced_at) updated_at
+            FROM wb_financial_sales_rows x
+            JOIN wb_financial_sales_reports r ON r.id=x.report_id
+            WHERE x.rr_date>=:b AND x.rr_date<:u""", b=begin, u=until)
+        wb_rows = [] if "error" in wb else [
+            {"key": "logistics", "label": "Логистика и доставка", "amount": wb.get("logistics")},
+            {"key": "storage", "label": "Хранение", "amount": wb.get("storage")},
+            {"key": "acceptance", "label": "Платная приёмка", "amount": wb.get("acceptance")},
+            {"key": "acquiring", "label": "Эквайринг", "amount": wb.get("acquiring")},
+            {"key": "penalties", "label": "Штрафы", "amount": wb.get("penalties")},
+            {"key": "deductions", "label": "Удержания и прочие услуги", "amount": wb.get("deductions")},
+        ]
+        ozon_rows = self._many(db, """SELECT
+            coalesce(nullif(accrual_name,''),accrual_type,'Прочая операция') label,
+            coalesce(accrual_type,'unknown')||':'||coalesce(accrual_name,'') key,
+            greatest(-sum(amount),0) amount
+            FROM ozon_finance_accruals
+            WHERE accrual_date BETWEEN :b AND :e
+            GROUP BY accrual_type,accrual_name HAVING sum(amount)<0
+            ORDER BY greatest(-sum(amount),0) DESC""", b=begin, e=finish)
+        yandex_rows = self._many(db, """SELECT
+            coalesce(nullif(product_or_service,''),nullif(transaction_source,''),transaction_type,'Прочая операция') label,
+            coalesce(product_or_service,'')||':'||coalesce(transaction_source,'')||':'||coalesce(transaction_type,'unknown') key,
+            greatest(-sum(amount),0) amount
+            FROM yandex_market_finance_transactions
+            WHERE transaction_at>=:b AND transaction_at<:u
+            GROUP BY product_or_service,transaction_source,transaction_type HAVING sum(amount)<0
+            ORDER BY greatest(-sum(amount),0) DESC""", b=begin, u=until)
+        metadata = {
+            "wb": {
+                "table": "wb_financial_sales_rows",
+                "endpoint": "WB financial sales report details",
+                "updated_at": wb.get("updated_at") if "error" not in wb else None,
+                "rows": wb_rows,
+            },
+            "ozon": {
+                "table": "ozon_finance_accruals",
+                "endpoint": "/v1/finance/accrual/by-day",
+                "updated_at": self._one(
+                    db,
+                    "SELECT max(fetched_at) updated_at FROM ozon_finance_accruals WHERE accrual_date BETWEEN :b AND :e",
+                    b=begin, e=finish,
+                ).get("updated_at"),
+                "rows": ozon_rows,
+            },
+            "yandex_market": {
+                "table": "yandex_market_finance_transactions",
+                "endpoint": "United Netting Report",
+                "updated_at": self._one(
+                    db,
+                    "SELECT max(fetched_at) updated_at FROM yandex_market_finance_transactions WHERE transaction_at>=:b AND transaction_at<:u",
+                    b=begin, u=until,
+                ).get("updated_at"),
+                "rows": yandex_rows,
+            },
+        }
+        result = {}
+        for marketplace, meta in metadata.items():
+            view = views[marketplace]
+            revenue = _number(view.get("revenue")) if view.get("available") else 0
+            expenses = _number(view.get("expenses")) if view.get("available") else 0
+            result[marketplace] = {
+                "lines": self._expense_lines(
+                    meta["rows"], revenue=revenue, expected_total=expenses,
+                    source=f"{meta['endpoint']} → {meta['table']}",
+                ) if view.get("available") else [],
+                "source_table": meta["table"],
+                "source_endpoint": meta["endpoint"],
+                "updated_at": meta["updated_at"],
+            }
+        return result
+
+    @staticmethod
+    def _total_pnl(views: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        available = [value for value in views.values() if value.get("available")]
+        revenue = sum(_number(value.get("revenue")) for value in available)
+        expenses = sum(_number(value.get("expenses")) for value in available)
+        cost = sum(_number(value.get("cost_of_goods")) for value in available)
+        categorized: dict[str, dict[str, Any]] = {}
+        for value in available:
+            for line in value.get("expense_lines", []):
+                key = str(line["category"])
+                item = categorized.setdefault(key, {
+                    "key": key, "label": line["category_label"], "amount": 0.0,
+                })
+                item["amount"] += _number(line["amount"])
+        expense_lines = sorted(categorized.values(), key=lambda item: abs(item["amount"]), reverse=True)
+        for line in expense_lines:
+            line["share_percent"] = line["amount"] / revenue * 100 if revenue else 0
+        profit = revenue - expenses - cost
+        return {
+            "covered": len(available), "revenue": revenue,
+            "sales_revenue": sum(_number(value.get("sales_revenue")) for value in available),
+            "compensation": sum(_number(value.get("compensation")) for value in available),
+            "expenses": expenses, "expense_ratio": expenses / revenue * 100 if revenue else 0,
+            "cost_of_goods": cost, "net_payout": revenue - expenses,
+            "profit": profit, "profit_margin": profit / revenue * 100 if revenue else 0,
+            "cost_missing": any(value.get("cost_missing") for value in available),
+            "expense_lines": expense_lines,
+        }
+
     def pnl(self, start: str | None, end: str | None) -> dict[str, Any]:
         begin, finish = self.period(start, end)
         previous_begin, previous_finish = self.previous_period(begin, finish)
         with self.session_factory() as db:
             current_raw = self._period_metrics(db, begin, finish)["marketplaces"]
             previous_raw = self._period_metrics(db, previous_begin, previous_finish)["marketplaces"]
-        current = {key: self._pnl_view(values, key) for key, values in current_raw.items()}
-        previous = {key: self._pnl_view(values, key) for key, values in previous_raw.items()}
-        available = [values for values in current.values() if values.get("available")]
-        total_revenue = sum(_number(values.get("revenue")) for values in available)
-        total_expenses = sum(_number(values.get("expenses")) for values in available)
-        total_cost = sum(_number(values.get("cost_of_goods")) for values in available)
+            current = {key: self._pnl_view(values, key) for key, values in current_raw.items()}
+            previous = {key: self._pnl_view(values, key) for key, values in previous_raw.items()}
+            current_breakdowns = self._pnl_expense_breakdowns(db, begin, finish, current)
+            previous_breakdowns = self._pnl_expense_breakdowns(
+                db, previous_begin, previous_finish, previous
+            )
+        for key in current:
+            current[key].update(current_breakdowns[key])
+            current[key]["expense_lines"] = current[key].pop("lines")
+            previous[key].update(previous_breakdowns[key])
+            previous[key]["expense_lines"] = previous[key].pop("lines")
         return {
             "period": {"from": begin.isoformat(), "to": finish.isoformat()},
             "previous_period": {"from": previous_begin.isoformat(), "to": previous_finish.isoformat()},
             "marketplaces": current, "previous_marketplaces": previous,
-            "total": {"covered": len(available), "revenue": total_revenue, "expenses": total_expenses,
-                "cost_of_goods": total_cost, "net_payout": total_revenue - total_expenses,
-                "profit": total_revenue - total_expenses - total_cost,
-                "cost_missing": any(values.get("cost_missing") for values in available)},
+            "total": self._total_pnl(current),
+            "previous_total": self._total_pnl(previous),
         }

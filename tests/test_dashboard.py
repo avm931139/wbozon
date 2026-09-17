@@ -103,12 +103,43 @@ def test_cabinet_analytics_is_separate_and_exposes_ozon_realization_price():
 
 def test_pnl_dashboard_uses_only_financial_labels_and_separate_endpoint():
     assert "/api/pnl" in PNL_HTML
-    assert "Только финансовые отчёты" in PNL_HTML
-    assert "Все удержания МП" in PNL_HTML
-    assert "v.profit" in PNL_HTML
-    assert "v.revenue" in PNL_HTML
+    assert "Точные финансовые отчёты" in PNL_HTML
+    assert "Все расходы МП" in PNL_HTML
+    assert "value.profit" in PNL_HTML
+    assert "value.revenue" in PNL_HTML
     assert "ROAS" not in PNL_HTML
-    assert "v.orders_amount" not in PNL_HTML
+    assert "value.orders_amount" not in PNL_HTML
+
+
+def test_pnl_shows_expense_breakdown_comparisons_and_source_tooltips():
+    import inspect
+
+    assert 'class="info"' in PNL_HTML
+    assert "Расшифровка расходов" in PNL_HTML
+    assert "Расходы по категориям" in PNL_HTML
+    assert "share_percent" in PNL_HTML
+    assert "previous_total" in PNL_HTML
+    assert "source_endpoint" in PNL_HTML
+    assert "updated_at" in PNL_HTML
+    assert "Процент = статья расходов ÷ выручка × 100%" in PNL_HTML
+    source = inspect.getsource(DashboardService._pnl_expense_breakdowns)
+    assert "wb_financial_sales_rows" in source
+    assert "ozon_finance_accruals" in source
+    assert "yandex_market_finance_transactions" in source
+
+
+def test_pnl_expense_lines_reconcile_to_authoritative_finance_total():
+    lines = DashboardService._expense_lines(
+        [{"key": "delivery", "label": "Доставка", "amount": 20}],
+        revenue=200,
+        expected_total=50,
+        source="finance table",
+    )
+
+    assert sum(line["amount"] for line in lines) == 50
+    assert lines[0]["category"] == "logistics"
+    assert lines[0]["share_percent"] == 10
+    assert lines[1]["key"] == "reconciliation_adjustment"
 
 
 def test_stock_dashboard_has_three_market_images_and_refresh_dates():
