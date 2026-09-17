@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+import inspect
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import create_engine
@@ -189,6 +190,7 @@ def test_sales_funnel_period_sync_uses_365_day_aggregate_endpoint():
         assert row.order_sum == Decimal("21000")
         assert row.buyout_count == 4
         assert row.cancel_count == 2
+    assert ".delete(" not in inspect.getsource(SalesFunnelSyncService._persist_period)
 
 
 def test_sales_funnel_month_reconciliation_caches_every_month_prefix():

@@ -367,10 +367,27 @@ class SalesFunnelSyncService:
                 fetched_at=fetched_at,
             ))
         with self.session_factory() as session:
-            session.query(WBSalesFunnelPeriodProduct).filter_by(
-                period_from=period_from, period_to=period_to
-            ).delete(synchronize_session=False)
-            session.add_all(parsed)
+            identifiers = [row.nm_id for row in parsed]
+            existing = {
+                row.nm_id: row
+                for row in session.query(WBSalesFunnelPeriodProduct).filter(
+                    WBSalesFunnelPeriodProduct.period_from == period_from,
+                    WBSalesFunnelPeriodProduct.period_to == period_to,
+                    WBSalesFunnelPeriodProduct.nm_id.in_(identifiers),
+                ).all()
+            } if identifiers else {}
+            fields = (
+                "vendor_code", "title", "currency", "open_count", "cart_count",
+                "order_count", "order_sum", "buyout_count", "buyout_sum",
+                "cancel_count", "cancel_sum", "raw_data", "fetched_at",
+            )
+            for candidate in parsed:
+                row = existing.get(candidate.nm_id)
+                if row is None:
+                    session.add(candidate)
+                    continue
+                for field in fields:
+                    setattr(row, field, getattr(candidate, field))
             session.commit()
         return len(parsed)
 
