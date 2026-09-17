@@ -78,6 +78,7 @@ def test_cabinet_analytics_is_separate_and_exposes_ozon_realization_price():
     source = inspect.getsource(DashboardService._cabinet_analytics)
     assert "wb_sales_funnel_daily" in source
     assert "wb_sales_funnel_period_products" in source
+    assert "period_metrics.ordered_items ELSE product_metrics.product_ordered_items" in source
     assert "yandex_market_sales_analytics_daily" in source
     assert "seller_price*coalesce(p.quantity,0)" in source
     assert "average_realized_price" in source
