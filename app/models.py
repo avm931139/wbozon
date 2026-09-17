@@ -988,6 +988,36 @@ class WBSalesFunnelAccountDaily(Base):
     fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class WBSalesFunnelPeriodProduct(Base):
+    """Cabinet funnel totals by product for an arbitrary period up to one year."""
+
+    __tablename__ = "wb_sales_funnel_period_products"
+    __table_args__ = (
+        UniqueConstraint(
+            "period_from", "period_to", "nm_id",
+            name="uq_wb_sales_funnel_period_product",
+        ),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    period_from = Column(Date, nullable=False, index=True)
+    period_to = Column(Date, nullable=False, index=True)
+    nm_id = Column(BigInteger, nullable=False, index=True)
+    vendor_code = Column(String, nullable=True, index=True)
+    title = Column(String, nullable=True)
+    currency = Column(String(10), nullable=True)
+    open_count = Column(Integer, nullable=False, default=0)
+    cart_count = Column(Integer, nullable=False, default=0)
+    order_count = Column(Integer, nullable=False, default=0)
+    order_sum = Column(Numeric(20, 6), nullable=False, default=0)
+    buyout_count = Column(Integer, nullable=False, default=0)
+    buyout_sum = Column(Numeric(20, 6), nullable=False, default=0)
+    cancel_count = Column(Integer, nullable=False, default=0)
+    cancel_sum = Column(Numeric(20, 6), nullable=False, default=0)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class WBSalesFunnelSyncRun(Base):
     __tablename__ = "wb_sales_funnel_sync_runs"
 

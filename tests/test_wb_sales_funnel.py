@@ -10,6 +10,7 @@ from app.models import (
     WBProduct,
     WBSalesFunnelAccountDaily,
     WBSalesFunnelDaily,
+    WBSalesFunnelPeriodProduct,
     WBSalesFunnelSyncRun,
 )
 from wb.sales_funnel import SalesFunnelAPI
@@ -58,6 +59,21 @@ def test_sales_funnel_api_gets_unfiltered_cabinet_totals():
     assert body["skipDeletedNm"] is False
 
 
+def test_sales_funnel_api_gets_arbitrary_period_product_totals():
+    client = QueueClient([{"data": {"products": [{"product": {"nmId": 1}}], "currency": {"name": "RUB"}}}])
+    api = SalesFunnelAPI(client, request_interval_seconds=0)
+
+    products, currency = api.products(date(2026, 9, 1), date(2026, 9, 16))
+
+    assert products == [{"product": {"nmId": 1}}]
+    assert currency == {"name": "RUB"}
+    path, body, _ = client.calls[0]
+    assert path == "/api/analytics/v3/sales-funnel/products"
+    assert body["selectedPeriod"] == {"start": "2026-09-01", "end": "2026-09-16"}
+    assert body["skipDeletedNm"] is False
+    assert body["limit"] == 1000
+
+
 class FakeSalesFunnelAPI:
     def pause(self):
         return None
@@ -90,6 +106,7 @@ class RecordingEmptyAPI:
     def __init__(self):
         self.history_calls = []
         self.grouped_calls = []
+        self.product_calls = []
         self.pauses = 0
 
     def pause(self):
@@ -102,6 +119,18 @@ class RecordingEmptyAPI:
     def grouped_history(self, date_from, date_to):
         self.grouped_calls.append((date_from, date_to))
         return []
+
+    def products(self, date_from, date_to):
+        self.product_calls.append((date_from, date_to))
+        return ([{
+            "product": {"nmId": 101, "vendorCode": "SKU-101", "title": "Product"},
+            "statistic": {"selected": {
+                "openCount": 20, "cartCount": 10,
+                "orderCount": 7, "orderSum": 21000,
+                "buyoutCount": 4, "buyoutSum": 11000,
+                "cancelCount": 2, "cancelSum": 5000,
+            }},
+        }], {"name": "RUB"})
 
 
 def test_sales_funnel_sync_upserts_daily_preliminary_metrics():
@@ -134,7 +163,7 @@ def test_sales_funnel_sync_upserts_daily_preliminary_metrics():
         assert session.query(WBSalesFunnelSyncRun).filter_by(status="completed").count() == 2
 
 
-def test_sales_funnel_sync_splits_explicit_backfill_into_seven_day_windows():
+def test_sales_funnel_period_sync_uses_365_day_aggregate_endpoint():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, future=True)
@@ -144,25 +173,22 @@ def test_sales_funnel_sync_splits_explicit_backfill_into_seven_day_windows():
     api = RecordingEmptyAPI()
     service = SalesFunnelSyncService(api=api, session_factory=session_factory)
 
-    result = service.sync(
+    result = service.sync_period(
+        date(2026, 9, 1),
+        date(2026, 9, 16),
         datetime(2026, 9, 17, 12, 0, tzinfo=MOSCOW),
-        date_from=date(2026, 9, 1),
-        date_to=date(2026, 9, 16),
     )
 
-    assert result["windows"] == 3
-    assert [(start, end) for start, end, _ in api.history_calls] == [
-        (date(2026, 9, 1), date(2026, 9, 7)),
-        (date(2026, 9, 8), date(2026, 9, 14)),
-        (date(2026, 9, 15), date(2026, 9, 16)),
-    ]
-    assert api.grouped_calls == [
-        (date(2026, 9, 1), date(2026, 9, 7)),
-        (date(2026, 9, 8), date(2026, 9, 14)),
-        (date(2026, 9, 15), date(2026, 9, 16)),
-    ]
-    # One pause separates product and account endpoints, another separates windows.
-    assert api.pauses == 5
+    assert result["mode"] == "period"
+    assert result["rows_upserted"] == 1
+    assert api.product_calls == [(date(2026, 9, 1), date(2026, 9, 16))]
+    assert api.history_calls == []
+    with session_factory() as session:
+        row = session.query(WBSalesFunnelPeriodProduct).one()
+        assert row.order_count == 7
+        assert row.order_sum == Decimal("21000")
+        assert row.buyout_count == 4
+        assert row.cancel_count == 2
 
 
 def test_sales_funnel_sync_rejects_incomplete_or_reversed_explicit_period():
@@ -182,3 +208,13 @@ def test_sales_funnel_sync_rejects_incomplete_or_reversed_explicit_period():
         raise AssertionError("reversed range must fail")
     except ValueError as exc:
         assert "later than" in str(exc)
+
+    try:
+        service.sync(
+            datetime(2026, 9, 17, 12, 0, tzinfo=MOSCOW),
+            date_from=date(2026, 9, 1),
+            date_to=date(2026, 9, 7),
+        )
+        raise AssertionError("daily history older than the last week must fail")
+    except ValueError as exc:
+        assert "older than" in str(exc)

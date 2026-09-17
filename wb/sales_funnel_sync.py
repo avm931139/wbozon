@@ -15,7 +15,6 @@ from app.config import (
     WB_LOG_DIR,
     WB_LOG_LEVEL,
     WB_SALES_FUNNEL_LOOKBACK_DAYS,
-    WB_SALES_FUNNEL_RECONCILE_DAYS,
     WB_TG_TIMEZONE,
 )
 from app.db import SessionLocal
@@ -23,6 +22,7 @@ from app.models import (
     WBProduct,
     WBSalesFunnelAccountDaily,
     WBSalesFunnelDaily,
+    WBSalesFunnelPeriodProduct,
     WBSalesFunnelSyncRun,
 )
 from wb.exceptions import WBParseError
@@ -49,7 +49,6 @@ class SalesFunnelSyncService:
         session_factory: Callable[..., Any] = SessionLocal,
         timezone_name: str = WB_TG_TIMEZONE,
         lookback_days: int = WB_SALES_FUNNEL_LOOKBACK_DAYS,
-        reconcile_days: int = WB_SALES_FUNNEL_RECONCILE_DAYS,
     ) -> None:
         if not 1 <= lookback_days <= 7:
             raise ValueError("WB_SALES_FUNNEL_LOOKBACK_DAYS must be between 1 and 7")
@@ -57,9 +56,6 @@ class SalesFunnelSyncService:
         self.session_factory = session_factory
         self.timezone = ZoneInfo(timezone_name)
         self.lookback_days = lookback_days
-        if reconcile_days < 7:
-            raise ValueError("WB_SALES_FUNNEL_RECONCILE_DAYS must be at least 7")
-        self.reconcile_days = reconcile_days
 
     @staticmethod
     def _windows(period_from: date, period_to: date) -> list[tuple[date, date]]:
@@ -101,6 +97,10 @@ class SalesFunnelSyncService:
         period_from = date_from or (period_to - timedelta(days=self.lookback_days - 1))
         if period_from > period_to:
             raise ValueError("date_from must not be later than date_to")
+        if (period_to - period_from).days > 6:
+            raise ValueError("WB daily Sales Funnel API supports only the last seven days")
+        if period_from < current.date() - timedelta(days=6):
+            raise ValueError("WB daily Sales Funnel API cannot return dates older than the last week")
         windows = self._windows(period_from, period_to)
         run_id = uuid.uuid4().hex
         received = upserted = account_rows = 0
@@ -144,6 +144,56 @@ class SalesFunnelSyncService:
                 error = f"{type(exc).__name__}: {exc}"
                 self._finish(run_id, "failed", received, upserted, error, datetime.now(self.timezone))
                 logger.exception("WB Sales Funnel synchronization failed")
+                raise
+            finally:
+                self._unlock(lock_connection)
+
+    def sync_period(
+        self,
+        date_from: date,
+        date_to: date,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Store exact cabinet totals for a requested period using the 365-day endpoint."""
+        current = now or datetime.now(self.timezone)
+        current = current.replace(tzinfo=self.timezone) if current.tzinfo is None else current.astimezone(self.timezone)
+        if date_from > date_to:
+            raise ValueError("date_from must not be later than date_to")
+        if (date_to - date_from).days > 364:
+            raise ValueError("WB period Sales Funnel API supports no more than 365 days")
+        if date_from < current.date() - timedelta(days=364):
+            raise ValueError("WB period Sales Funnel API cannot return dates older than 365 days")
+        run_id = uuid.uuid4().hex
+        received = 0
+        with self.session_factory() as probe_session:
+            engine = probe_session.get_bind()
+        with engine.connect() as lock_connection:
+            if not self._try_lock(lock_connection):
+                return {"status": "skipped", "reason": "already_running"}
+            try:
+                with self.session_factory() as session:
+                    session.add(WBSalesFunnelSyncRun(
+                        id=run_id, started_at=current, status="running",
+                        period_from=date_from, period_to=date_to,
+                    ))
+                    session.commit()
+                payload, currency = self.api.products(date_from, date_to)
+                received = len(payload)
+                saved = self._persist_period(payload, currency, date_from, date_to, current)
+                self._finish(run_id, "completed", received, saved, None, datetime.now(self.timezone))
+                return {
+                    "run_id": run_id,
+                    "status": "completed",
+                    "mode": "period",
+                    "period_from": date_from,
+                    "period_to": date_to,
+                    "rows_received": received,
+                    "rows_upserted": saved,
+                }
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+                self._finish(run_id, "failed", received, 0, error, datetime.now(self.timezone))
+                logger.exception("WB Sales Funnel period synchronization failed")
                 raise
             finally:
                 self._unlock(lock_connection)
@@ -254,6 +304,51 @@ class SalesFunnelSyncService:
             session.commit()
         return len(totals)
 
+    def _persist_period(
+        self,
+        payload: list[dict[str, Any]],
+        raw_currency: Any,
+        period_from: date,
+        period_to: date,
+        fetched_at: datetime,
+    ) -> int:
+        currency = raw_currency.get("name") if isinstance(raw_currency, dict) else raw_currency
+        parsed: list[WBSalesFunnelPeriodProduct] = []
+        for item in payload:
+            product = item.get("product")
+            statistic = item.get("statistic")
+            selected = statistic.get("selected") if isinstance(statistic, dict) else None
+            if not isinstance(product, dict) or not isinstance(selected, dict):
+                raise WBParseError("WB Sales Funnel period item has no product or selected statistic")
+            nm_id = int(product.get("nmId") or 0)
+            if not nm_id:
+                raise WBParseError("WB Sales Funnel period item has no nmId")
+            parsed.append(WBSalesFunnelPeriodProduct(
+                period_from=period_from,
+                period_to=period_to,
+                nm_id=nm_id,
+                vendor_code=product.get("vendorCode"),
+                title=product.get("title"),
+                currency=str(currency) if currency else None,
+                open_count=int(selected.get("openCount") or 0),
+                cart_count=int(selected.get("cartCount") or 0),
+                order_count=int(selected.get("orderCount") or 0),
+                order_sum=_money(selected.get("orderSum")),
+                buyout_count=int(selected.get("buyoutCount") or 0),
+                buyout_sum=_money(selected.get("buyoutSum")),
+                cancel_count=int(selected.get("cancelCount") or 0),
+                cancel_sum=_money(selected.get("cancelSum")),
+                raw_data={"product": product, "statistic": statistic, "currency": raw_currency},
+                fetched_at=fetched_at,
+            ))
+        with self.session_factory() as session:
+            session.query(WBSalesFunnelPeriodProduct).filter_by(
+                period_from=period_from, period_to=period_to
+            ).delete(synchronize_session=False)
+            session.add_all(parsed)
+            session.commit()
+        return len(parsed)
+
     def _finish(self, run_id: str, status: str, received: int, upserted: int,
                 error: str | None, finished_at: datetime) -> None:
         with self.session_factory() as session:
@@ -273,7 +368,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--to", dest="date_to", type=date.fromisoformat)
     parser.add_argument(
         "--reconcile", action="store_true",
-        help="refresh the configured rolling cohort window in seven-day API batches",
+        help="refresh the exact aggregate snapshot for the current calendar month",
     )
     args = parser.parse_args()
     if (args.date_from is None) != (args.date_to is None):
@@ -294,9 +389,11 @@ def main() -> None:
     date_to = args.date_to
     if args.reconcile:
         date_to = datetime.now(service.timezone).date()
-        date_from = date_to - timedelta(days=service.reconcile_days - 1)
+        date_from = date_to.replace(day=1)
     print(json.dumps(
-        service.sync(date_from=date_from, date_to=date_to),
+        service.sync_period(date_from, date_to)
+        if date_from is not None and date_to is not None
+        else service.sync(),
         ensure_ascii=False,
         default=str,
     ))

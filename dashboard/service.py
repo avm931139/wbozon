@@ -326,7 +326,16 @@ class DashboardService:
         one = lambda sql, **params: self._one(db, sql, **params)
         expected_days = (finish - begin).days + 1
         result = {
-            "wb": one("""WITH product_metrics AS (
+            "wb": one("""WITH period_metrics AS (
+                    SELECT count(*) snapshot_rows,
+                        coalesce(sum(open_count),0) views,coalesce(sum(cart_count),0) to_cart,
+                        coalesce(sum(order_count),0) ordered_items,coalesce(sum(order_sum),0) ordered_amount,
+                        coalesce(sum(buyout_count),0) purchased_items,coalesce(sum(buyout_sum),0) purchased_amount,
+                        coalesce(sum(cancel_count),0) cancelled_items,coalesce(sum(cancel_sum),0) cancelled_amount,
+                        max(fetched_at) fetched_at
+                    FROM wb_sales_funnel_period_products
+                    WHERE period_from=:b AND period_to=:e
+                ), product_metrics AS (
                     SELECT coalesce(sum(open_count),0) product_views,
                         coalesce(sum(order_count),0) product_ordered_items,
                         coalesce(sum(order_sum),0) product_ordered_amount
@@ -337,13 +346,26 @@ class DashboardService:
                         coalesce(sum(buyout_count),0) purchased_items,coalesce(sum(buyout_sum),0) purchased_amount,
                         count(DISTINCT stat_date) coverage_days
                     FROM wb_sales_funnel_account_daily WHERE stat_date BETWEEN :b AND :e
-                ) SELECT account_metrics.*,product_metrics.*,
-                    account_metrics.ordered_items-product_metrics.product_ordered_items item_delta,
-                    account_metrics.ordered_amount-product_metrics.product_ordered_amount amount_delta,
+                ) SELECT
+                    CASE WHEN period_metrics.snapshot_rows>0 THEN period_metrics.views ELSE account_metrics.views END views,
+                    CASE WHEN period_metrics.snapshot_rows>0 THEN period_metrics.to_cart ELSE account_metrics.to_cart END to_cart,
+                    CASE WHEN period_metrics.snapshot_rows>0 THEN period_metrics.ordered_items ELSE account_metrics.ordered_items END ordered_items,
+                    CASE WHEN period_metrics.snapshot_rows>0 THEN period_metrics.ordered_amount ELSE account_metrics.ordered_amount END ordered_amount,
+                    CASE WHEN period_metrics.snapshot_rows>0 THEN period_metrics.purchased_items ELSE account_metrics.purchased_items END purchased_items,
+                    CASE WHEN period_metrics.snapshot_rows>0 THEN period_metrics.purchased_amount ELSE account_metrics.purchased_amount END purchased_amount,
+                    CASE WHEN period_metrics.snapshot_rows>0 THEN period_metrics.cancelled_items ELSE 0 END cancelled_items,
+                    CASE WHEN period_metrics.snapshot_rows>0 THEN period_metrics.cancelled_amount ELSE 0 END cancelled_amount,
+                    CASE WHEN period_metrics.snapshot_rows>0 THEN CAST(:e AS date)-CAST(:b AS date)+1 ELSE account_metrics.coverage_days END coverage_days,
+                    product_metrics.*,
+                    CASE WHEN period_metrics.snapshot_rows>0 THEN 0 ELSE account_metrics.ordered_items-product_metrics.product_ordered_items END item_delta,
+                    CASE WHEN period_metrics.snapshot_rows>0 THEN 0 ELSE account_metrics.ordered_amount-product_metrics.product_ordered_amount END amount_delta,
                     CAST(:e AS date)-CAST(:b AS date)+1 expected_days,
-                    account_metrics.coverage_days=CAST(:e AS date)-CAST(:b AS date)+1 complete,
-                    'WB Sales Funnel grouped/history' source
-                FROM product_metrics CROSS JOIN account_metrics""", b=begin, e=finish),
+                    period_metrics.snapshot_rows>0 OR account_metrics.coverage_days=CAST(:e AS date)-CAST(:b AS date)+1 complete,
+                    CASE WHEN period_metrics.snapshot_rows>0
+                        THEN 'WB Sales Funnel products period snapshot'
+                        ELSE 'WB Sales Funnel grouped/history' END source,
+                    period_metrics.fetched_at period_snapshot_fetched_at
+                FROM period_metrics CROSS JOIN product_metrics CROSS JOIN account_metrics""", b=begin, e=finish),
             "ozon": one("""WITH analytics AS (
                     SELECT coalesce(sum(ordered_units),0) ordered_items,
                         coalesce(sum(revenue),0) ordered_amount,

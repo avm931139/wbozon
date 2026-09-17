@@ -77,3 +77,41 @@ class SalesFunnelAPI:
         if not isinstance(page, list):
             raise WBParseError("WB grouped Sales Funnel response is not a list")
         return [item for item in page if isinstance(item, dict)]
+
+    def products(self, date_from: date, date_to: date) -> tuple[list[dict[str, Any]], Any]:
+        """Return per-product totals for an arbitrary period within the last year."""
+        if date_from > date_to:
+            raise ValueError("date_from must not be later than date_to")
+        if (date_to - date_from).days > 364:
+            raise ValueError("WB Sales Funnel products supports no more than 365 days")
+        result: list[dict[str, Any]] = []
+        currency: Any = None
+        offset = 0
+        limit = 1000
+        while True:
+            if offset:
+                self.pause()
+            payload = self.client.post(
+                "/api/analytics/v3/sales-funnel/products",
+                json_body={
+                    "selectedPeriod": {"start": date_from.isoformat(), "end": date_to.isoformat()},
+                    "nmIds": [],
+                    "brandNames": [],
+                    "subjectIds": [],
+                    "tagIds": [],
+                    "skipDeletedNm": False,
+                    "orderBy": {"field": "openCard", "mode": "desc"},
+                    "limit": limit,
+                    "offset": offset,
+                },
+                retries=3,
+            )
+            data = payload.get("data", payload) if isinstance(payload, dict) else payload
+            if not isinstance(data, dict) or not isinstance(data.get("products"), list):
+                raise WBParseError("WB Sales Funnel products response has no products list")
+            page = [item for item in data["products"] if isinstance(item, dict)]
+            currency = data.get("currency", currency)
+            result.extend(page)
+            if len(page) < limit:
+                return result, currency
+            offset += limit

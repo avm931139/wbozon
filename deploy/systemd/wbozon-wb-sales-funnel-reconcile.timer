@@ -1,5 +1,5 @@
 [Unit]
-Description=Reconcile mutable Wildberries Sales Funnel cohorts daily
+Description=Snapshot current-month Wildberries Sales Funnel totals daily
 
 [Timer]
 OnCalendar=*-*-* 01:35:00 Europe/Moscow

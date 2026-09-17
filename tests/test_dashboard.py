@@ -77,6 +77,7 @@ def test_cabinet_analytics_is_separate_and_exposes_ozon_realization_price():
 
     source = inspect.getsource(DashboardService._cabinet_analytics)
     assert "wb_sales_funnel_daily" in source
+    assert "wb_sales_funnel_period_products" in source
     assert "yandex_market_sales_analytics_daily" in source
     assert "seller_price*coalesce(p.quantity,0)" in source
     assert "average_realized_price" in source
@@ -210,5 +211,6 @@ def test_dashboard_uses_cabinet_wide_wb_and_ozon_order_analytics():
     assert "item_delta" in source
     assert "FROM ozon_daily_sales" in source
     assert "ordered_units" in source
-    assert "Сверка итога с товарами" in HTML
+    assert "Источник кабинетного периода" in HTML
+    assert "Отменено и возвращено по воронке" in HTML
     assert "Заказано по аналитике" in HTML

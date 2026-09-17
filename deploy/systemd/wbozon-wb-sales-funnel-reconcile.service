@@ -1,5 +1,5 @@
 [Unit]
-Description=Reconcile mutable Wildberries Sales Funnel cohorts
+Description=Snapshot current-month Wildberries Sales Funnel totals
 After=network-online.target postgresql.service
 Wants=network-online.target
 
