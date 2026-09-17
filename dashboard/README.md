@@ -44,6 +44,10 @@ The UI is deliberately split into two pages:
   current stock tables; a past date uses the latest daily snapshot on or before
   that date and clearly displays the actual snapshot date.
 
+For WB, stock on both the operational page and `/stocks` means physical goods
+on Wildberries warehouses from `/api/v1/warehouse_remains` (`Всего находится
+на складах`). Seller-managed FBS stock is deliberately excluded.
+
 The API endpoints are `/health`,
 `/api/summary?from=YYYY-MM-DD&to=YYYY-MM-DD` for operations,
 `/api/pnl?from=YYYY-MM-DD&to=YYYY-MM-DD` for finance, and

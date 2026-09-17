@@ -16,12 +16,8 @@ from app.models import (
     OzonStockSnapshot,
     OzonWarehouse,
     OzonWarehouseStockSnapshot,
-    WBFboStockSnapshot,
-    WBFboWarehouse,
-    WBFBSStockSnapshot,
-    WBFBSWarehouse,
     WBProduct,
-    WBProductSize,
+    WBWarehouseRemainSnapshot,
     YandexMarketCampaign,
     YandexMarketOffer,
     YandexMarketStockSnapshot,
@@ -73,52 +69,62 @@ class StockExcelReportService:
 
     def wb(self, snapshot_date: date) -> tuple[str, bytes, str]:
         with self.session_factory() as session:
-            fbs = session.query(
-                WBFBSStockSnapshot.snapshot_date,
-                WBFBSStockSnapshot.captured_at,
-                WBProduct.nm_id,
-                WBProduct.vendor_code,
-                WBProduct.title,
-                WBProduct.brand,
-                WBProductSize.tech_size,
-                WBProductSize.wb_size,
-                WBFBSStockSnapshot.sku,
-                WBFBSWarehouse.name,
-                WBFBSStockSnapshot.quantity,
-            ).join(WBProductSize, WBProductSize.id == WBFBSStockSnapshot.size_id).join(
-                WBProduct, WBProduct.id == WBProductSize.product_id
-            ).join(WBFBSWarehouse, WBFBSWarehouse.id == WBFBSStockSnapshot.warehouse_id).filter(
-                WBFBSStockSnapshot.snapshot_date == snapshot_date,
-                WBFBSStockSnapshot.quantity > 0,
-            ).order_by(WBProduct.vendor_code, WBFBSWarehouse.name).all()
-            fbo = session.query(
-                WBFboStockSnapshot.snapshot_date,
-                WBFboStockSnapshot.captured_at,
-                WBProduct.nm_id,
-                WBProduct.vendor_code,
-                WBProduct.title,
-                WBProduct.brand,
-                WBProductSize.tech_size,
-                WBProductSize.wb_size,
-                WBFboWarehouse.name,
-                WBFboWarehouse.region_name,
-                WBFboStockSnapshot.quantity,
-                WBFboStockSnapshot.in_way_to_client,
-                WBFboStockSnapshot.in_way_from_client,
-            ).join(WBProductSize, WBProductSize.id == WBFboStockSnapshot.size_id).join(
-                WBProduct, WBProduct.id == WBProductSize.product_id
-            ).join(WBFboWarehouse, WBFboWarehouse.id == WBFboStockSnapshot.warehouse_id).filter(
-                WBFboStockSnapshot.snapshot_date == snapshot_date,
-                WBFboStockSnapshot.quantity > 0,
-            ).order_by(WBProduct.vendor_code, WBFboWarehouse.name).all()
-        if not fbs and not fbo:
+            stock_rows = session.query(
+                WBWarehouseRemainSnapshot.snapshot_date,
+                WBWarehouseRemainSnapshot.captured_at,
+                WBWarehouseRemainSnapshot.vendor_code,
+                WBWarehouseRemainSnapshot.warehouse_name,
+                WBWarehouseRemainSnapshot.quantity,
+            ).filter(
+                WBWarehouseRemainSnapshot.snapshot_date == snapshot_date,
+                WBWarehouseRemainSnapshot.quantity > 0,
+            ).order_by(
+                WBWarehouseRemainSnapshot.vendor_code,
+                WBWarehouseRemainSnapshot.warehouse_name,
+            ).all()
+            products = {}
+            for product in session.query(WBProduct).order_by(WBProduct.id).all():
+                products.setdefault(product.vendor_code, product)
+
+        def report_row(stock: Any) -> tuple[Any, ...]:
+            product = products.get(stock.vendor_code)
+            return (
+                stock.snapshot_date,
+                stock.captured_at,
+                product.nm_id if product else None,
+                stock.vendor_code,
+                product.title if product else None,
+                product.brand if product else None,
+                stock.warehouse_name,
+                stock.quantity,
+            )
+
+        total = [
+            report_row(row) for row in stock_rows
+            if row.warehouse_name == "Всего находится на складах"
+        ]
+        logistics_names = {
+            "В пути до получателей",
+            "В пути возвраты на склад WB",
+        }
+        warehouses = [
+            report_row(row) for row in stock_rows
+            if row.warehouse_name != "Всего находится на складах"
+            and row.warehouse_name not in logistics_names
+        ]
+        logistics = [
+            report_row(row) for row in stock_rows
+            if row.warehouse_name in logistics_names
+        ]
+        if not total:
             raise StockSnapshotNotFound(f"WB stock snapshot for {snapshot_date.isoformat()} was not found")
         content = build_workbook([
-            ("FBS", ("Дата", "Снято", "nmID", "Артикул", "Товар", "Бренд", "Размер", "Размер WB", "Баркод", "Склад", "Остаток"), fbs),
-            ("FBO", ("Дата", "Снято", "nmID", "Артикул", "Товар", "Бренд", "Размер", "Размер WB", "Склад", "Регион", "Остаток", "К клиенту", "От клиента"), fbo),
+            ("Итого на WB", ("Дата", "Снято", "nmID", "Артикул", "Товар", "Бренд", "Показатель", "Остаток"), total),
+            ("По складам WB", ("Дата", "Снято", "nmID", "Артикул", "Товар", "Бренд", "Склад WB", "Остаток"), warehouses),
+            ("В пути", ("Дата", "Снято", "nmID", "Артикул", "Товар", "Бренд", "Направление", "Количество"), logistics),
         ])
         filename = f"wb_stocks_{snapshot_date.isoformat()}.xlsx"
-        return filename, content, f"Остатки Wildberries на {snapshot_date:%d.%m.%Y} (00:00 МСК)"
+        return filename, content, f"Остатки на складах Wildberries на {snapshot_date:%d.%m.%Y} (00:00 МСК; FBS исключён)"
 
     def ozon(self, snapshot_date: date) -> tuple[str, bytes, str]:
         with self.session_factory() as session:

@@ -26,6 +26,8 @@ from app.models import (
     WBFBSStockSnapshot,
     WBFBSWarehouse,
     WBProductSize,
+    WBWarehouseRemain,
+    WBWarehouseRemainSnapshot,
     YandexMarketStock,
     YandexMarketStockSnapshot,
 )
@@ -34,6 +36,7 @@ from ozon.stocks import OzonStocksAPI
 from ozon.warehouse_stocks import OzonWarehouseStocksAPI
 from wb.fbo_stocks import FBOStocksAPI
 from wb.stocks import StocksAPI
+from wb.warehouse_remains import WarehouseRemainsAPI
 from yandex_market.stocks import YandexMarketStocksAPI
 
 
@@ -55,6 +58,7 @@ class InventorySyncService:
         marketplace: str = "all",
         wb_fbs_api: StocksAPI | None = None,
         wb_fbo_api: FBOStocksAPI | None = None,
+        wb_warehouse_remains_api: WarehouseRemainsAPI | None = None,
         ozon_api: OzonStocksAPI | None = None,
         ozon_warehouse_api: OzonWarehouseStocksAPI | None = None,
         yandex_market_api: YandexMarketStocksAPI | None = None,
@@ -68,6 +72,9 @@ class InventorySyncService:
         self.marketplace = marketplace
         self.wb_fbs_api = wb_fbs_api or (StocksAPI() if marketplace in {"all", "wb"} else None)
         self.wb_fbo_api = wb_fbo_api or (FBOStocksAPI() if marketplace in {"all", "wb"} else None)
+        self.wb_warehouse_remains_api = wb_warehouse_remains_api or (
+            WarehouseRemainsAPI(sleeper=sleeper) if marketplace in {"all", "wb"} else None
+        )
         self.ozon_api = ozon_api or (OzonStocksAPI() if marketplace in {"all", "ozon"} else None)
         self.ozon_warehouse_api = ozon_warehouse_api or (
             OzonWarehouseStocksAPI() if marketplace in {"all", "ozon"} else None
@@ -93,6 +100,7 @@ class InventorySyncService:
                 "skipped": True,
                 "wb_fbs": 0,
                 "wb_fbo": 0,
+                "wb_warehouse_remains": 0,
                 "ozon": 0,
                 "ozon_warehouse": 0,
                 "yandex_market": 0,
@@ -132,6 +140,7 @@ class InventorySyncService:
                 self._create_run(run_id, run_type, snapshot_date, scheduled_for, started_at)
                 wb_fbs: list[dict[str, Any]] = []
                 wb_fbo: list[dict[str, Any]] = []
+                wb_warehouse_remains: list[dict[str, Any]] = []
                 ozon: list[dict[str, Any]] = []
                 ozon_warehouse: list[dict[str, Any]] = []
                 ozon_warehouse_metadata: list[dict[str, Any]] = []
@@ -139,8 +148,10 @@ class InventorySyncService:
 
                 if self.marketplace in {"all", "wb"}:
                     assert self.wb_fbo_api is not None
+                    assert self.wb_warehouse_remains_api is not None
                     wb_fbs = self._fetch_wb_fbs()
                     wb_fbo = self.wb_fbo_api.list()
+                    wb_warehouse_remains = self.wb_warehouse_remains_api.list()
 
                 if self.marketplace in {"all", "ozon"}:
                     assert self.ozon_api is not None
@@ -175,6 +186,7 @@ class InventorySyncService:
                 counts = self._persist(
                     wb_fbs,
                     wb_fbo,
+                    wb_warehouse_remains,
                     ozon,
                     ozon_warehouse,
                     ozon_warehouse_metadata,
@@ -231,6 +243,7 @@ class InventorySyncService:
         self,
         wb_fbs_items: list[dict[str, Any]],
         wb_fbo_items: list[dict[str, Any]],
+        wb_warehouse_remains_items: list[dict[str, Any]],
         ozon_items: list[dict[str, Any]],
         ozon_warehouse_items: list[dict[str, Any]],
         ozon_warehouse_metadata: list[dict[str, Any]],
@@ -242,6 +255,7 @@ class InventorySyncService:
         counts = {
             "wb_fbs": 0,
             "wb_fbo": 0,
+            "wb_warehouse_remains": 0,
             "ozon": 0,
             "ozon_warehouse": 0,
             "yandex_market": 0,
@@ -250,6 +264,9 @@ class InventorySyncService:
             if marketplace in {"all", "wb"}:
                 counts["wb_fbs"] = self._persist_wb_fbs(session, wb_fbs_items)
                 counts["wb_fbo"] = self._persist_wb_fbo(session, wb_fbo_items)
+                counts["wb_warehouse_remains"] = self._persist_wb_warehouse_remains(
+                    session, wb_warehouse_remains_items, captured_at
+                )
             if marketplace in {"all", "ozon"}:
                 counts["ozon"] = self._persist_ozon(session, ozon_items, captured_at)
                 counts["ozon_warehouse"] = self._persist_ozon_warehouses(
@@ -368,6 +385,56 @@ class InventorySyncService:
             row.raw_data = item
 
         return len(retained)
+
+    @staticmethod
+    def _persist_wb_warehouse_remains(
+        session: Any,
+        items: list[dict[str, Any]],
+        captured_at: datetime,
+    ) -> int:
+        flattened: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
+        for item in items:
+            vendor_code = str(item.get("vendorCode") or "").strip()
+            warehouses = item.get("warehouses")
+            if not vendor_code or not isinstance(warehouses, list):
+                raise RuntimeError("WB warehouse remains row has no vendorCode or warehouses")
+            for stock in warehouses:
+                if not isinstance(stock, dict):
+                    raise RuntimeError("WB warehouse remains has an invalid warehouse row")
+                warehouse_name = str(stock.get("warehouseName") or "").strip()
+                if not warehouse_name:
+                    raise RuntimeError("WB warehouse remains row has no warehouseName")
+                key = (vendor_code, warehouse_name)
+                if key in flattened:
+                    raise RuntimeError(f"duplicate WB warehouse remains identity: {key}")
+                flattened[key] = (
+                    int(stock.get("quantity") or 0),
+                    {"vendorCode": vendor_code, **stock},
+                )
+
+        session.query(WBWarehouseRemain).update(
+            {WBWarehouseRemain.quantity: 0, WBWarehouseRemain.fetched_at: captured_at},
+            synchronize_session=False,
+        )
+        existing = rows_by_composite_keys(
+            session,
+            WBWarehouseRemain,
+            (WBWarehouseRemain.vendor_code, WBWarehouseRemain.warehouse_name),
+            set(flattened),
+        )
+        for key, (quantity, raw_data) in flattened.items():
+            row = existing.get(key)
+            if row is None:
+                row = WBWarehouseRemain(
+                    vendor_code=key[0], warehouse_name=key[1],
+                    raw_data=raw_data, fetched_at=captured_at,
+                )
+                session.add(row)
+                existing[key] = row
+            row.quantity = quantity
+            row.raw_data = raw_data
+            row.fetched_at = captured_at
+        return len(flattened)
 
     @staticmethod
     def _persist_ozon(session: Any, items: list[dict[str, Any]], captured_at: datetime) -> int:
@@ -592,6 +659,11 @@ class InventorySyncService:
                     "in_way_from_client", "raw_data",
                 ),
             )
+            InventorySyncService._insert_snapshot_from_current(
+                session, WBWarehouseRemainSnapshot, WBWarehouseRemain,
+                snapshot_date, captured_at,
+                ("vendor_code", "warehouse_name", "quantity", "raw_data"),
+            )
         if marketplace in {"all", "ozon"}:
             InventorySyncService._insert_snapshot_from_current(
                 session, OzonStockSnapshot, OzonStock, snapshot_date, captured_at,
@@ -777,6 +849,7 @@ class InventorySyncService:
             if counts:
                 row.wb_fbs_rows = counts["wb_fbs"]
                 row.wb_fbo_rows = counts["wb_fbo"]
+                row.wb_warehouse_remains_rows = counts["wb_warehouse_remains"]
                 row.ozon_rows = counts["ozon"]
                 row.ozon_warehouse_rows = counts["ozon_warehouse"]
                 row.yandex_market_rows = counts["yandex_market"]

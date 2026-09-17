@@ -9,7 +9,17 @@ from sqlalchemy.orm import sessionmaker
 from zoneinfo import ZoneInfo
 
 from app.db import Base
-from app.models import OzonPosting, OzonSyncRun, WBSyncRun, YandexMarketAdDailyStat, YandexMarketOrder, YandexMarketStockSnapshot
+from app.models import (
+    OzonPosting,
+    OzonSyncRun,
+    WBProduct,
+    WBSyncRun,
+    WBWarehouseRemain,
+    WBWarehouseRemainSnapshot,
+    YandexMarketAdDailyStat,
+    YandexMarketOrder,
+    YandexMarketStockSnapshot,
+)
 from telegram_bot.client import TelegramClient, TelegramError, split_text
 from telegram_bot.__main__ import send_stock_files
 from telegram_bot.dispatcher import TelegramReportDispatcher
@@ -151,6 +161,76 @@ def test_stock_files_warn_when_daily_snapshot_is_missing_but_send_available_file
     assert "Wildberries" in dispatcher.warnings[0][2]
     assert "Яндекс Маркет" in dispatcher.warnings[0][2]
     assert "20.08.2026" in dispatcher.warnings[0][2]
+
+
+def test_wb_stock_report_uses_physical_wb_warehouses_and_excludes_fbs():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    snapshot_date = date(2026, 9, 17)
+    captured_at = datetime(2026, 9, 17, 19, 17, tzinfo=ZoneInfo("UTC"))
+    with session_factory() as session:
+        session.add(WBProduct(
+            nm_id=123, vendor_code="vendor-1", title="Product", brand="Brand"
+        ))
+        session.add_all([
+            WBWarehouseRemainSnapshot(
+                snapshot_date=snapshot_date, captured_at=captured_at,
+                vendor_code="vendor-1", warehouse_name="Всего находится на складах",
+                quantity=222, raw_data={},
+            ),
+            WBWarehouseRemainSnapshot(
+                snapshot_date=snapshot_date, captured_at=captured_at,
+                vendor_code="vendor-1", warehouse_name="Коледино",
+                quantity=222, raw_data={},
+            ),
+            WBWarehouseRemainSnapshot(
+                snapshot_date=snapshot_date, captured_at=captured_at,
+                vendor_code="vendor-1", warehouse_name="В пути до получателей",
+                quantity=36, raw_data={},
+            ),
+        ])
+        session.commit()
+
+    filename, payload, caption = StockExcelReportService(
+        session_factory=session_factory
+    ).wb(snapshot_date)
+
+    assert filename == "wb_stocks_2026-09-17.xlsx"
+    assert "FBS исключён" in caption
+    workbook = load_workbook(BytesIO(payload), read_only=True)
+    assert workbook.sheetnames == ["Итого на WB", "По складам WB", "В пути"]
+    assert list(workbook["Итого на WB"].values)[1][3:] == (
+        "vendor-1", "Product", "Brand", "Всего находится на складах", 222
+    )
+    assert list(workbook["По складам WB"].values)[1][6:] == ("Коледино", 222)
+    assert list(workbook["В пути"].values)[1][6:] == ("В пути до получателей", 36)
+    workbook.close()
+
+
+def test_wb_telegram_stock_summary_excludes_fbs_seller_stock():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    now = datetime(2026, 9, 17, 19, 17, tzinfo=ZoneInfo("UTC"))
+    with session_factory() as session:
+        session.add_all([
+            WBWarehouseRemain(
+                vendor_code="vendor-1", warehouse_name="Всего находится на складах",
+                quantity=222, raw_data={}, fetched_at=now,
+            ),
+            WBWarehouseRemain(
+                vendor_code="vendor-1", warehouse_name="В пути возвраты на склад WB",
+                quantity=87, raw_data={}, fetched_at=now,
+            ),
+        ])
+        session.commit()
+
+    report = TelegramReportService(session_factory=session_factory)
+    data = report._wb_stock_data()
+
+    assert data == {"physical": 222, "to_client": 0, "from_client": 87, "low": 0}
+    assert "FBS на складе продавца не учитывается" in report._stock_block(data)
 
 
 def test_yandex_market_stock_report_contains_summary_and_warehouse_rows():

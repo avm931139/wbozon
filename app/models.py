@@ -291,6 +291,40 @@ class WBFboStockSnapshot(Base):
     raw_data = Column(JSON, nullable=True)
 
 
+class WBWarehouseRemain(Base):
+    __tablename__ = "wb_warehouse_remains"
+    __table_args__ = (
+        UniqueConstraint("vendor_code", "warehouse_name", name="uq_wb_warehouse_remain"),
+        {"comment": "Полные физические остатки WB из отчёта warehouse_remains."},
+    )
+
+    id = Column(Integer, primary_key=True)
+    vendor_code = Column(String, nullable=False, index=True)
+    warehouse_name = Column(String, nullable=False, index=True)
+    quantity = Column(Integer, nullable=False, default=0)
+    raw_data = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class WBWarehouseRemainSnapshot(Base):
+    __tablename__ = "wb_warehouse_remain_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "snapshot_date", "vendor_code", "warehouse_name",
+            name="uq_wb_warehouse_remain_snapshot",
+        ),
+        {"comment": "Ежедневные срезы полных физических остатков WB."},
+    )
+
+    id = Column(Integer, primary_key=True)
+    snapshot_date = Column(Date, nullable=False, index=True)
+    captured_at = Column(DateTime(timezone=True), nullable=False)
+    vendor_code = Column(String, nullable=False, index=True)
+    warehouse_name = Column(String, nullable=False, index=True)
+    quantity = Column(Integer, nullable=False, default=0)
+    raw_data = Column(JSON, nullable=False)
+
+
 class WBFBSOrder(Base):
     __tablename__ = "wb_fbs_orders"
     __table_args__ = {"comment": "Заказы Wildberries, обрабатываемые продавцом по схеме FBS."}
@@ -1891,6 +1925,7 @@ class InventorySyncRun(Base):
     status = Column(String, nullable=False, index=True)
     wb_fbs_rows = Column(Integer, nullable=False, default=0)
     wb_fbo_rows = Column(Integer, nullable=False, default=0)
+    wb_warehouse_remains_rows = Column(Integer, nullable=False, default=0)
     ozon_rows = Column(Integer, nullable=False, default=0)
     ozon_warehouse_rows = Column(Integer, nullable=False, default=0)
     yandex_market_rows = Column(Integer, nullable=False, default=0)

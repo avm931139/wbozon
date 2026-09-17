@@ -46,16 +46,16 @@ class DashboardService:
         current = requested == date.today()
         if current:
             sources = {
-                "wb": """SELECT p.nm_id::text external_id,p.vendor_code source_article,
-                        p.title source_name,x.quantity units,x.updated_at refreshed_at,
+                "wb": """SELECT coalesce(p.nm_id::text,x.vendor_code) external_id,
+                        x.vendor_code source_article,p.title source_name,
+                        x.quantity units,x.fetched_at refreshed_at,
                         CAST(:d AS date) data_date
-                    FROM wb_fbs_stocks x JOIN wb_product_sizes z ON z.id=x.size_id
-                    JOIN wb_products p ON p.id=z.product_id
-                    UNION ALL
-                    SELECT p.nm_id::text,p.vendor_code,p.title,x.quantity,x.updated_at,
-                        CAST(:d AS date)
-                    FROM wb_fbo_stocks x JOIN wb_product_sizes z ON z.id=x.size_id
-                    JOIN wb_products p ON p.id=z.product_id""",
+                    FROM wb_warehouse_remains x
+                    LEFT JOIN LATERAL (
+                        SELECT nm_id,vendor_code,title FROM wb_products
+                        WHERE vendor_code=x.vendor_code ORDER BY id LIMIT 1
+                    ) p ON TRUE
+                    WHERE x.warehouse_name='Всего находится на складах'""",
                 "ozon": """SELECT x.product_id::text external_id,p.offer_id source_article,
                         p.name source_name,x.present units,x.fetched_at refreshed_at,
                         CAST(:d AS date) data_date
@@ -71,17 +71,18 @@ class DashboardService:
             }
         else:
             sources = {
-                "wb": """SELECT p.nm_id::text external_id,p.vendor_code source_article,
-                        p.title source_name,x.quantity units,x.captured_at refreshed_at,
+                "wb": """SELECT coalesce(p.nm_id::text,x.vendor_code) external_id,
+                        x.vendor_code source_article,p.title source_name,
+                        x.quantity units,x.captured_at refreshed_at,
                         x.snapshot_date data_date
-                    FROM wb_fbs_stock_snapshots x JOIN wb_product_sizes z ON z.id=x.size_id
-                    JOIN wb_products p ON p.id=z.product_id
-                    WHERE x.snapshot_date=(SELECT max(snapshot_date) FROM wb_fbs_stock_snapshots WHERE snapshot_date<=:d)
-                    UNION ALL
-                    SELECT p.nm_id::text,p.vendor_code,p.title,x.quantity,x.captured_at,x.snapshot_date
-                    FROM wb_fbo_stock_snapshots x JOIN wb_product_sizes z ON z.id=x.size_id
-                    JOIN wb_products p ON p.id=z.product_id
-                    WHERE x.snapshot_date=(SELECT max(snapshot_date) FROM wb_fbo_stock_snapshots WHERE snapshot_date<=:d)""",
+                    FROM wb_warehouse_remain_snapshots x
+                    LEFT JOIN LATERAL (
+                        SELECT nm_id,vendor_code,title FROM wb_products
+                        WHERE vendor_code=x.vendor_code ORDER BY id LIMIT 1
+                    ) p ON TRUE
+                    WHERE x.warehouse_name='Всего находится на складах'
+                      AND x.snapshot_date=(SELECT max(snapshot_date)
+                          FROM wb_warehouse_remain_snapshots WHERE snapshot_date<=:d)""",
                 "ozon": """SELECT x.product_id::text external_id,p.offer_id source_article,
                         p.name source_name,x.present units,x.captured_at refreshed_at,
                         x.snapshot_date data_date
@@ -632,7 +633,7 @@ class DashboardService:
     def _stocks(self, db: Any) -> dict[str, Any]:
         c = """WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC),"""
         stocks = {
-            "wb": self._one(db, c + """ s AS (SELECT p.nm_id::text k,x.quantity q FROM wb_fbs_stocks x JOIN wb_product_sizes z ON z.id=x.size_id JOIN wb_products p ON p.id=z.product_id UNION ALL SELECT p.nm_id::text,x.quantity FROM wb_fbo_stocks x JOIN wb_product_sizes z ON z.id=x.size_id JOIN wb_products p ON p.id=z.product_id) SELECT coalesce(sum(s.q),0) units,coalesce(sum(s.q*coalesce(c.unit_cost,0)),0) cost_value FROM s LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=s.k LEFT JOIN c ON c.master_product_id=l.master_product_id"""),
+            "wb": self._one(db, c + """ p AS (SELECT DISTINCT ON (vendor_code) vendor_code,nm_id FROM wb_products WHERE vendor_code IS NOT NULL ORDER BY vendor_code,id),s AS (SELECT coalesce(p.nm_id::text,x.vendor_code) k,x.quantity q FROM wb_warehouse_remains x LEFT JOIN p ON p.vendor_code=x.vendor_code WHERE x.warehouse_name='Всего находится на складах') SELECT coalesce(sum(s.q),0) units,coalesce(sum(s.q*coalesce(c.unit_cost,0)),0) cost_value FROM s LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=s.k LEFT JOIN c ON c.master_product_id=l.master_product_id"""),
             "ozon": self._one(db, c + """ s AS (SELECT product_id::text k,sum(present) q FROM ozon_stocks GROUP BY product_id) SELECT coalesce(sum(s.q),0) units,coalesce(sum(s.q*coalesce(c.unit_cost,0)),0) cost_value FROM s LEFT JOIN marketplace_product_links l ON l.marketplace='ozon' AND l.active AND l.external_product_id=s.k LEFT JOIN c ON c.master_product_id=l.master_product_id"""),
             "yandex_market": self._one(db, c + """ s AS (SELECT offer_id k,sum(count) q FROM yandex_market_stocks WHERE stock_type='AVAILABLE' GROUP BY offer_id) SELECT coalesce(sum(s.q),0) units,coalesce(sum(s.q*coalesce(c.unit_cost,0)),0) cost_value FROM s LEFT JOIN marketplace_product_links l ON l.marketplace='yandex_market' AND l.active AND l.external_product_id=s.k LEFT JOIN c ON c.master_product_id=l.master_product_id"""),
         }
@@ -642,7 +643,7 @@ class DashboardService:
     def _historical_stocks(self, db: Any, as_of: date) -> dict[str, Any]:
         c = """WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC),"""
         stocks = {
-            "wb": self._one(db, c + """ s AS (SELECT p.nm_id::text k,x.quantity q FROM wb_fbs_stock_snapshots x JOIN wb_product_sizes z ON z.id=x.size_id JOIN wb_products p ON p.id=z.product_id WHERE x.snapshot_date=(SELECT max(snapshot_date) FROM wb_fbs_stock_snapshots WHERE snapshot_date<=:d) UNION ALL SELECT p.nm_id::text,x.quantity FROM wb_fbo_stock_snapshots x JOIN wb_product_sizes z ON z.id=x.size_id JOIN wb_products p ON p.id=z.product_id WHERE x.snapshot_date=(SELECT max(snapshot_date) FROM wb_fbo_stock_snapshots WHERE snapshot_date<=:d)) SELECT coalesce(sum(s.q),0) units,coalesce(sum(s.q*coalesce(c.unit_cost,0)),0) cost_value FROM s LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=s.k LEFT JOIN c ON c.master_product_id=l.master_product_id""", d=as_of),
+            "wb": self._one(db, c + """ p AS (SELECT DISTINCT ON (vendor_code) vendor_code,nm_id FROM wb_products WHERE vendor_code IS NOT NULL ORDER BY vendor_code,id),s AS (SELECT coalesce(p.nm_id::text,x.vendor_code) k,x.quantity q FROM wb_warehouse_remain_snapshots x LEFT JOIN p ON p.vendor_code=x.vendor_code WHERE x.warehouse_name='Всего находится на складах' AND x.snapshot_date=(SELECT max(snapshot_date) FROM wb_warehouse_remain_snapshots WHERE snapshot_date<=:d)) SELECT coalesce(sum(s.q),0) units,coalesce(sum(s.q*coalesce(c.unit_cost,0)),0) cost_value FROM s LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=s.k LEFT JOIN c ON c.master_product_id=l.master_product_id""", d=as_of),
             "ozon": self._one(db, c + """ s AS (SELECT product_id::text k,sum(present) q FROM ozon_stock_snapshots WHERE snapshot_date=(SELECT max(snapshot_date) FROM ozon_stock_snapshots WHERE snapshot_date<=:d) GROUP BY product_id) SELECT coalesce(sum(s.q),0) units,coalesce(sum(s.q*coalesce(c.unit_cost,0)),0) cost_value FROM s LEFT JOIN marketplace_product_links l ON l.marketplace='ozon' AND l.active AND l.external_product_id=s.k LEFT JOIN c ON c.master_product_id=l.master_product_id""", d=as_of),
             "yandex_market": self._one(db, c + """ s AS (SELECT offer_id k,sum(count) q FROM yandex_market_stock_snapshots WHERE stock_type='AVAILABLE' AND snapshot_date=(SELECT max(snapshot_date) FROM yandex_market_stock_snapshots WHERE snapshot_date<=:d) GROUP BY offer_id) SELECT coalesce(sum(s.q),0) units,coalesce(sum(s.q*coalesce(c.unit_cost,0)),0) cost_value FROM s LEFT JOIN marketplace_product_links l ON l.marketplace='yandex_market' AND l.active AND l.external_product_id=s.k LEFT JOIN c ON c.master_product_id=l.master_product_id""", d=as_of),
         }

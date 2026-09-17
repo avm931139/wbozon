@@ -13,8 +13,7 @@ from app.models import (
     OzonPosting,
     OzonStock,
     OzonSyncRun,
-    WBFBSStock,
-    WBFboStock,
+    WBWarehouseRemain,
     WBSyncRun,
     YandexMarketOrder,
     YandexMarketAdDailyStat,
@@ -406,24 +405,29 @@ class TelegramReportService:
 
     def _wb_stock_data(self) -> dict[str, int]:
         with self.session_factory() as session:
-            fbs_units = session.query(func.coalesce(func.sum(WBFBSStock.quantity), 0)).scalar()
-            fbo_units = session.query(func.coalesce(func.sum(WBFboStock.quantity), 0)).scalar()
-            to_client = session.query(func.coalesce(func.sum(WBFboStock.in_way_to_client), 0)).scalar()
-            from_client = session.query(func.coalesce(func.sum(WBFboStock.in_way_from_client), 0)).scalar()
-            low_fbs = session.query(func.count(WBFBSStock.id)).filter(WBFBSStock.quantity.between(1, self.low_stock_threshold)).scalar()
-            low_fbo = session.query(func.count(WBFboStock.id)).filter(WBFboStock.quantity.between(1, self.low_stock_threshold)).scalar()
+            total = session.query(func.coalesce(func.sum(WBWarehouseRemain.quantity), 0)).filter(
+                WBWarehouseRemain.warehouse_name == "Всего находится на складах"
+            ).scalar()
+            to_client = session.query(func.coalesce(func.sum(WBWarehouseRemain.quantity), 0)).filter(
+                WBWarehouseRemain.warehouse_name == "В пути до получателей"
+            ).scalar()
+            from_client = session.query(func.coalesce(func.sum(WBWarehouseRemain.quantity), 0)).filter(
+                WBWarehouseRemain.warehouse_name == "В пути возвраты на склад WB"
+            ).scalar()
+            low = session.query(func.count(WBWarehouseRemain.id)).filter(
+                WBWarehouseRemain.warehouse_name == "Всего находится на складах",
+                WBWarehouseRemain.quantity.between(1, self.low_stock_threshold),
+            ).scalar()
         return {
-            "fbs": int(fbs_units or 0),
-            "fbo": int(fbo_units or 0),
+            "physical": int(total or 0),
             "to_client": int(to_client or 0),
             "from_client": int(from_client or 0),
-            "low_fbs": int(low_fbs or 0),
-            "low_fbo": int(low_fbo or 0),
+            "low": int(low or 0),
         }
 
     def _stock_block(self, data: dict[str, int] | None = None) -> str:
         data = data or self._wb_stock_data()
-        return f"ОСТАТКИ СЕЙЧАС\nFBS: {data['fbs']} шт.; FBO: {data['fbo']} шт.; к клиенту: {data['to_client']}; от клиента: {data['from_client']}.\nПозиций с остатком 1–{self.low_stock_threshold}: FBS {data['low_fbs']}, FBO {data['low_fbo']}."
+        return f"ОСТАТКИ НА СКЛАДАХ WB\nНа складах WB: {data['physical']} шт.; к клиенту: {data['to_client']}; возвраты в пути на WB: {data['from_client']}.\nПозиций с остатком 1–{self.low_stock_threshold}: {data['low']}. FBS на складе продавца не учитывается."
 
     def _ozon_stock_data(self) -> dict[str, dict[str, int]]:
         with self.session_factory() as session:
@@ -530,7 +534,7 @@ class TelegramReportService:
             advertising_sources.append("Яндекс Маркет")
         ozon_available = sum(values["available"] for values in ozon_stock.values())
         yandex_available = yandex_stock.get("AVAILABLE", {}).get("units", 0)
-        total_available = wb_stock["fbs"] + wb_stock["fbo"] + ozon_available + yandex_available
+        total_available = wb_stock["physical"] + ozon_available + yandex_available
         ozon_status = ozon_orders["run"].status if ozon_orders["run"] is not None else "нет запуска"
         yandex_status = yandex_orders["run"].status if yandex_orders["run"] is not None else "нет запуска"
         return "\n".join([
@@ -538,7 +542,7 @@ class TelegramReportService:
             f"Заказы: {total_orders}; товаров: {total_units}; сумма: {_money(total_amount)}.",
             f"Сейчас отменено: {total_cancelled}.",
             f"Реклама ({' + '.join(advertising_sources)}): расход {_money(advertising_spend)}; атрибутированная выручка {_money(advertising_revenue)}.",
-            f"Доступные остатки: {total_available} шт. — WB {wb_stock['fbs'] + wb_stock['fbo']}, Ozon {ozon_available}, Яндекс Маркет {yandex_available}.",
+            f"Доступные остатки: {total_available} шт. — WB {wb_stock['physical']}, Ozon {ozon_available}, Яндекс Маркет {yandex_available}.",
             f"Загрузка заказов: Ozon {ozon_status}; Яндекс Маркет {yandex_status}. Статус WB указан в сообщении площадки.",
         ])
 

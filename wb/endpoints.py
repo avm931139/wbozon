@@ -23,6 +23,12 @@ class WBFboStocksEndpoints:
     LIST = "/api/analytics/v1/stocks-report/wb-warehouses"
 
 
+class WBWarehouseRemainsEndpoints:
+    CREATE = "/api/v1/warehouse_remains"
+    STATUS = "/api/v1/warehouse_remains/tasks/{task_id}/status"
+    DOWNLOAD = "/api/v1/warehouse_remains/tasks/{task_id}/download"
+
+
 class WBOrdersEndpoints:
     FBS_LIST = "/api/v3/orders"
     FBS_STATUS = "/api/v3/orders/status"
@@ -57,6 +63,9 @@ class WBEndpoints:
     WAREHOUSES_LIST = WBWarehousesEndpoints.LIST
     STOCKS_LIST = WBStocksEndpoints.LIST
     FBO_STOCKS_LIST = WBFboStocksEndpoints.LIST
+    WAREHOUSE_REMAINS_CREATE = WBWarehouseRemainsEndpoints.CREATE
+    WAREHOUSE_REMAINS_STATUS = WBWarehouseRemainsEndpoints.STATUS
+    WAREHOUSE_REMAINS_DOWNLOAD = WBWarehouseRemainsEndpoints.DOWNLOAD
     FBS_ORDERS_LIST = WBOrdersEndpoints.FBS_LIST
     FBS_ORDERS_STATUS = WBOrdersEndpoints.FBS_STATUS
     ORDERS_HISTORY = WBOrdersEndpoints.HISTORY

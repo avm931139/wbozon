@@ -128,14 +128,32 @@ def test_stock_details_uses_current_rows_and_historical_snapshots():
     import inspect
 
     source = inspect.getsource(DashboardService.stock_details)
-    assert "wb_fbs_stocks" in source
+    assert "wb_warehouse_remains" in source
+    assert "wb_warehouse_remain_snapshots" in source
+    assert "Всего находится на складах" in source
+    assert "wb_fbs_stocks" not in source
+    assert "wb_fbo_stocks" not in source
     assert "ozon_stocks" in source
     assert "yandex_market_stocks" in source
-    assert "wb_fbs_stock_snapshots" in source
     assert "ozon_stock_snapshots" in source
     assert "yandex_market_stock_snapshots" in source
     assert "snapshot_date<=:d" in source
     assert "marketplace_product_media" in source
+
+
+def test_wb_dashboard_stock_total_excludes_seller_fbs_stock():
+    import inspect
+
+    current = inspect.getsource(DashboardService._stocks)
+    historical = inspect.getsource(DashboardService._historical_stocks)
+    assert "wb_warehouse_remains" in current
+    assert "wb_warehouse_remain_snapshots" in historical
+    assert "Всего находится на складах" in current
+    assert "Всего находится на складах" in historical
+    assert "wb_fbs_stocks" not in current
+    assert "wb_fbo_stocks" not in current
+    assert "wb_fbs_stock_snapshots" not in historical
+    assert "wb_fbo_stock_snapshots" not in historical
 
 
 def test_operational_service_does_not_query_finance_ledgers():

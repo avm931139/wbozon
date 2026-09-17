@@ -21,6 +21,8 @@ from app.models import (
     WBFBSWarehouse,
     WBProduct,
     WBProductSize,
+    WBWarehouseRemain,
+    WBWarehouseRemainSnapshot,
     YandexMarketStock,
     YandexMarketStockSnapshot,
 )
@@ -44,6 +46,17 @@ class FBOAPI:
             "quantity": 8,
             "inWayToClient": 2,
             "inWayFromClient": 1,
+        }]
+
+
+class WarehouseRemainsAPI:
+    def list(self):
+        return [{
+            "vendorCode": "vendor-1",
+            "warehouses": [
+                {"warehouseName": "Всего находится на складах", "quantity": 8},
+                {"warehouseName": "Коледино", "quantity": 8},
+            ],
         }]
 
 
@@ -123,7 +136,7 @@ def inventory_db():
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, future=True)
     with session_factory() as session:
-        product = WBProduct(nm_id=1)
+        product = WBProduct(nm_id=1, vendor_code="vendor-1")
         session.add(product)
         session.flush()
         current_size = WBProductSize(product_id=product.id, chrt_id=10)
@@ -156,6 +169,10 @@ def inventory_db():
                 raw_data={},
                 fetched_at=datetime.now(timezone.utc),
             ),
+            WBWarehouseRemain(
+                vendor_code="old-vendor", warehouse_name="Всего находится на складах",
+                quantity=99, raw_data={}, fetched_at=datetime.now(timezone.utc),
+            ),
         ])
         session.commit()
     return session_factory
@@ -163,7 +180,8 @@ def inventory_db():
 
 def test_daily_snapshot_updates_current_rows_and_zeroes_missing_inventory(inventory_db):
     service = InventorySyncService(
-        wb_fbs_api=FBSAPI(), wb_fbo_api=FBOAPI(), ozon_api=OzonAPI(),
+        wb_fbs_api=FBSAPI(), wb_fbo_api=FBOAPI(),
+        wb_warehouse_remains_api=WarehouseRemainsAPI(), ozon_api=OzonAPI(),
         ozon_warehouse_api=OzonWarehouseAPI(),
         yandex_market_campaign_ids=(),
         session_factory=inventory_db, request_pause_seconds=0, sleeper=lambda value: None,
@@ -176,6 +194,7 @@ def test_daily_snapshot_updates_current_rows_and_zeroes_missing_inventory(invent
     assert result == {
         "wb_fbs": 1,
         "wb_fbo": 1,
+        "wb_warehouse_remains": 2,
         "ozon": 1,
         "ozon_warehouse": 1,
         "yandex_market": 0,
@@ -184,6 +203,12 @@ def test_daily_snapshot_updates_current_rows_and_zeroes_missing_inventory(invent
         assert session.query(WBFBSStock).filter_by(sku="sku-10").one().quantity == 7
         assert session.query(WBFBSStock).filter_by(sku="old-fbs").one().quantity == 0
         assert session.query(WBFboStock).filter_by(size_id=2).one().quantity == 0
+        assert session.query(WBWarehouseRemain).filter_by(
+            vendor_code="vendor-1", warehouse_name="Всего находится на складах"
+        ).one().quantity == 8
+        assert session.query(WBWarehouseRemain).filter_by(
+            vendor_code="old-vendor"
+        ).one().quantity == 0
         assert session.query(OzonStock).filter_by(product_id=200).one().present == 0
         assert session.query(OzonWarehouseStock).filter_by(product_id=200).one().present == 0
         warehouse = session.query(OzonWarehouse).filter_by(ozon_warehouse_id=700).one()
@@ -192,11 +217,15 @@ def test_daily_snapshot_updates_current_rows_and_zeroes_missing_inventory(invent
         assert session.query(OzonWarehouseStock).filter_by(product_id=100).one().warehouse_id == warehouse.id
         assert session.query(WBFBSStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 2
         assert session.query(WBFboStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 2
+        assert session.query(WBWarehouseRemainSnapshot).filter_by(
+            snapshot_date=snapshot_day
+        ).count() == 3
         assert session.query(OzonStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 2
         assert session.query(OzonWarehouseStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 2
         run = session.query(InventorySyncRun).filter_by(snapshot_date=snapshot_day).one()
         assert run.status == "completed"
         assert run.ozon_warehouse_rows == 1
+        assert run.wb_warehouse_remains_rows == 2
 
     assert service.snapshot(snapshot_day, scheduled_for=scheduled_for)["skipped"] is True
 
@@ -206,6 +235,7 @@ def test_yandex_market_inventory_is_stored_snapshotted_and_zeroed(inventory_db):
     service = InventorySyncService(
         wb_fbs_api=FBSAPI(),
         wb_fbo_api=FBOAPI(),
+        wb_warehouse_remains_api=WarehouseRemainsAPI(),
         ozon_api=OzonAPI(),
         ozon_warehouse_api=OzonWarehouseAPI(),
         yandex_market_api=api,
@@ -243,6 +273,7 @@ def test_marketplace_worker_does_not_call_or_change_other_marketplaces(inventory
         marketplace="wb",
         wb_fbs_api=FBSAPI(),
         wb_fbo_api=FBOAPI(),
+        wb_warehouse_remains_api=WarehouseRemainsAPI(),
         ozon_api=UnexpectedAPI(),
         yandex_market_api=UnexpectedAPI(),
         session_factory=inventory_db,
@@ -255,6 +286,7 @@ def test_marketplace_worker_does_not_call_or_change_other_marketplaces(inventory
     assert result == {
         "wb_fbs": 1,
         "wb_fbo": 1,
+        "wb_warehouse_remains": 2,
         "ozon": 0,
         "ozon_warehouse": 0,
         "yandex_market": 0,
@@ -293,6 +325,7 @@ def test_marketplace_snapshot_only_writes_its_own_tables(inventory_db):
         marketplace="wb",
         wb_fbs_api=FBSAPI(),
         wb_fbo_api=FBOAPI(),
+        wb_warehouse_remains_api=WarehouseRemainsAPI(),
         session_factory=inventory_db,
         request_pause_seconds=0,
         sleeper=lambda value: None,
@@ -307,6 +340,9 @@ def test_marketplace_snapshot_only_writes_its_own_tables(inventory_db):
     with inventory_db() as session:
         assert session.query(WBFBSStockSnapshot).filter_by(snapshot_date=snapshot_day).count() > 0
         assert session.query(WBFboStockSnapshot).filter_by(snapshot_date=snapshot_day).count() > 0
+        assert session.query(WBWarehouseRemainSnapshot).filter_by(
+            snapshot_date=snapshot_day
+        ).count() > 0
         assert session.query(OzonStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 0
         assert session.query(YandexMarketStockSnapshot).filter_by(snapshot_date=snapshot_day).count() == 0
 
@@ -324,7 +360,10 @@ def test_yandex_market_worker_requires_campaign_ids(inventory_db):
 
 
 def test_inventory_workers_use_distinct_locks_and_all_mode_reserves_each_one():
-    wb = InventorySyncService(marketplace="wb", wb_fbs_api=FBSAPI(), wb_fbo_api=FBOAPI())
+    wb = InventorySyncService(
+        marketplace="wb", wb_fbs_api=FBSAPI(), wb_fbo_api=FBOAPI(),
+        wb_warehouse_remains_api=WarehouseRemainsAPI(),
+    )
     ozon = InventorySyncService(
         marketplace="ozon",
         ozon_api=OzonAPI(),
@@ -338,6 +377,7 @@ def test_inventory_workers_use_distinct_locks_and_all_mode_reserves_each_one():
     combined = InventorySyncService(
         wb_fbs_api=FBSAPI(),
         wb_fbo_api=FBOAPI(),
+        wb_warehouse_remains_api=WarehouseRemainsAPI(),
         ozon_api=OzonAPI(),
         ozon_warehouse_api=OzonWarehouseAPI(),
         yandex_market_api=YandexMarketAPI(),
@@ -353,6 +393,7 @@ def test_duplicate_ozon_warehouse_rows_fail_before_inventory_is_changed(inventor
     service = InventorySyncService(
         wb_fbs_api=FBSAPI(),
         wb_fbo_api=FBOAPI(),
+        wb_warehouse_remains_api=WarehouseRemainsAPI(),
         ozon_api=OzonAPI(),
         ozon_warehouse_api=DuplicateOzonWarehouseAPI(),
         yandex_market_campaign_ids=(),
@@ -374,6 +415,7 @@ def test_analytics_metadata_failure_does_not_block_stock_quantities(inventory_db
     service = InventorySyncService(
         wb_fbs_api=FBSAPI(),
         wb_fbo_api=FBOAPI(),
+        wb_warehouse_remains_api=WarehouseRemainsAPI(),
         ozon_api=OzonAPI(),
         ozon_warehouse_api=MetadataFailureOzonWarehouseAPI(),
         yandex_market_campaign_ids=(),

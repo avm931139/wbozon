@@ -11,6 +11,7 @@ from wb.products import ProductsAPI
 from wb.stocks import StocksAPI
 from wb.sales import SalesOperationsAPI
 from wb.warehouses import WarehousesAPI
+from wb.warehouse_remains import WarehouseRemainsAPI
 
 
 class FakeClient:
@@ -34,6 +35,16 @@ class SequenceClient(FakeClient):
 
     def post(self, path, *, json_body=None, retries=3):
         self.calls.append(("POST", path, None, json_body))
+        return next(self.responses)
+
+
+class GetSequenceClient(FakeClient):
+    def __init__(self, responses):
+        super().__init__(None)
+        self.responses = iter(responses)
+
+    def get(self, path, *, params=None, retries=3):
+        self.calls.append(("GET", path, params, None))
         return next(self.responses)
 
 
@@ -126,6 +137,40 @@ def test_fbo_stocks_use_analytics_contract():
             None,
             {"nmIds": [], "chrtIds": [], "limit": 100, "offset": 0},
         )
+    ]
+
+
+def test_warehouse_remains_generates_polls_and_downloads_full_report():
+    report = [{
+        "vendorCode": "vendor-1",
+        "warehouses": [
+            {"warehouseName": "Всего находится на складах", "quantity": 8},
+            {"warehouseName": "Коледино", "quantity": 8},
+        ],
+    }]
+    client = GetSequenceClient([
+        {"data": {"taskId": "task-1"}},
+        {"data": {"status": "processing"}},
+        {"data": {"status": "done"}},
+        report,
+    ])
+    sleeps = []
+
+    result = WarehouseRemainsAPI(client, sleeper=sleeps.append).list(
+        attempts=3, pause_seconds=0.25
+    )
+
+    assert result == report
+    assert sleeps == [0.25]
+    assert client.calls == [
+        ("GET", "/api/v1/warehouse_remains", {
+            "locale": "ru", "groupByBrand": False, "groupBySubject": False,
+            "groupBySa": True, "groupByNm": False, "groupByBarcode": False,
+            "groupBySize": False, "filterPics": 0, "filterVolume": 0,
+        }, None),
+        ("GET", "/api/v1/warehouse_remains/tasks/task-1/status", None, None),
+        ("GET", "/api/v1/warehouse_remains/tasks/task-1/status", None, None),
+        ("GET", "/api/v1/warehouse_remains/tasks/task-1/download", None, None),
     ]
 
 

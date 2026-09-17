@@ -64,6 +64,7 @@ python -m inventory_sync --marketplace yandex_market --snapshot
 |---|---|---|---|
 | WB FBS | Marketplace API `/api/v3/stocks/{warehouse_id}` | `wb_fbs_stocks` | `sku + warehouse_id` |
 | WB FBO | Seller Analytics `/api/analytics/v1/stocks-report/wb-warehouses` | `wb_fbo_stocks` | `size_id + warehouse_id` |
+| WB полный складской отчёт | Seller Analytics `/api/v1/warehouse_remains` | `wb_warehouse_remains` | `vendor_code + warehouse_name` |
 | Ozon | Seller API `/v4/product/info/stocks` | `ozon_stocks` | `product_id + stock_type` |
 | Ozon FBO по складам | Seller API `/v1/product/info/stocks-by-warehouse/fbo` | `ozon_warehouse_stocks` | `product_id + warehouse_id + stock_type` |
 | Ozon FBS по складам | Seller API `/v2/product/info/stocks-by-warehouse/fbs` | `ozon_warehouse_stocks` | `product_id + warehouse_id + stock_type` |
@@ -72,6 +73,8 @@ python -m inventory_sync --marketplace yandex_market --snapshot
 `ozon_warehouses` хранит внешний `ozon_warehouse_id`, название и кластер. Названия и кластеры обогащаются через `/v1/analytics/stocks`; временная ошибка этого вспомогательного запроса не блокирует запись количеств. Агрегат `/v4/product/info/stocks` сохраняется параллельно и сверяется с суммой складских строк. Поскольку оба источника realtime и запрашиваются последовательно, кратковременное расхождение фиксируется предупреждением, но не приводит к потере полного складского ответа.
 
 WB FBS требует предварительно загруженные `wb_product_sizes` и `wb_fbs_warehouses`. Если каталог размеров или склады отсутствуют, запуск завершается ошибкой, не изменяя текущие остатки и историю.
+
+`/api/analytics/v1/stocks-report/wb-warehouses` показывает количество, доступное покупателю для добавления в корзину, и не заменяет кабинетный отчёт «Остатки на складах». Для физического остатка worker создаёт асинхронный отчёт `/api/v1/warehouse_remains`, ждёт его готовности и сохраняет итоговую строку `Всего находится на складах`, логистику в пути и разбивку по реальным складам WB. Именно итоговая строка из `wb_warehouse_remains` используется в дашборде и Telegram-отчёте. Запасы FBS находятся на складе продавца и в остаток маркетплейса не входят.
 
 Все обязательные ответы выбранного маркетплейса сначала полностью загружаются из API. После успешной загрузки его текущие и, при ежедневном запуске, исторические таблицы записываются одной транзакцией. Исчезнувшие позиции не удаляются: их количественные поля обнуляются, а в `raw_data` добавляется `zeroed_by_inventory_sync=true`.
 
@@ -120,6 +123,7 @@ ORDER BY s.offer_id, s.stock_type, w.name;
 |---|---|---|
 | `wb_fbs_stock_snapshots` | `snapshot_date + sku + warehouse_id` | `quantity` |
 | `wb_fbo_stock_snapshots` | `snapshot_date + size_id + warehouse_id` | `quantity`, `in_way_to_client`, `in_way_from_client` |
+| `wb_warehouse_remain_snapshots` | `snapshot_date + vendor_code + warehouse_name` | `quantity` |
 | `ozon_stock_snapshots` | `snapshot_date + product_id + stock_type` | `present`, `reserved` |
 | `ozon_warehouse_stock_snapshots` | `snapshot_date + product_id + warehouse_id + stock_type` | `present`, `reserved` |
 | `yandex_market_stock_snapshots` | `snapshot_date + campaign_id + warehouse_id + offer_id + stock_type` | `count` |
@@ -137,7 +141,7 @@ ORDER BY s.offer_id, s.stock_type, w.name;
 - плановое и фактическое время;
 - дату ежедневного среза;
 - статус `running`, `completed` или `failed`;
-- количество принятых строк WB FBS/FBO, агрегата и складов Ozon, Яндекс Маркета;
+- количество принятых строк WB FBS/FBO/полного складского отчёта, агрегата и складов Ozon, Яндекс Маркета;
 - текст ошибки.
 
 Перед обращением к API процесс получает PostgreSQL advisory lock, отдельный для каждого маркетплейса. Второй экземпляр того же worker не начинает параллельную загрузку и получает `InventorySyncAlreadyRunning`; workers разных маркетплейсов могут выполняться одновременно. Блокировка не заменяет запуск процесса под systemd с политикой перезапуска.
