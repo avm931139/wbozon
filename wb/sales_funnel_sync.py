@@ -198,6 +198,31 @@ class SalesFunnelSyncService:
             finally:
                 self._unlock(lock_connection)
 
+    def sync_month_prefixes(self, now: datetime | None = None) -> dict[str, Any]:
+        """Refresh every month-to-date period so historical dashboard filters stay exact."""
+        current = now or datetime.now(self.timezone)
+        current = current.replace(tzinfo=self.timezone) if current.tzinfo is None else current.astimezone(self.timezone)
+        period_from = current.date().replace(day=1)
+        period_to = period_from
+        results: list[dict[str, Any]] = []
+        while period_to <= current.date():
+            results.append(self.sync_period(period_from, period_to, current))
+            period_to += timedelta(days=1)
+            if period_to <= current.date():
+                self.api.pause()
+        completed = sum(result.get("status") == "completed" for result in results)
+        skipped = sum(result.get("status") == "skipped" for result in results)
+        return {
+            "status": "completed",
+            "mode": "month_prefixes",
+            "period_from": period_from,
+            "period_to": current.date(),
+            "snapshots_completed": completed,
+            "snapshots_skipped": skipped,
+            "snapshots_total": len(results),
+            "rows_upserted": sum(int(result.get("rows_upserted") or 0) for result in results),
+        }
+
     def _persist(self, payload: list[dict[str, Any]], fetched_at: datetime) -> tuple[int, int]:
         parsed: list[tuple[date, int, dict[str, Any], dict[str, Any], Any, str | None]] = []
         for product_row in payload:
@@ -368,7 +393,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--to", dest="date_to", type=date.fromisoformat)
     parser.add_argument(
         "--reconcile", action="store_true",
-        help="refresh the exact aggregate snapshot for the current calendar month",
+        help="refresh every month-to-date aggregate snapshot for the current month",
     )
     args = parser.parse_args()
     if (args.date_from is None) != (args.date_to is None):
@@ -387,11 +412,10 @@ def main() -> None:
     service = SalesFunnelSyncService()
     date_from = args.date_from
     date_to = args.date_to
-    if args.reconcile:
-        date_to = datetime.now(service.timezone).date()
-        date_from = date_to.replace(day=1)
     print(json.dumps(
-        service.sync_period(date_from, date_to)
+        service.sync_month_prefixes()
+        if args.reconcile
+        else service.sync_period(date_from, date_to)
         if date_from is not None and date_to is not None
         else service.sync(),
         ensure_ascii=False,

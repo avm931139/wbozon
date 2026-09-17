@@ -191,6 +191,38 @@ def test_sales_funnel_period_sync_uses_365_day_aggregate_endpoint():
         assert row.cancel_count == 2
 
 
+def test_sales_funnel_month_reconciliation_caches_every_month_prefix():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    api = RecordingEmptyAPI()
+    service = SalesFunnelSyncService(api=api, session_factory=session_factory)
+
+    result = service.sync_month_prefixes(
+        datetime(2026, 9, 3, 1, 35, tzinfo=MOSCOW)
+    )
+
+    assert result == {
+        "status": "completed",
+        "mode": "month_prefixes",
+        "period_from": date(2026, 9, 1),
+        "period_to": date(2026, 9, 3),
+        "snapshots_completed": 3,
+        "snapshots_skipped": 0,
+        "snapshots_total": 3,
+        "rows_upserted": 3,
+    }
+    assert api.product_calls == [
+        (date(2026, 9, 1), date(2026, 9, 1)),
+        (date(2026, 9, 1), date(2026, 9, 2)),
+        (date(2026, 9, 1), date(2026, 9, 3)),
+    ]
+    assert api.pauses == 2
+    with session_factory() as session:
+        assert session.query(WBSalesFunnelPeriodProduct).count() == 3
+        assert session.query(WBSalesFunnelSyncRun).filter_by(status="completed").count() == 3
+
+
 def test_sales_funnel_sync_rejects_incomplete_or_reversed_explicit_period():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

@@ -1,5 +1,5 @@
 [Unit]
-Description=Snapshot current-month Wildberries Sales Funnel totals
+Description=Snapshot Wildberries Sales Funnel month-to-date periods
 After=network-online.target postgresql.service
 Wants=network-online.target
 

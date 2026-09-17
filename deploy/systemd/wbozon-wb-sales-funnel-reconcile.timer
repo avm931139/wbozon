@@ -1,5 +1,5 @@
 [Unit]
-Description=Snapshot current-month Wildberries Sales Funnel totals daily
+Description=Snapshot Wildberries Sales Funnel month-to-date periods daily
 
 [Timer]
 OnCalendar=*-*-* 01:35:00 Europe/Moscow
