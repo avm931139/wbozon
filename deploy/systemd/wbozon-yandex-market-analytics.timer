@@ -1,8 +1,8 @@
 [Unit]
-Description=Synchronize Yandex Market cabinet sales analytics daily
+Description=Synchronize Yandex Market cabinet sales analytics every six hours
 
 [Timer]
-OnCalendar=*-*-* 03:05:00 Europe/Moscow
+OnCalendar=*-*-* 00,06,12,18:05:00 Europe/Moscow
 Persistent=true
 RandomizedDelaySec=60
 Unit=wbozon-yandex-market@analytics.service
