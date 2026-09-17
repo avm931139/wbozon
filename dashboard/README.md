@@ -98,7 +98,8 @@ Order cards identify their operational sources: WB Order Feed plus FBO Orders,
 Ozon Postings, and Yandex Market Orders API. Marketplace cabinet funnel exports
 are cohort analytics and can be recalculated after order creation, so they are
 shown as a separate cabinet-analytics group rather than silently mixed into the
-realtime series. The page includes this distinction as a visible note. When WB
+realtime series. Question-mark tooltips next to both group titles explain their
+source, timing and formulas without occupying permanent card space. When WB
 cabinet coverage is complete, the WB card headline uses the cabinet ordered
 quantity and amount; otherwise it explicitly falls back to operational data.
 The headline also shows the average ordered quantity and amount per calendar

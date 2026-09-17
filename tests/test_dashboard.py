@@ -60,14 +60,17 @@ def test_operational_dashboard_has_readable_semantic_comparisons_and_help():
     assert "WB Order Feed и FBO Orders" in HTML
     assert "Ozon Postings" in HTML
     assert "Yandex Market Orders API" in HTML
-    assert "Как читать данные." in HTML
-    assert "Оперативная аналитика поступает из ленты заказов" in HTML
-    assert "Кабинетная аналитика" in HTML
+    assert "Оперативные события / 实时事件 ${info(" in HTML
+    assert "Кабинетная аналитика / 后台分析 ${info(" in HTML
+    assert "Данные поступают почти в реальном времени" in HTML
+    assert "Это воронка заказов, созданных в выбранном периоде" in HTML
+    assert "Поздние выкупы, доставки, отмены и возвраты пересчитываются задним числом" in HTML
     assert "Процент выкупа / отмен" in HTML
     assert "cabinetPurchaseRate=ratio(cabinetPurchased,cabinetOrdered)" in HTML
     assert "useCabinetHeadline=key==='wb'&&cabinet.complete" in HTML
     assert "headlineAmount/days" in HTML
     assert "кабинетная аналитика':'оперативные данные'" in HTML
+    assert 'class="analytics-note"' not in HTML
 
 
 def test_operational_queries_compare_product_units_with_product_units():
