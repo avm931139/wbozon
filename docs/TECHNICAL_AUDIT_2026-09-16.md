@@ -153,8 +153,9 @@ healthcheck/operations bot. Риск считается закрытым тол�
 scope для курсора, coverage и delete; уникальные ключи обеих таблиц включают
 `business_id`; чужой `businessId` в строке отчёта отклоняется до изменения БД.
 Production-проверка показала один бизнес, 368 рекламных и 18 173 финансовых
-строк, конфликтов будущих ключей нет. Окончательное закрытие — после применения
-миграции и успешного `alembic check` на production.
+строк, конфликтов будущих ключей нет. Миграция применена на production;
+`alembic current` показывает `20260917_yandex_business_scope (head)`, а
+`alembic check` — `No new upgrade operations detected`. Пункт закрыт.
 
 **Доказательства**
 
