@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import uuid
@@ -8,7 +9,15 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
-from app.config import WB_LOG_DIR, WB_LOG_LEVEL, WB_SALES_FUNNEL_LOOKBACK_DAYS, WB_TG_TIMEZONE
+from sqlalchemy import text
+
+from app.config import (
+    WB_LOG_DIR,
+    WB_LOG_LEVEL,
+    WB_SALES_FUNNEL_LOOKBACK_DAYS,
+    WB_SALES_FUNNEL_RECONCILE_DAYS,
+    WB_TG_TIMEZONE,
+)
 from app.db import SessionLocal
 from app.models import (
     WBProduct,
@@ -22,6 +31,7 @@ from wb.sync_logging import configure_wb_logging, install_context_filter
 
 
 logger = logging.getLogger(__name__)
+_SYNC_LOCK_ID = 2_026_091_701
 
 
 def _money(value: Any) -> Decimal:
@@ -39,6 +49,7 @@ class SalesFunnelSyncService:
         session_factory: Callable[..., Any] = SessionLocal,
         timezone_name: str = WB_TG_TIMEZONE,
         lookback_days: int = WB_SALES_FUNNEL_LOOKBACK_DAYS,
+        reconcile_days: int = WB_SALES_FUNNEL_RECONCILE_DAYS,
     ) -> None:
         if not 1 <= lookback_days <= 7:
             raise ValueError("WB_SALES_FUNNEL_LOOKBACK_DAYS must be between 1 and 7")
@@ -46,34 +57,96 @@ class SalesFunnelSyncService:
         self.session_factory = session_factory
         self.timezone = ZoneInfo(timezone_name)
         self.lookback_days = lookback_days
+        if reconcile_days < 7:
+            raise ValueError("WB_SALES_FUNNEL_RECONCILE_DAYS must be at least 7")
+        self.reconcile_days = reconcile_days
 
-    def sync(self, now: datetime | None = None) -> dict[str, Any]:
+    @staticmethod
+    def _windows(period_from: date, period_to: date) -> list[tuple[date, date]]:
+        windows: list[tuple[date, date]] = []
+        cursor = period_from
+        while cursor <= period_to:
+            end = min(cursor + timedelta(days=6), period_to)
+            windows.append((cursor, end))
+            cursor = end + timedelta(days=1)
+        return windows
+
+    @staticmethod
+    def _try_lock(connection: Any) -> bool:
+        if connection.dialect.name != "postgresql":
+            return True
+        return bool(connection.execute(
+            text("SELECT pg_try_advisory_lock(:lock_id)"), {"lock_id": _SYNC_LOCK_ID}
+        ).scalar())
+
+    @staticmethod
+    def _unlock(connection: Any) -> None:
+        if connection.dialect.name == "postgresql":
+            connection.execute(
+                text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": _SYNC_LOCK_ID}
+            )
+
+    def sync(
+        self,
+        now: datetime | None = None,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> dict[str, Any]:
         current = now or datetime.now(self.timezone)
         current = current.replace(tzinfo=self.timezone) if current.tzinfo is None else current.astimezone(self.timezone)
-        period_to = current.date()
-        period_from = period_to - timedelta(days=self.lookback_days - 1)
+        if (date_from is None) != (date_to is None):
+            raise ValueError("date_from and date_to must be provided together")
+        period_to = date_to or current.date()
+        period_from = date_from or (period_to - timedelta(days=self.lookback_days - 1))
+        if period_from > period_to:
+            raise ValueError("date_from must not be later than date_to")
+        windows = self._windows(period_from, period_to)
         run_id = uuid.uuid4().hex
-        with self.session_factory() as session:
-            nm_ids = [int(value) for (value,) in session.query(WBProduct.nm_id).filter(WBProduct.nm_id.isnot(None)).distinct().all()]
-            session.add(WBSalesFunnelSyncRun(
-                id=run_id, started_at=current, status="running", period_from=period_from, period_to=period_to
-            ))
-            session.commit()
-        try:
-            payload = self.api.history(period_from, period_to, nm_ids)
-            received, upserted = self._persist(payload, current)
-            self.api.pause()
-            account_payload = self.api.grouped_history(period_from, period_to)
-            account_rows = self._persist_account(account_payload, current)
-            self._finish(run_id, "completed", received, upserted, None, datetime.now(self.timezone))
-            return {"run_id": run_id, "status": "completed", "period_from": period_from,
-                    "period_to": period_to, "rows_received": received, "rows_upserted": upserted,
-                    "account_rows_upserted": account_rows}
-        except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
-            self._finish(run_id, "failed", 0, 0, error, datetime.now(self.timezone))
-            logger.exception("WB Sales Funnel synchronization failed")
-            raise
+        received = upserted = account_rows = 0
+        with self.session_factory() as probe_session:
+            engine = probe_session.get_bind()
+        # Keep a dedicated connection open for the full run. PostgreSQL advisory
+        # locks are connection-scoped and must not be returned to the pool early.
+        with engine.connect() as lock_connection:
+            if not self._try_lock(lock_connection):
+                return {"status": "skipped", "reason": "already_running"}
+            try:
+                with self.session_factory() as session:
+                    nm_ids = [int(value) for (value,) in session.query(WBProduct.nm_id).filter(
+                        WBProduct.nm_id.isnot(None)
+                    ).distinct().all()]
+                    session.add(WBSalesFunnelSyncRun(
+                        id=run_id, started_at=current, status="running",
+                        period_from=period_from, period_to=period_to,
+                    ))
+                    session.commit()
+                for index, (window_from, window_to) in enumerate(windows):
+                    payload = self.api.history(window_from, window_to, nm_ids)
+                    window_received, window_upserted = self._persist(payload, current)
+                    received += window_received
+                    upserted += window_upserted
+                    self.api.pause()
+                    account_payload = self.api.grouped_history(window_from, window_to)
+                    account_rows += self._persist_account(
+                        account_payload, current, window_from, window_to
+                    )
+                    if index + 1 < len(windows):
+                        self.api.pause()
+                self._finish(run_id, "completed", received, upserted, None, datetime.now(self.timezone))
+                return {
+                    "run_id": run_id, "status": "completed", "period_from": period_from,
+                    "period_to": period_to, "windows": len(windows),
+                    "rows_received": received, "rows_upserted": upserted,
+                    "account_rows_upserted": account_rows,
+                }
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+                self._finish(run_id, "failed", received, upserted, error, datetime.now(self.timezone))
+                logger.exception("WB Sales Funnel synchronization failed")
+                raise
+            finally:
+                self._unlock(lock_connection)
 
     def _persist(self, payload: list[dict[str, Any]], fetched_at: datetime) -> tuple[int, int]:
         parsed: list[tuple[date, int, dict[str, Any], dict[str, Any], Any, str | None]] = []
@@ -125,8 +198,23 @@ class SalesFunnelSyncService:
             session.commit()
         return len(parsed), len(parsed)
 
-    def _persist_account(self, payload: list[dict[str, Any]], fetched_at: datetime) -> int:
+    def _persist_account(
+        self,
+        payload: list[dict[str, Any]],
+        fetched_at: datetime,
+        period_from: date,
+        period_to: date,
+    ) -> int:
         totals: dict[date, dict[str, Any]] = {}
+        cursor = period_from
+        while cursor <= period_to:
+            totals[cursor] = {
+                "currency": None,
+                "open_count": 0, "cart_count": 0,
+                "order_count": 0, "order_sum": Decimal(0),
+                "buyout_count": 0, "buyout_sum": Decimal(0), "groups": [],
+            }
+            cursor += timedelta(days=1)
         for group in payload:
             history = group.get("history")
             if not isinstance(history, list):
@@ -137,12 +225,14 @@ class SalesFunnelSyncService:
                 if not isinstance(item, dict) or not item.get("date"):
                     raise WBParseError("WB grouped Sales Funnel history has no date")
                 day = date.fromisoformat(str(item["date"])[:10])
-                row = totals.setdefault(day, {
-                    "currency": str(currency_code) if currency_code else None,
-                    "open_count": 0, "cart_count": 0,
-                    "order_count": 0, "order_sum": Decimal(0),
-                    "buyout_count": 0, "buyout_sum": Decimal(0), "groups": [],
-                })
+                if day not in totals:
+                    raise WBParseError(
+                        f"WB grouped Sales Funnel returned {day} outside "
+                        f"requested period {period_from}..{period_to}"
+                    )
+                row = totals[day]
+                if currency_code:
+                    row["currency"] = str(currency_code)
                 row["open_count"] += int(item.get("openCount") or 0)
                 row["cart_count"] += int(item.get("cartCount") or 0)
                 row["order_count"] += int(item.get("orderCount") or 0)
@@ -177,12 +267,39 @@ class SalesFunnelSyncService:
                 session.commit()
 
 
+def _arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Synchronize WB Sales Funnel analytics")
+    parser.add_argument("--from", dest="date_from", type=date.fromisoformat)
+    parser.add_argument("--to", dest="date_to", type=date.fromisoformat)
+    parser.add_argument(
+        "--reconcile", action="store_true",
+        help="refresh the configured rolling cohort window in seven-day API batches",
+    )
+    args = parser.parse_args()
+    if (args.date_from is None) != (args.date_to is None):
+        parser.error("--from and --to must be provided together")
+    if args.reconcile and args.date_from is not None:
+        parser.error("--reconcile cannot be combined with --from/--to")
+    return args
+
+
 def main() -> None:
     configure_wb_logging(log_dir=WB_LOG_DIR, file_prefix="wb_sales_funnel")
     install_context_filter()
     logging.basicConfig(level=getattr(logging, WB_LOG_LEVEL, logging.INFO),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    print(json.dumps(SalesFunnelSyncService().sync(), ensure_ascii=False, default=str))
+    args = _arguments()
+    service = SalesFunnelSyncService()
+    date_from = args.date_from
+    date_to = args.date_to
+    if args.reconcile:
+        date_to = datetime.now(service.timezone).date()
+        date_from = date_to - timedelta(days=service.reconcile_days - 1)
+    print(json.dumps(
+        service.sync(date_from=date_from, date_to=date_to),
+        ensure_ascii=False,
+        default=str,
+    ))
 
 
 if __name__ == "__main__":

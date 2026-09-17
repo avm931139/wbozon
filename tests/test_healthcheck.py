@@ -190,6 +190,7 @@ def test_collect_checks_targets_independent_workers_instead_of_cron(monkeypatch)
         "wbozon-wb.service",
         "wbozon-wb-order-feed.timer",
         "wbozon-wb-sales-funnel.timer",
+        "wbozon-wb-sales-funnel-reconcile.timer",
     ]
     assert all(check.name != "product catalog media sync" for check in checks)
 

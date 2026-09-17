@@ -80,6 +80,7 @@ sudo systemctl enable --now \
   wbozon-wb.service \
   wbozon-wb-order-feed.timer \
   wbozon-wb-sales-funnel.timer \
+  wbozon-wb-sales-funnel-reconcile.timer \
   wbozon-telegram-relay.service \
   wbozon-telegram.service \
   wbozon-telegram-stock.timer \
@@ -94,9 +95,20 @@ sudo systemctl enable --now \
 `wbozon-telegram.service`.
 
 `wbozon-wb-sales-funnel.timer` раз в час независимо обновляет предварительные
-заказы и выкупы WB за скользящие семь дней. Оперативная страница дашборда
-не подменяет эти данные финансовыми. Закрытые отчёты реализации отображаются
+заказы и выкупы WB за скользящие семь дней. Ночной
+`wbozon-wb-sales-funnel-reconcile.timer` повторно загружает изменяемые когорты
+за последние `WB_SALES_FUNNEL_RECONCILE_DAYS` (по умолчанию 45 дней) окнами по
+семь дней — это нужно, потому что WB относит поздние выкупы к дате исходного
+заказа. Оба задания защищены общей блокировкой и не запускаются параллельно.
+Оперативная страница дашборда показывает кабинетную воронку отдельным блоком и
+не подменяет ею события заказов. Закрытые отчёты реализации отображаются
 отдельно на `/pnl`.
+
+Разовую сверку произвольного периода можно запустить вручную:
+
+```bash
+./.venv/bin/python -m wb.sales_funnel_sync --from 2026-09-01 --to 2026-09-16
+```
 
 После обновления кода проверьте, что долгоживущий Telegram-процесс перечитал его
 и почасовой отчёт содержит все три секции:
@@ -273,6 +285,7 @@ systemctl --no-pager --full status \
   wbozon-wb.service \
   wbozon-wb-order-feed.timer \
   wbozon-wb-sales-funnel.timer \
+  wbozon-wb-sales-funnel-reconcile.timer \
   wbozon-inventory@wb.service \
   wbozon-inventory@ozon.service \
   wbozon-inventory@yandex_market.service \

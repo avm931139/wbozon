@@ -351,6 +351,8 @@ def collect_checks(
     checks.append(Check(order_feed_ok, "WB Order Feed timer", order_feed_status))
     funnel_ok, funnel_status = systemctl("wbozon-wb-sales-funnel.timer")
     checks.append(Check(funnel_ok, "WB Sales Funnel timer", funnel_status))
+    reconcile_ok, reconcile_status = systemctl("wbozon-wb-sales-funnel-reconcile.timer")
+    checks.append(Check(reconcile_ok, "WB Sales Funnel reconciliation timer", reconcile_status))
     if WB_DOCUMENT_SYNC_REQUIRED:
         documents_ok, documents_status = systemctl("wbozon-wb-documents.timer")
         checks.append(Check(documents_ok, "WB documents timer", documents_status))

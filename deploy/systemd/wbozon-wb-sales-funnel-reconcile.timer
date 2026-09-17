@@ -1,0 +1,11 @@
+[Unit]
+Description=Reconcile mutable Wildberries Sales Funnel cohorts daily
+
+[Timer]
+OnCalendar=*-*-* 01:35:00 Europe/Moscow
+RandomizedDelaySec=120
+Persistent=true
+Unit=wbozon-wb-sales-funnel-reconcile.service
+
+[Install]
+WantedBy=timers.target
