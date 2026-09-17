@@ -47,10 +47,10 @@ class YandexMarketAdvertisingService:
     def sync(self, *, stat_date: date | None = None) -> dict[str, Any]:
         business_id = self._business_id()
         today = datetime.now(ZoneInfo(YANDEX_MARKET_TIMEZONE)).date()
-        stat_date = stat_date or self._target_date(today)
+        stat_date = stat_date or self._target_date(today, business_id=business_id)
         results: dict[str, Any] = {}
         errors: list[str] = []
-        sources = self._sources_for_date(stat_date)
+        sources = self._sources_for_date(stat_date, business_id=business_id)
         for source in sources:
             try:
                 report_id = self.api.generate(
@@ -77,19 +77,28 @@ class YandexMarketAdvertisingService:
             raise RuntimeError("; ".join(errors))
         return {"date": stat_date.isoformat(), "sources": results}
 
-    def _sources_for_date(self, stat_date: date) -> tuple[str, ...]:
+    def _sources_for_date(
+        self, stat_date: date, *, business_id: int | None = None
+    ) -> tuple[str, ...]:
         """Backfill only missing reports; refresh all sources on a complete day."""
+        business_id = business_id or self._business_id()
         with self.session_factory() as session:
             present = {
                 source for source, in session.query(
                     distinct(YandexMarketAdDailyStat.source)
-                ).filter(YandexMarketAdDailyStat.stat_date == stat_date).all()
+                ).filter(
+                    YandexMarketAdDailyStat.business_id == business_id,
+                    YandexMarketAdDailyStat.stat_date == stat_date,
+                ).all()
             }
         missing = tuple(source for source in self.SOURCES if source not in present)
         return missing or self.SOURCES
 
-    def _target_date(self, today: date) -> date:
+    def _target_date(
+        self, today: date, *, business_id: int | None = None
+    ) -> date:
         """Backfill one day per run, then continuously refresh recent attribution."""
+        business_id = business_id or self._business_id()
         if YANDEX_MARKET_AD_HISTORY_DAYS < 1:
             raise ValueError("YANDEX_MARKET_AD_HISTORY_DAYS must be positive")
         if YANDEX_MARKET_AD_REFRESH_DAYS < 1:
@@ -106,7 +115,10 @@ class YandexMarketAdvertisingService:
                         YandexMarketAdDailyStat.stat_date,
                         func.count(distinct(YandexMarketAdDailyStat.source)),
                     )
-                    .filter(YandexMarketAdDailyStat.stat_date.between(history_from, today))
+                    .filter(
+                        YandexMarketAdDailyStat.business_id == business_id,
+                        YandexMarketAdDailyStat.stat_date.between(history_from, today),
+                    )
                     .group_by(YandexMarketAdDailyStat.stat_date)
                     .all()
                 )
@@ -127,7 +139,10 @@ class YandexMarketAdvertisingService:
                     YandexMarketAdDailyStat.stat_date,
                     func.min(YandexMarketAdDailyStat.fetched_at),
                 )
-                .filter(YandexMarketAdDailyStat.stat_date.between(refresh_from, today))
+                .filter(
+                    YandexMarketAdDailyStat.business_id == business_id,
+                    YandexMarketAdDailyStat.stat_date.between(refresh_from, today),
+                )
                 .group_by(YandexMarketAdDailyStat.stat_date)
                 .order_by(func.min(YandexMarketAdDailyStat.fetched_at))
                 .first()
@@ -189,6 +204,12 @@ class YandexMarketAdvertisingService:
             "rows": [],
         })
         for row in rows:
+            row_business_id = int(row.get("businessId") or business_id)
+            if row_business_id != business_id:
+                raise ValueError(
+                    f"Yandex Market advertising row belongs to business "
+                    f"{row_business_id}, expected {business_id}"
+                )
             campaign_id = 0 if source == "sales_boost" else int(
                 row.get("saleCampaignId") or row.get("campaignId") or 0
             )
@@ -217,7 +238,7 @@ class YandexMarketAdvertisingService:
         now = datetime.now(timezone.utc)
         with self.session_factory() as session:
             session.query(YandexMarketAdDailyStat).filter_by(
-                stat_date=stat_date, source=source
+                business_id=business_id, stat_date=stat_date, source=source
             ).delete(synchronize_session=False)
             for campaign_id, item in grouped.items():
                 session.add(YandexMarketAdDailyStat(

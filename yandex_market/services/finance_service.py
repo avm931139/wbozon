@@ -55,7 +55,7 @@ class YandexMarketFinanceService:
     def sync(self) -> dict[str, Any]:
         business_id = self._business_id()
         today = datetime.now(ZoneInfo(YANDEX_MARKET_TIMEZONE)).date()
-        begin = self._begin(today)
+        begin = self._begin(today, business_id)
         generated = rows_received = rows_saved = 0
         cursor = begin
         while cursor <= today:
@@ -90,11 +90,15 @@ class YandexMarketFinanceService:
             raise ValueError("configure YANDEX_MARKET_BUSINESS_ID or synchronize one business")
         return int(values[0])
 
-    def _begin(self, today: date) -> date:
+    def _begin(self, today: date, business_id: int | None = None) -> date:
+        business_id = business_id or self._business_id()
         with self.session_factory() as session:
-            latest = session.query(YandexMarketFinanceTransaction.transaction_at).order_by(
-                YandexMarketFinanceTransaction.transaction_at.desc()
-            ).first()
+            latest = (
+                session.query(YandexMarketFinanceTransaction.transaction_at)
+                .filter(YandexMarketFinanceTransaction.business_id == business_id)
+                .order_by(YandexMarketFinanceTransaction.transaction_at.desc())
+                .first()
+            )
         if latest and latest[0]:
             return max(latest[0].date() - timedelta(days=self.OVERLAP_DAYS), date.fromisoformat(YANDEX_MARKET_HISTORY_FROM))
         return date.fromisoformat(YANDEX_MARKET_HISTORY_FROM)
@@ -106,6 +110,12 @@ class YandexMarketFinanceService:
             transaction_at = _datetime(raw.get("transactionDate"))
             if transaction_at is None or not begin <= transaction_at.date() <= finish:
                 continue
+            row_business_id = int(raw.get("businessId") or business_id)
+            if row_business_id != business_id:
+                raise ValueError(
+                    f"Yandex Market finance row belongs to business {row_business_id}, "
+                    f"expected {business_id}"
+                )
             transaction_type = str(raw.get("transactionType") or "").strip()
             signed = _decimal(raw.get("transactionSum"))
             canonical = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
@@ -113,9 +123,9 @@ class YandexMarketFinanceService:
             occurrences[canonical] = occurrence + 1
             parsed.append({
                 "source_hash": hashlib.sha256(
-                    f"{canonical}:{occurrence}".encode()
+                    f"{business_id}:{canonical}:{occurrence}".encode()
                 ).hexdigest(),
-                "business_id": int(raw.get("businessId") or business_id),
+                "business_id": business_id,
                 "partner_id": int(raw["partnerId"]) if raw.get("partnerId") is not None else None,
                 "transaction_at": transaction_at,
                 "transaction_id": str(raw["transactionId"]) if raw.get("transactionId") is not None else None,
@@ -133,6 +143,7 @@ class YandexMarketFinanceService:
         now = datetime.now(timezone.utc)
         with self.session_factory() as session:
             session.query(YandexMarketFinanceTransaction).filter(
+                YandexMarketFinanceTransaction.business_id == business_id,
                 YandexMarketFinanceTransaction.transaction_at >= start_at,
                 YandexMarketFinanceTransaction.transaction_at < end_at,
             ).delete(synchronize_session=False)

@@ -1,6 +1,7 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -131,3 +132,69 @@ def test_finance_datetime_is_moscow_aware_and_invalid_value_is_skipped():
     assert parsed is not None
     assert parsed.utcoffset().total_seconds() == 3 * 60 * 60
     assert _datetime("not-a-date") is None
+
+
+def test_finance_replacement_and_cursor_are_scoped_by_business(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    monkeypatch.setattr(
+        "yandex_market.services.finance_service.YANDEX_MARKET_HISTORY_FROM",
+        "2026-01-01",
+    )
+    row = {
+        "transactionDate": "06.09.2026 12:01",
+        "transactionId": 1,
+        "transactionType": "Начисление",
+        "transactionSum": 100,
+    }
+    first = YandexMarketFinanceService(
+        api=object(), session_factory=factory, business_id=111
+    )
+    second = YandexMarketFinanceService(
+        api=object(), session_factory=factory, business_id=222
+    )
+
+    first._replace([row], date(2026, 9, 6), date(2026, 9, 6), 111)
+    second._replace([row], date(2026, 9, 6), date(2026, 9, 6), 222)
+    first._replace([dict(row, transactionSum=125)], date(2026, 9, 6), date(2026, 9, 6), 111)
+
+    with factory() as session:
+        saved = session.query(YandexMarketFinanceTransaction).order_by(
+            YandexMarketFinanceTransaction.business_id
+        ).all()
+        assert [(item.business_id, item.amount) for item in saved] == [
+            (111, Decimal("125.000000")),
+            (222, Decimal("100.000000")),
+        ]
+        saved[1].transaction_at = datetime(2026, 3, 10, tzinfo=timezone.utc)
+        session.commit()
+
+    assert first._begin(date(2026, 9, 10), 111) == date(2026, 8, 30)
+    assert second._begin(date(2026, 9, 10), 222) == date(2026, 3, 3)
+
+
+def test_finance_rejects_row_from_another_business_without_deleting_data():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    service = YandexMarketFinanceService(
+        api=object(), session_factory=factory, business_id=111
+    )
+    valid = {
+        "transactionDate": "06.09.2026 12:01",
+        "transactionType": "Начисление",
+        "transactionSum": 100,
+    }
+    service._replace([valid], date(2026, 9, 6), date(2026, 9, 6), 111)
+
+    with pytest.raises(ValueError, match="belongs to business 222"):
+        service._replace(
+            [dict(valid, businessId=222)],
+            date(2026, 9, 6),
+            date(2026, 9, 6),
+            111,
+        )
+
+    with factory() as session:
+        assert session.query(YandexMarketFinanceTransaction).count() == 1

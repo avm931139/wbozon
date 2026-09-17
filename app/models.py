@@ -1514,7 +1514,8 @@ class YandexMarketAdDailyStat(Base):
     __tablename__ = "yandex_market_ad_daily_stats"
     __table_args__ = (
         UniqueConstraint(
-            "stat_date", "source", "campaign_id", name="uq_yandex_market_ad_daily_stat"
+            "business_id", "stat_date", "source", "campaign_id",
+            name="uq_yandex_market_ad_daily_stat",
         ),
     )
 
@@ -1570,7 +1571,8 @@ class YandexMarketFinanceTransaction(Base):
     __tablename__ = "yandex_market_finance_transactions"
     __table_args__ = (
         UniqueConstraint(
-            "source_hash", name="uq_yandex_market_finance_source_hash"
+            "business_id", "source_hash",
+            name="uq_yandex_market_finance_source_hash",
         ),
     )
 

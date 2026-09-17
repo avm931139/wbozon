@@ -148,6 +148,14 @@ healthcheck/operations bot. Риск считается закрытым тол�
 
 ### P1-02. Возможна потеря данных при нескольких Yandex Market business ID
 
+**Статус 17.09.2026:** исправлено в коде и миграции
+`20260917_yandex_business_scope`. Finance и advertising используют business
+scope для курсора, coverage и delete; уникальные ключи обеих таблиц включают
+`business_id`; чужой `businessId` в строке отчёта отклоняется до изменения БД.
+Production-проверка показала один бизнес, 368 рекламных и 18 173 финансовых
+строк, конфликтов будущих ключей нет. Окончательное закрытие — после применения
+миграции и успешного `alembic check` на production.
+
 **Доказательства**
 
 - `yandex_market/services/finance_service.py:93-100` ищет последнюю транзакцию без фильтра `business_id`.

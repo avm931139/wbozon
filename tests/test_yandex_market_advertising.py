@@ -212,3 +212,50 @@ def test_advertising_backfill_requests_only_missing_sources():
 
     assert service._sources_for_date(date(2026, 9, 5)) == ("shelves",)
     assert service._sources_for_date(date(2026, 9, 4)) == service.SOURCES
+
+
+def test_advertising_coverage_and_replacement_are_scoped_by_business():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    stat_date = date(2026, 9, 5)
+    with factory() as session:
+        for business_id in (111, 222):
+            for source in YandexMarketAdvertisingService.SOURCES:
+                session.add(YandexMarketAdDailyStat(
+                    stat_date=stat_date,
+                    source=source,
+                    business_id=business_id,
+                    campaign_id=0,
+                    spend=business_id,
+                    fetched_at=datetime(2026, 9, 6, tzinfo=timezone.utc),
+                ))
+        session.query(YandexMarketAdDailyStat).filter_by(
+            business_id=111, source="shelves"
+        ).delete()
+        session.commit()
+
+    first = YandexMarketAdvertisingService(
+        api=object(), session_factory=factory, business_id=111
+    )
+    second = YandexMarketAdvertisingService(
+        api=object(), session_factory=factory, business_id=222
+    )
+    assert first._sources_for_date(stat_date) == ("shelves",)
+    assert second._sources_for_date(stat_date) == second.SOURCES
+
+    first._replace(
+        "sales_boost",
+        stat_date,
+        [{"billedAmount": 999}],
+        business_id=111,
+    )
+    with factory() as session:
+        first_row = session.query(YandexMarketAdDailyStat).filter_by(
+            business_id=111, source="sales_boost"
+        ).one()
+        second_row = session.query(YandexMarketAdDailyStat).filter_by(
+            business_id=222, source="sales_boost"
+        ).one()
+        assert first_row.spend == 999
+        assert second_row.spend == 222
