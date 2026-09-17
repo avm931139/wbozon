@@ -98,7 +98,11 @@ Order cards identify their operational sources: WB Order Feed plus FBO Orders,
 Ozon Postings, and Yandex Market Orders API. Marketplace cabinet funnel exports
 are cohort analytics and can be recalculated after order creation, so they are
 shown as a separate cabinet-analytics group rather than silently mixed into the
-realtime series. WB uses its hourly seven-day Sales Funnel history. Yandex
+realtime series. The page includes this distinction as a visible note. When WB
+cabinet coverage is complete, the WB card headline uses the cabinet ordered
+quantity and amount; otherwise it explicitly falls back to operational data.
+The headline also shows the average ordered quantity and amount per calendar
+day of the selected period. WB uses its hourly seven-day Sales Funnel history. Yandex
 Market uses the official daily `shows-sales` report and refreshes a rolling
 40-day window so late delivery, cancellation and return attribution matures;
 older rows remain available as local history.
@@ -109,6 +113,10 @@ Ozon cabinet analytics also shows `ordered_units` and `revenue` from
 `/v1/analytics/data`; product units are not labelled as unique orders. WB uses
 the cabinet-wide `grouped/history` total and audits it against the sum of
 `products/history` rows.
+The cabinet block shows purchase and cancellation percentages against ordered
+product units from the same cabinet cohort. Pending orders belong to neither
+outcome. If the WB daily source has no cancellation field, the UI says that the
+value is unavailable instead of presenting a false zero.
 Advertising keeps two money layers separate: performance API spend is paired
 with attributed orders and ROAS, while actual finance charges are displayed on
 a separate line. Yandex attribution is complete only when sales boost, shows
