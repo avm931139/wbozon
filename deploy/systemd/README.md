@@ -247,6 +247,25 @@ sudo journalctl -u wbozon-ozon@communications.service -n 50 --no-pager
 sudo systemctl enable --now wbozon-ozon-communications.timer
 ```
 
+## Зашифрованное резервное копирование
+
+Backup не включается с локальным каталогом в качестве назначения. Подготовьте
+внешний SFTP/S3/B2/REST-репозиторий, установите `/etc/wbozon/backup.env` из
+[`deploy/backup.env.example`](../backup.env.example) и отдельно сохраните пароль
+Restic вне VPS. Полная первичная процедура находится в
+[`docs/VPS_RUNBOOK.md`](../../docs/VPS_RUNBOOK.md).
+
+После успешных ручных запусков `wbozon-backup.service` и
+`wbozon-backup-verify.service`:
+
+```bash
+sudo systemctl enable --now wbozon-backup.timer wbozon-backup-verify.timer
+systemctl list-timers 'wbozon-backup*' --all
+```
+
+Не задавайте `BACKUP_REQUIRED=true` до первого успешного snapshot и restore-test:
+иначе healthcheck обоснованно сообщит об отсутствующей проверенной копии.
+
 ## Проверка
 
 ```bash

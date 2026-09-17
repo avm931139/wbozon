@@ -244,6 +244,15 @@ PRODUCT_MEDIA_DOWNLOAD_WORKERS = int(
 )
 PRODUCT_MEDIA_DOWNLOAD_LIMIT = int(os.getenv("PRODUCT_MEDIA_DOWNLOAD_LIMIT", "0"))
 
+# Encrypted off-site backups. Secrets stay in /etc/wbozon/backup.env and the
+# restic password file; these settings only control health monitoring here.
+BACKUP_REQUIRED = _env_bool("BACKUP_REQUIRED", False)
+BACKUP_STATUS_DIR = os.getenv("BACKUP_STATUS_DIR", "data/backup")
+BACKUP_MAX_AGE_SECONDS = int(os.getenv("BACKUP_MAX_AGE_SECONDS", "129600"))
+BACKUP_RESTORE_MAX_AGE_SECONDS = int(
+    os.getenv("BACKUP_RESTORE_MAX_AGE_SECONDS", "3024000")
+)
+
 # Ozon inventory is realtime; 00:00 Moscow is our daily business cutoff.
 # Server timezone does not affect the snapshot schedule.
 INVENTORY_SYNC_INTERVAL_SECONDS = int(os.getenv("INVENTORY_SYNC_INTERVAL_SECONDS", "3600"))

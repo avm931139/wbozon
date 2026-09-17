@@ -28,6 +28,7 @@
 | Telegram Excel | `python -m telegram_bot --once stock-files` | `wbozon-telegram-stock.timer` | три складских файла в 09:00 МСК |
 | Личный журнал | `python -m operations_bot` | `wbozon-operations.timer` | дайджест успешных и ошибочных действий программы |
 | Healthcheck | `python -m healthcheck` | `wbozon-healthcheck.timer` | процессы, свежесть БД, срезы и доставка Telegram |
+| Зашифрованный backup | `python -m backup run/verify` | `wbozon-backup*.timer` | внешний Restic-снимок БД и файлов, периодическое тестовое восстановление |
 | Telegram relay | SSH dynamic SOCKS proxy | `wbozon-telegram-relay.service` | доступ к Telegram через старый VPS |
 
 `main.py` оставлен только как совместимый alias для `python -m wb`. Он больше не запускает Telegram в одном процессе с WB.
@@ -41,7 +42,9 @@
 - Каждый Ozon task имеет собственный advisory lock и запись в `ozon_sync_runs`.
 - Excel-файлы имеют независимые ключи доставки: уже отправленный файл не дублируется при повторе другого.
 - Личные уведомления читают завершённые события из БД через собственную очередь; недоступность Telegram не меняет результат workers.
-- Общими точками отказа остаются PostgreSQL, каталог проекта, `.venv`, `.env` и сам VPS.
+- PostgreSQL и runtime-файлы защищает зашифрованный внешний Restic-снимок; сам
+  VPS остаётся точкой отказа исполнения, но не должен быть единственной точкой
+  хранения данных.
 
 Журналы процессов также разделены: WB пишет в `logs/wb/`, Telegram — в `logs/telegram/`, остальные workers — в journal systemd и свои таблицы запусков. Два процесса не ротируют один файл одновременно.
 

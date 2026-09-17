@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 import sys
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func
 
 from app.config import (
+    BACKUP_MAX_AGE_SECONDS,
+    BACKUP_REQUIRED,
+    BACKUP_RESTORE_MAX_AGE_SECONDS,
+    BACKUP_STATUS_DIR,
     INVENTORY_SYNC_INTERVAL_SECONDS,
     INVENTORY_TIMEZONE,
     OPERATIONS_TG_BOT_TOKEN,
@@ -100,6 +106,34 @@ YANDEX_MARKET_TASK_MAX_AGES = {
     "finances": YANDEX_MARKET_FINANCE_MAX_AGE_SECONDS,
     "analytics": YANDEX_MARKET_ANALYTICS_MAX_AGE_SECONDS,
 }
+
+
+def _backup_status_check(
+    name: str,
+    path: Path,
+    current: datetime,
+    max_age_seconds: int,
+) -> Check:
+    if not path.is_file():
+        return Check(False, name, f"status file is missing: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        finished_at = datetime.fromisoformat(str(payload["finished_at"]))
+        if finished_at.tzinfo is None:
+            finished_at = finished_at.replace(tzinfo=ZoneInfo("UTC"))
+        age = current - finished_at.astimezone(current.tzinfo)
+        status = str(payload.get("status") or "unknown")
+        repository_kind = str(payload.get("repository_kind") or "unknown")
+        detail = f"{status}, age {age}, repository={repository_kind}"
+        if payload.get("error"):
+            detail += f", error={str(payload['error'])[:300]}"
+        return Check(
+            status == "completed" and timedelta(0) <= age <= timedelta(seconds=max_age_seconds),
+            name,
+            detail,
+        )
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        return Check(False, name, f"invalid status file: {type(exc).__name__}: {exc}")
 
 
 def _price_sync_checks(session, current: datetime) -> list[Check]:
@@ -332,6 +366,24 @@ def collect_checks(
     if operations_enabled:
         operations_ok, operations_status = systemctl("wbozon-operations.timer")
         checks.append(Check(operations_ok, "private operations timer", operations_status))
+    if BACKUP_REQUIRED:
+        backup_ok, backup_status = systemctl("wbozon-backup.timer")
+        checks.append(Check(backup_ok, "encrypted off-site backup timer", backup_status))
+        restore_ok, restore_status = systemctl("wbozon-backup-verify.timer")
+        checks.append(Check(restore_ok, "backup restore verification timer", restore_status))
+        status_dir = Path(BACKUP_STATUS_DIR)
+        checks.append(_backup_status_check(
+            "encrypted off-site backup",
+            status_dir / "backup-status.json",
+            current,
+            BACKUP_MAX_AGE_SECONDS,
+        ))
+        checks.append(_backup_status_check(
+            "backup restore verification",
+            status_dir / "restore-status.json",
+            current,
+            BACKUP_RESTORE_MAX_AGE_SECONDS,
+        ))
 
     with SessionLocal() as session:
         latest_order_feed = session.query(WBOrderFeedSyncRun).order_by(

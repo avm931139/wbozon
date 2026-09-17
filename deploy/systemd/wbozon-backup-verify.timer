@@ -1,0 +1,11 @@
+[Unit]
+Description=Verify wbozon backup restoration monthly
+
+[Timer]
+OnCalendar=*-*-01 05:30:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=15min
+Unit=wbozon-backup-verify.service
+
+[Install]
+WantedBy=timers.target

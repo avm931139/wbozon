@@ -357,15 +357,75 @@ Git содержит код и миграции, но не позволяет в
 - доступ владельца к GitHub и BotFather;
 - перечень активных API-ключей кабинетов и порядок их отзыва.
 
-Пример создания дампа без вывода данных на экран:
+## Автоматический зашифрованный backup
+
+Для production используется Restic во внешнем SFTP/S3/B2/REST-хранилище. Репозиторий
+на диске этого же VPS запрещён настройкой `BACKUP_REQUIRE_OFFSITE=true` и не считается
+резервной копией.
+
+Сначала установите инструмент, каталоги и units:
 
 ```bash
-sudo install -d -m 700 -o postgres -g postgres /var/backups/wbozon
-sudo -u postgres pg_dump -Fc -f /var/backups/wbozon/app_db_YYYY-MM-DD.dump app_db
-sudo -u postgres pg_restore --list /var/backups/wbozon/app_db_YYYY-MM-DD.dump
+cd /home/wbozon/wbozon
+sudo apt-get update
+sudo apt-get install -y restic
+sudo install -d -m 700 -o wbozon -g wbozon /var/backups/wbozon
+sudo install -d -m 700 -o wbozon -g wbozon /home/wbozon/wbozon/data/backup
+sudo install -d -m 700 -o wbozon -g wbozon /etc/wbozon
+sudo install -m 600 -o wbozon -g wbozon deploy/backup.env.example /etc/wbozon/backup.env
+sudo install -m 644 deploy/systemd/wbozon-backup*.service /etc/systemd/system/
+sudo install -m 644 deploy/systemd/wbozon-backup*.timer /etc/systemd/system/
+sudo systemctl daemon-reload
 ```
 
-Замените дату в имени вручную. После проверки скопируйте дамп с VPS в зашифрованное внешнее хранилище. Локальный файл на том же VPS не защищает от потери самого сервера. Восстановление БД является отдельной потенциально разрушительной операцией и должно выполняться только в новую или заранее проверенную целевую базу.
+Создайте пароль Restic, сохраните его копию в менеджере паролей и отредактируйте
+`/etc/wbozon/backup.env`: укажите выданный провайдером внешний `RESTIC_REPOSITORY`,
+его credentials и пароль отдельной проверочной БД.
+
+```bash
+openssl rand -base64 48 | sudo tee /etc/wbozon/restic-password >/dev/null
+sudo chown wbozon:wbozon /etc/wbozon/restic-password
+sudo chmod 600 /etc/wbozon/restic-password
+sudoedit /etc/wbozon/backup.env
+sudo -u postgres createdb --owner=wbozon wbozon_restore_test
+```
+
+Если проверочная БД уже существует, `createdb` завершится ошибкой `already exists` —
+это не повод удалять её. Проверьте владельца и продолжайте. Затем инициализируйте
+репозиторий, сделайте первый snapshot и реальное тестовое восстановление:
+
+```bash
+sudo systemctl start wbozon-backup-init.service
+sudo systemctl start wbozon-backup.service
+sudo systemctl start wbozon-backup-verify.service
+sudo journalctl -u wbozon-backup-init.service -u wbozon-backup.service -u wbozon-backup-verify.service -n 100 --no-pager
+```
+
+Только когда обе последние задачи завершились успешно, добавьте в основной `.env`
+`BACKUP_REQUIRED=true`, включите расписание и запустите healthcheck:
+
+```bash
+sudo systemctl enable --now wbozon-backup.timer wbozon-backup-verify.timer
+sudo systemctl start wbozon-healthcheck.service
+systemctl list-timers 'wbozon-backup*' --all
+sudo journalctl -u wbozon-healthcheck.service -n 100 --no-pager
+```
+
+Ежедневно сохраняются PostgreSQL, `data/`, `.env` и `/etc/wbozon/backup.env`;
+пароль Restic намеренно не помещается внутрь той же копии. Retention — 7 daily,
+5 weekly, 12 monthly. Первый день месяца последний snapshot разворачивается в
+`wbozon_restore_test`, проверяются Alembic revision и наличие таблиц. Production-БД
+эта операция не изменяет. Подробности — в [`backup/README.md`](../backup/README.md).
+
+Аварийный ручной `pg_dump` допустим только как временная мера перед изменениями:
+
+```bash
+sudo install -d -m 700 -o postgres -g postgres /var/backups/wbozon-manual
+sudo -u postgres pg_dump -Fc -f /var/backups/wbozon-manual/app_db.dump app_db
+sudo -u postgres pg_restore --list /var/backups/wbozon-manual/app_db.dump
+```
+
+Он остаётся на том же VPS и не заменяет внешний backup.
 
 ## Что где запускать
 
@@ -393,7 +453,9 @@ systemctl --no-pager --full status \
   wbozon-inventory@yandex_market.service \
   wbozon-telegram.service \
   wbozon-telegram-relay.service \
-  wbozon-operations.timer
+  wbozon-operations.timer \
+  wbozon-backup.timer \
+  wbozon-backup-verify.timer
 sudo systemctl start wbozon-healthcheck.service
 sudo journalctl -u wbozon-healthcheck.service -n 100 --no-pager
 ```

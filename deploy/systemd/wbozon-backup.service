@@ -1,0 +1,21 @@
+[Unit]
+Description=wbozon encrypted off-site backup
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wbozon
+Group=wbozon
+WorkingDirectory=/home/wbozon/wbozon
+EnvironmentFile=/home/wbozon/wbozon/.env
+EnvironmentFile=/etc/wbozon/backup.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/wbozon/wbozon/.venv/bin/python -m backup run
+TimeoutStartSec=8h
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/backups/wbozon /home/wbozon/wbozon/data/backup

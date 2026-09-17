@@ -9,6 +9,7 @@ from app.models import HealthcheckRun, OzonSyncRun, WBDocumentSyncRun, YandexMar
 from healthcheck.__main__ import (
     Check,
     OZON_TASK_MAX_AGES,
+    _backup_status_check,
     _error_message,
     _failure_signature,
     _ozon_task_checks,
@@ -17,6 +18,37 @@ from healthcheck.__main__ import (
     collect_checks,
     record_healthcheck,
 )
+
+
+def test_backup_status_check_accepts_fresh_completed_status(tmp_path):
+    now = datetime(2026, 9, 17, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    status = tmp_path / "backup-status.json"
+    status.write_text(
+        '{"status":"completed","finished_at":"2026-09-17T08:30:00+00:00",'
+        '"repository_kind":"sftp","error":null}',
+        encoding="utf-8",
+    )
+
+    check = _backup_status_check("backup", status, now, 7200)
+
+    assert check.ok is True
+    assert "repository=sftp" in check.detail
+
+
+def test_backup_status_check_rejects_failed_or_missing_status(tmp_path):
+    now = datetime(2026, 9, 17, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    missing = _backup_status_check("backup", tmp_path / "missing.json", now, 7200)
+    assert missing.ok is False
+
+    status = tmp_path / "restore-status.json"
+    status.write_text(
+        '{"status":"failed","finished_at":"2026-09-17T08:30:00+00:00",'
+        '"repository_kind":"s3","error":"restore failed"}',
+        encoding="utf-8",
+    )
+    failed = _backup_status_check("restore", status, now, 7200)
+    assert failed.ok is False
+    assert "restore failed" in failed.detail
 
 
 class Result:

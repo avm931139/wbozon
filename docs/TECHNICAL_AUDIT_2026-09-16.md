@@ -124,6 +124,12 @@ constraints/indexes и комментарии, а тип `yandex_market_sales_an
 
 ### P1-01. Нет автоматизированного и проверяемого резервного копирования
 
+**Статус 17.09.2026:** код и эксплуатационный контур реализованы: Restic,
+ежедневный внешний зашифрованный snapshot, retention 7/5/12, repository check,
+ежемесячное восстановление в отдельную БД, systemd timers и контроль через
+healthcheck/operations bot. Риск считается закрытым только после настройки
+внешнего назначения на production и первого успешного `run` + `verify`.
+
 **Доказательства**
 
 В `docs/VPS_RUNBOOK.md:350-368` приведён только ручной пример `pg_dump`; backup service/timer, шифрование, ротация, внешний upload и автоматическая проверка восстановления в `deploy/` отсутствуют. Кроме PostgreSQL существуют важные файлы в `data/wb/documents`, `data/ozon/accounting`, `data/product_media` и reconciliation-каталогах.

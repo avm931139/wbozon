@@ -1,0 +1,11 @@
+[Unit]
+Description=Run encrypted wbozon backup daily after nightly synchronization
+
+[Timer]
+OnCalendar=*-*-* 04:40:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=10min
+Unit=wbozon-backup.service
+
+[Install]
+WantedBy=timers.target
