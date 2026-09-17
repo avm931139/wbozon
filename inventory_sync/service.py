@@ -7,9 +7,10 @@ import zlib
 from datetime import date, datetime, timezone
 from typing import Any, Callable
 
-from sqlalchemy import text
+from sqlalchemy import insert, literal, select, text
 
 from app.db import SessionLocal
+from app.query_utils import rows_by_composite_keys
 from app.config import YANDEX_MARKET_CAMPAIGN_IDS
 from app.models import (
     InventorySyncRun,
@@ -271,7 +272,19 @@ class InventorySyncService:
     def _persist_wb_fbs(session: Any, items: list[dict[str, Any]]) -> int:
         sizes = {int(row.chrt_id): row for row in session.query(WBProductSize).all()}
         warehouses = {int(row.wb_id): row for row in session.query(WBFBSWarehouse).all()}
-        existing = {(row.sku, row.warehouse_id): row for row in session.query(WBFBSStock).all()}
+        incoming_keys = {
+            (str(item["sku"]), warehouses[int(item["warehouseId"])].id)
+            for item in items
+            if item.get("sku") is not None
+            and item.get("warehouseId") is not None
+            and int(item["warehouseId"]) in warehouses
+        }
+        session.query(WBFBSStock).update(
+            {WBFBSStock.quantity: 0}, synchronize_session=False
+        )
+        existing = rows_by_composite_keys(
+            session, WBFBSStock, (WBFBSStock.sku, WBFBSStock.warehouse_id), incoming_keys
+        )
         retained: set[tuple[str, int]] = set()
 
         for item in items:
@@ -295,10 +308,6 @@ class InventorySyncService:
             row.quantity = int(item.get("amount", item.get("quantity", item.get("stock", 0))) or 0)
             row.raw_data = item
 
-        for key, row in existing.items():
-            if key not in retained:
-                row.quantity = 0
-                row.raw_data = {**(row.raw_data or {}), "amount": 0, "zeroed_by_inventory_sync": True}
         return len(retained)
 
     @staticmethod
@@ -316,7 +325,27 @@ class InventorySyncService:
                 warehouses[key] = warehouse
         session.flush()
 
-        existing = {(row.size_id, row.warehouse_id): row for row in session.query(WBFboStock).all()}
+        incoming_keys = {
+            (sizes[int(item["chrtId"])].id, warehouses[InventorySyncService._fbo_warehouse_key(item)].id)
+            for item in items
+            if item.get("chrtId") is not None
+            and int(item["chrtId"]) in sizes
+            and InventorySyncService._fbo_warehouse_key(item) in warehouses
+        }
+        session.query(WBFboStock).update(
+            {
+                WBFboStock.quantity: 0,
+                WBFboStock.in_way_to_client: 0,
+                WBFboStock.in_way_from_client: 0,
+            },
+            synchronize_session=False,
+        )
+        existing = rows_by_composite_keys(
+            session,
+            WBFboStock,
+            (WBFboStock.size_id, WBFboStock.warehouse_id),
+            incoming_keys,
+        )
         retained: set[tuple[int, int]] = set()
         for item in items:
             chrt_id = item.get("chrtId")
@@ -338,23 +367,22 @@ class InventorySyncService:
             row.in_way_from_client = int(item.get("inWayFromClient") or 0)
             row.raw_data = item
 
-        for key, row in existing.items():
-            if key not in retained:
-                row.quantity = 0
-                row.in_way_to_client = 0
-                row.in_way_from_client = 0
-                row.raw_data = {
-                    **(row.raw_data or {}),
-                    "quantity": 0,
-                    "inWayToClient": 0,
-                    "inWayFromClient": 0,
-                    "zeroed_by_inventory_sync": True,
-                }
         return len(retained)
 
     @staticmethod
     def _persist_ozon(session: Any, items: list[dict[str, Any]], captured_at: datetime) -> int:
-        existing = {(int(row.product_id), row.stock_type): row for row in session.query(OzonStock).all()}
+        incoming_keys = {
+            (int(item["product_id"]), str(stock.get("type") or "unknown").lower())
+            for item in items if item.get("product_id") is not None
+            for stock in (item.get("stocks") or []) if isinstance(stock, dict)
+        }
+        session.query(OzonStock).update(
+            {OzonStock.present: 0, OzonStock.reserved: 0, OzonStock.fetched_at: captured_at},
+            synchronize_session=False,
+        )
+        existing = rows_by_composite_keys(
+            session, OzonStock, (OzonStock.product_id, OzonStock.stock_type), incoming_keys
+        )
         retained: set[tuple[int, str]] = set()
         for item in items:
             product_id = item.get("product_id")
@@ -377,12 +405,6 @@ class InventorySyncService:
                 row.raw_data = stock
                 row.fetched_at = captured_at
 
-        for key, row in existing.items():
-            if key not in retained:
-                row.present = 0
-                row.reserved = 0
-                row.raw_data = {**(row.raw_data or {}), "present": 0, "reserved": 0, "zeroed_by_inventory_sync": True}
-                row.fetched_at = captured_at
         return len(retained)
 
     @staticmethod
@@ -435,10 +457,32 @@ class InventorySyncService:
 
         session.flush()
 
-        existing = {
-            (int(row.product_id), row.warehouse_id, row.stock_type): row
-            for row in session.query(OzonWarehouseStock).all()
+        incoming_keys = {
+            (
+                int(item["product_id"]),
+                warehouses[int(item["warehouse_id"])].id,
+                str(item["_stock_type"]),
+            )
+            for item in items
         }
+        session.query(OzonWarehouseStock).update(
+            {
+                OzonWarehouseStock.present: 0,
+                OzonWarehouseStock.reserved: 0,
+                OzonWarehouseStock.fetched_at: captured_at,
+            },
+            synchronize_session=False,
+        )
+        existing = rows_by_composite_keys(
+            session,
+            OzonWarehouseStock,
+            (
+                OzonWarehouseStock.product_id,
+                OzonWarehouseStock.warehouse_id,
+                OzonWarehouseStock.stock_type,
+            ),
+            incoming_keys,
+        )
         retained: set[tuple[int, int, str]] = set()
         for item in items:
             warehouse = warehouses[int(item["warehouse_id"])]
@@ -464,17 +508,6 @@ class InventorySyncService:
             row.raw_data = raw_data
             row.fetched_at = captured_at
 
-        for key, row in existing.items():
-            if key not in retained:
-                row.present = 0
-                row.reserved = 0
-                row.raw_data = {
-                    **(row.raw_data or {}),
-                    "present": 0,
-                    "reserved": 0,
-                    "zeroed_by_inventory_sync": True,
-                }
-                row.fetched_at = captured_at
         return len(retained)
 
     @staticmethod
@@ -483,10 +516,29 @@ class InventorySyncService:
         items: list[dict[str, Any]],
         captured_at: datetime,
     ) -> int:
-        existing = {
-            (int(row.campaign_id), int(row.warehouse_id), row.offer_id, row.stock_type): row
-            for row in session.query(YandexMarketStock).all()
+        incoming_keys = {
+            (
+                int(item["campaignId"]), int(item["warehouseId"]), str(item["offerId"]),
+                str(stock["type"]).upper(),
+            )
+            for item in items
+            for stock in (item.get("stocks") or []) if isinstance(stock, dict)
         }
+        session.query(YandexMarketStock).update(
+            {YandexMarketStock.count: 0, YandexMarketStock.fetched_at: captured_at},
+            synchronize_session=False,
+        )
+        existing = rows_by_composite_keys(
+            session,
+            YandexMarketStock,
+            (
+                YandexMarketStock.campaign_id,
+                YandexMarketStock.warehouse_id,
+                YandexMarketStock.offer_id,
+                YandexMarketStock.stock_type,
+            ),
+            incoming_keys,
+        )
         retained: set[tuple[int, int, str, str]] = set()
         for item in items:
             campaign_id = int(item["campaignId"])
@@ -519,14 +571,6 @@ class InventorySyncService:
                 row.raw_data = item
                 row.fetched_at = captured_at
 
-        for key, row in existing.items():
-            if key not in retained:
-                row.count = 0
-                row.raw_data = {
-                    **(row.raw_data or {}),
-                    "zeroed_by_inventory_sync": True,
-                }
-                row.fetched_at = captured_at
         return len(retained)
 
     @staticmethod
@@ -537,53 +581,58 @@ class InventorySyncService:
         marketplace: str,
     ) -> None:
         if marketplace in {"all", "wb"}:
-            for row in session.query(WBFBSStock).all():
-                session.add(WBFBSStockSnapshot(
-                    snapshot_date=snapshot_date, captured_at=captured_at, size_id=row.size_id,
-                    warehouse_id=row.warehouse_id, sku=row.sku, quantity=row.quantity, raw_data=row.raw_data,
-                ))
-            for row in session.query(WBFboStock).all():
-                session.add(WBFboStockSnapshot(
-                    snapshot_date=snapshot_date, captured_at=captured_at, size_id=row.size_id,
-                    warehouse_id=row.warehouse_id, quantity=row.quantity,
-                    in_way_to_client=row.in_way_to_client, in_way_from_client=row.in_way_from_client,
-                    raw_data=row.raw_data,
-                ))
+            InventorySyncService._insert_snapshot_from_current(
+                session, WBFBSStockSnapshot, WBFBSStock, snapshot_date, captured_at,
+                ("size_id", "warehouse_id", "sku", "quantity", "raw_data"),
+            )
+            InventorySyncService._insert_snapshot_from_current(
+                session, WBFboStockSnapshot, WBFboStock, snapshot_date, captured_at,
+                (
+                    "size_id", "warehouse_id", "quantity", "in_way_to_client",
+                    "in_way_from_client", "raw_data",
+                ),
+            )
         if marketplace in {"all", "ozon"}:
-            for row in session.query(OzonStock).all():
-                session.add(OzonStockSnapshot(
-                    snapshot_date=snapshot_date, captured_at=captured_at, product_id=row.product_id,
-                    offer_id=row.offer_id, stock_type=row.stock_type, present=row.present,
-                    reserved=row.reserved, raw_data=row.raw_data,
-                ))
-            for row in session.query(OzonWarehouseStock).all():
-                session.add(OzonWarehouseStockSnapshot(
-                    snapshot_date=snapshot_date,
-                    captured_at=captured_at,
-                    product_id=row.product_id,
-                    offer_id=row.offer_id,
-                    sku=row.sku,
-                    warehouse_id=row.warehouse_id,
-                    stock_type=row.stock_type,
-                    present=row.present,
-                    reserved=row.reserved,
-                    raw_data=row.raw_data,
-                ))
+            InventorySyncService._insert_snapshot_from_current(
+                session, OzonStockSnapshot, OzonStock, snapshot_date, captured_at,
+                ("product_id", "offer_id", "stock_type", "present", "reserved", "raw_data"),
+            )
+            InventorySyncService._insert_snapshot_from_current(
+                session, OzonWarehouseStockSnapshot, OzonWarehouseStock,
+                snapshot_date, captured_at,
+                (
+                    "product_id", "offer_id", "sku", "warehouse_id", "stock_type",
+                    "present", "reserved", "raw_data",
+                ),
+            )
         if marketplace in {"all", "yandex_market"}:
-            for row in session.query(YandexMarketStock).all():
-                session.add(YandexMarketStockSnapshot(
-                    snapshot_date=snapshot_date,
-                    captured_at=captured_at,
-                    campaign_id=row.campaign_id,
-                    warehouse_id=row.warehouse_id,
-                    offer_id=row.offer_id,
-                    stock_type=row.stock_type,
-                    count=row.count,
-                    turnover=row.turnover,
-                    turnover_days=row.turnover_days,
-                    source_updated_at=row.source_updated_at,
-                    raw_data=row.raw_data,
-                ))
+            InventorySyncService._insert_snapshot_from_current(
+                session, YandexMarketStockSnapshot, YandexMarketStock,
+                snapshot_date, captured_at,
+                (
+                    "campaign_id", "warehouse_id", "offer_id", "stock_type", "count",
+                    "turnover", "turnover_days", "source_updated_at", "raw_data",
+                ),
+            )
+
+    @staticmethod
+    def _insert_snapshot_from_current(
+        session: Any,
+        snapshot_model: Any,
+        current_model: Any,
+        snapshot_date: date,
+        captured_at: datetime,
+        copied_columns: tuple[str, ...],
+    ) -> None:
+        target_columns = ["snapshot_date", "captured_at", *copied_columns]
+        source_values = [
+            literal(snapshot_date),
+            literal(captured_at),
+            *(getattr(current_model, name) for name in copied_columns),
+        ]
+        session.execute(
+            insert(snapshot_model).from_select(target_columns, select(*source_values))
+        )
 
     @staticmethod
     def _ozon_skus(items: list[dict[str, Any]]) -> list[int]:

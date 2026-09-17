@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.db import SessionLocal
+from app.query_utils import rows_by_keys
 from app.models import (
     WBFinancialAcquiringReport,
     WBFinancialAcquiringRow,
@@ -39,7 +40,12 @@ class FinanceService:
     def sync_sales_reports(self, date_from: date = date(2025, 1, 1), date_to: date | None = None) -> int:
         rows = self.api.sales_reports(date_from, date_to or date.today())
         with SessionLocal() as session:
-            existing = {x.report_wb_id: x for x in session.query(WBFinancialSalesReport).all()}
+            existing = rows_by_keys(
+                session,
+                WBFinancialSalesReport,
+                WBFinancialSalesReport.report_wb_id,
+                (int(item["reportId"]) for item in rows),
+            )
             for item in rows:
                 report_id = int(item["reportId"])
                 row = existing.get(report_id)
@@ -53,9 +59,25 @@ class FinanceService:
     def sync_sales_details(self, date_from: date = date(2024, 1, 29), date_to: date | None = None) -> int:
         rows = self.api.sales_details(date_from, date_to or date.today())
         with SessionLocal() as session:
-            reports = {x.report_wb_id: x for x in session.query(WBFinancialSalesReport).all()}
-            products = {x.nm_id: x.id for x in session.query(WBProduct).all()}
-            existing = {x.rrd_id: x for x in session.query(WBFinancialSalesRow).all()}
+            reports = rows_by_keys(
+                session,
+                WBFinancialSalesReport,
+                WBFinancialSalesReport.report_wb_id,
+                (int(item["reportId"]) for item in rows),
+            )
+            product_rows = rows_by_keys(
+                session,
+                WBProduct,
+                WBProduct.nm_id,
+                (int(item.get("nmId") or 0) or None for item in rows),
+            )
+            products = {nm_id: product.id for nm_id, product in product_rows.items()}
+            existing = rows_by_keys(
+                session,
+                WBFinancialSalesRow,
+                WBFinancialSalesRow.rrd_id,
+                (int(item["rrdId"]) for item in rows),
+            )
             touched: set[int] = set()
             for item in rows:
                 report_wb_id = int(item["reportId"])
@@ -81,7 +103,12 @@ class FinanceService:
     def sync_acquiring_reports(self, date_from: date = date(2025, 1, 1), date_to: date | None = None) -> int:
         rows = self.api.acquiring_reports(date_from, date_to or date.today())
         with SessionLocal() as session:
-            existing = {x.report_wb_id: x for x in session.query(WBFinancialAcquiringReport).all()}
+            existing = rows_by_keys(
+                session,
+                WBFinancialAcquiringReport,
+                WBFinancialAcquiringReport.report_wb_id,
+                (int(item["reportId"]) for item in rows),
+            )
             for item in rows:
                 report_id = int(item["reportId"]); row = existing.get(report_id)
                 if row is None:
@@ -94,8 +121,18 @@ class FinanceService:
     def sync_acquiring_details(self, date_from: date = date(2025, 1, 1), date_to: date | None = None) -> int:
         rows = self.api.acquiring_details(date_from, date_to or date.today())
         with SessionLocal() as session:
-            reports = {x.report_wb_id: x for x in session.query(WBFinancialAcquiringReport).all()}
-            existing = {x.rrd_id: x for x in session.query(WBFinancialAcquiringRow).all()}
+            reports = rows_by_keys(
+                session,
+                WBFinancialAcquiringReport,
+                WBFinancialAcquiringReport.report_wb_id,
+                (int(item["reportId"]) for item in rows),
+            )
+            existing = rows_by_keys(
+                session,
+                WBFinancialAcquiringRow,
+                WBFinancialAcquiringRow.rrd_id,
+                (int(item["rrdId"]) for item in rows),
+            )
             touched: set[int] = set()
             for item in rows:
                 report = reports.get(int(item["reportId"]))

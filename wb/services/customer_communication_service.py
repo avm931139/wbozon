@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import case, func
+
 from app.config import WB_FEEDBACK_RESPONSE_SLA_HOURS, WB_QUESTION_RESPONSE_SLA_HOURS
 from app.db import SessionLocal
 from app.models import (
@@ -12,6 +14,7 @@ from app.models import (
     WBCustomerQuestionAnswer,
     WBProduct,
 )
+from app.query_utils import rows_by_keys
 from wb.customer_communications import CustomerCommunicationsAPI
 
 
@@ -66,9 +69,27 @@ class CustomerCommunicationService:
     @staticmethod
     def _persist_questions(items: list[dict[str, Any]], processed: bool) -> int:
         with SessionLocal() as session:
-            existing = {x.question_wb_id: x for x in session.query(WBCustomerQuestion).all()}
-            answer_versions = {(x.question_id, x.answer_created_date, x.text) for x in session.query(WBCustomerQuestionAnswer).all()}
-            products = {x.nm_id: x.id for x in session.query(WBProduct).all()}
+            question_ids = [str(item["id"]) for item in items]
+            existing = rows_by_keys(
+                session, WBCustomerQuestion, WBCustomerQuestion.question_wb_id, question_ids
+            )
+            existing_row_ids = [row.id for row in existing.values()]
+            answer_versions = {
+                (row.question_id, row.answer_created_date, row.text)
+                for row in session.query(WBCustomerQuestionAnswer).filter(
+                    WBCustomerQuestionAnswer.question_id.in_(existing_row_ids)
+                )
+            } if existing_row_ids else set()
+            nm_ids = [
+                int((item.get("productDetails") or {}).get("nmId") or 0)
+                for item in items
+            ]
+            products = {
+                nm_id: row.id
+                for nm_id, row in rows_by_keys(
+                    session, WBProduct, WBProduct.nm_id, nm_ids
+                ).items()
+            }
             for item in items:
                 wb_id = str(item["id"]); row = existing.get(wb_id)
                 is_new = row is None
@@ -92,9 +113,27 @@ class CustomerCommunicationService:
     @staticmethod
     def _persist_feedbacks(items: list[dict[str, Any]], processed: bool) -> int:
         with SessionLocal() as session:
-            existing = {x.feedback_wb_id: x for x in session.query(WBCustomerFeedback).all()}
-            answer_versions = {(x.feedback_id, x.answer_created_date, x.text) for x in session.query(WBCustomerFeedbackAnswer).all()}
-            products = {x.nm_id: x.id for x in session.query(WBProduct).all()}
+            feedback_ids = [str(item["id"]) for item in items]
+            existing = rows_by_keys(
+                session, WBCustomerFeedback, WBCustomerFeedback.feedback_wb_id, feedback_ids
+            )
+            existing_row_ids = [row.id for row in existing.values()]
+            answer_versions = {
+                (row.feedback_id, row.answer_created_date, row.text)
+                for row in session.query(WBCustomerFeedbackAnswer).filter(
+                    WBCustomerFeedbackAnswer.feedback_id.in_(existing_row_ids)
+                )
+            } if existing_row_ids else set()
+            nm_ids = [
+                int((item.get("productDetails") or {}).get("nmId") or 0)
+                for item in items
+            ]
+            products = {
+                nm_id: row.id
+                for nm_id, row in rows_by_keys(
+                    session, WBProduct, WBProduct.nm_id, nm_ids
+                ).items()
+            }
             for item in items:
                 wb_id = str(item["id"]); row = existing.get(wb_id)
                 is_new = row is None
@@ -123,8 +162,38 @@ class CustomerCommunicationService:
     @staticmethod
     def quality_summary() -> dict[str, Any]:
         with SessionLocal() as session:
-            questions = session.query(WBCustomerQuestion).all(); feedbacks = session.query(WBCustomerFeedback).all()
-        def metrics(rows: list[Any]) -> dict[str, Any]:
-            answered = [x for x in rows if x.is_answered]; response = [x.response_seconds for x in answered if x.response_seconds is not None]; scores = [x.answer_quality_score for x in answered if x.answer_quality_score is not None]
-            return {"total": len(rows), "answered": len(answered), "overdue": sum(x.sla_breached and not x.is_answered for x in rows), "sla_breached": sum(x.sla_breached for x in rows), "avg_response_hours": round(sum(response) / len(response) / 3600, 2) if response else None, "avg_quality_score": round(sum(scores) / len(scores), 1) if scores else None}
-        return {"questions": metrics(questions), "feedbacks": metrics(feedbacks)}
+            return {
+                "questions": CustomerCommunicationService._quality_metrics(
+                    session, WBCustomerQuestion
+                ),
+                "feedbacks": CustomerCommunicationService._quality_metrics(
+                    session, WBCustomerFeedback
+                ),
+            }
+
+    @staticmethod
+    def _quality_metrics(session: Any, model: Any) -> dict[str, Any]:
+        row = session.query(
+            func.count(model.id),
+            func.sum(case((model.is_answered.is_(True), 1), else_=0)),
+            func.sum(case((model.sla_breached.is_(True) & model.is_answered.is_(False), 1), else_=0)),
+            func.sum(case((model.sla_breached.is_(True), 1), else_=0)),
+            func.avg(model.response_seconds),
+            func.avg(model.answer_quality_score),
+        ).one()
+        avg_response_seconds = row[4]
+        avg_quality_score = row[5]
+        return {
+            "total": int(row[0] or 0),
+            "answered": int(row[1] or 0),
+            "overdue": int(row[2] or 0),
+            "sla_breached": int(row[3] or 0),
+            "avg_response_hours": (
+                round(float(avg_response_seconds) / 3600, 2)
+                if avg_response_seconds is not None else None
+            ),
+            "avg_quality_score": (
+                round(float(avg_quality_score), 1)
+                if avg_quality_score is not None else None
+            ),
+        }

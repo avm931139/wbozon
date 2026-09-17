@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func
 
 from app.db import SessionLocal
+from app.query_utils import rows_by_keys
 from app.models import (
     WBFinancialSalesReport,
     WBOperationalOrder,
@@ -70,8 +71,20 @@ class SalesService:
     def sync_orders(self, date_from: date | datetime | str) -> int:
         items = self.api.orders(date_from)
         with SessionLocal() as session:
-            existing = {row.srid: row for row in session.query(WBOperationalOrder).all()}
-            products = {int(row[0]): int(row[1]) for row in session.query(WBProduct.nm_id, WBProduct.id).all()}
+            existing = rows_by_keys(
+                session,
+                WBOperationalOrder,
+                WBOperationalOrder.srid,
+                (str(item.get("srid") or "") or None for item in items),
+            )
+            product_rows = rows_by_keys(
+                session,
+                WBProduct,
+                WBProduct.nm_id,
+                (int(item.get("nmId") or 0) or None for item in items),
+            )
+            products = {int(nm_id): int(row.id) for nm_id, row in product_rows.items()}
+            fetched_at = datetime.now(MOSCOW).replace(tzinfo=None)
             for item in items:
                 srid = str(item.get("srid") or "")
                 order_date = _dt(item.get("date")); last_change = _dt(item.get("lastChangeDate"))
@@ -88,15 +101,27 @@ class SalesService:
                 row.warehouse_name = item.get("warehouseName"); row.warehouse_type = item.get("warehouseType")
                 row.supplier_article = item.get("supplierArticle"); row.barcode = item.get("barcode")
                 row.finished_price = _money(item.get("finishedPrice")); row.price_with_discount = _money(item.get("priceWithDisc"))
-                row.raw_data = item; row.fetched_at = datetime.now(MOSCOW).replace(tzinfo=None)
+                row.raw_data = item; row.fetched_at = fetched_at
             session.commit()
         return len(items)
 
     def sync_sales(self, date_from: date | datetime | str) -> int:
         items = self.api.sales(date_from)
         with SessionLocal() as session:
-            existing = {row.sale_id: row for row in session.query(WBOperationalSale).all()}
-            products = {int(row[0]): int(row[1]) for row in session.query(WBProduct.nm_id, WBProduct.id).all()}
+            existing = rows_by_keys(
+                session,
+                WBOperationalSale,
+                WBOperationalSale.sale_id,
+                (str(item.get("saleID") or "") or None for item in items),
+            )
+            product_rows = rows_by_keys(
+                session,
+                WBProduct,
+                WBProduct.nm_id,
+                (int(item.get("nmId") or 0) or None for item in items),
+            )
+            products = {int(nm_id): int(row.id) for nm_id, row in product_rows.items()}
+            fetched_at = datetime.now(MOSCOW).replace(tzinfo=None)
             for item in items:
                 sale_id = str(item.get("saleID") or ""); srid = str(item.get("srid") or "")
                 event_date = _dt(item.get("date")); last_change = _dt(item.get("lastChangeDate"))
@@ -113,7 +138,7 @@ class SalesService:
                 row.warehouse_name = item.get("warehouseName"); row.warehouse_type = item.get("warehouseType")
                 row.supplier_article = item.get("supplierArticle"); row.barcode = item.get("barcode")
                 row.finished_price = _money(item.get("finishedPrice")); row.price_with_discount = _money(item.get("priceWithDisc")); row.for_pay = _money(item.get("forPay"))
-                row.raw_data = item; row.fetched_at = datetime.now(MOSCOW).replace(tzinfo=None)
+                row.raw_data = item; row.fetched_at = fetched_at
             session.commit()
         return len(items)
 

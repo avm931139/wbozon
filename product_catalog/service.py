@@ -17,6 +17,7 @@ from app.config import (
     PRODUCT_MEDIA_DOWNLOAD_WORKERS,
 )
 from app.db import SessionLocal
+from app.query_utils import rows_by_composite_keys
 from app.models import (
     MarketplaceProductAttribute,
     MarketplaceProductCatalogSnapshot,
@@ -248,14 +249,48 @@ class ProductCatalogService:
         attribute_seen: set[tuple[str, str, str, str]] = set()
         snapshots_created = 0
         with self.session_factory() as session:
-            media_existing = {
-                (r.marketplace, r.account_id, r.external_product_id, r.source_key): r
-                for r in session.query(MarketplaceProductMedia).all()
+            media_keys = {
+                (
+                    product.marketplace, product.account_id, product.external_product_id,
+                    _source_key(item.url),
+                )
+                for product in products for item in product.media
             }
-            attribute_existing = {
-                (r.marketplace, r.account_id, r.external_product_id, r.source_key): r
-                for r in session.query(MarketplaceProductAttribute).all()
+            attribute_keys = {
+                (
+                    product.marketplace, product.account_id, product.external_product_id,
+                    item.source_key,
+                )
+                for product in products for item in product.attributes
             }
+            session.query(MarketplaceProductMedia).update(
+                {MarketplaceProductMedia.active: False}, synchronize_session=False
+            )
+            session.query(MarketplaceProductAttribute).update(
+                {MarketplaceProductAttribute.active: False}, synchronize_session=False
+            )
+            media_existing = rows_by_composite_keys(
+                session,
+                MarketplaceProductMedia,
+                (
+                    MarketplaceProductMedia.marketplace,
+                    MarketplaceProductMedia.account_id,
+                    MarketplaceProductMedia.external_product_id,
+                    MarketplaceProductMedia.source_key,
+                ),
+                media_keys,
+            )
+            attribute_existing = rows_by_composite_keys(
+                session,
+                MarketplaceProductAttribute,
+                (
+                    MarketplaceProductAttribute.marketplace,
+                    MarketplaceProductAttribute.account_id,
+                    MarketplaceProductAttribute.external_product_id,
+                    MarketplaceProductAttribute.source_key,
+                ),
+                attribute_keys,
+            )
             for product in products:
                 media_payload = []
                 for item in product.media:
@@ -331,14 +366,6 @@ class ProductCatalogService:
                         data=snapshot_data,
                     ))
                     snapshots_created += 1
-            for key, row in media_existing.items():
-                if key not in media_seen:
-                    row.active = False
-                    row.last_seen_at = now
-            for key, row in attribute_existing.items():
-                if key not in attribute_seen:
-                    row.active = False
-                    row.last_seen_at = now
             session.commit()
         return {
             "source_rows": len(products),
@@ -348,34 +375,34 @@ class ProductCatalogService:
         }
 
     def _download_missing(self) -> dict[str, int]:
+        totals = {"downloaded": 0, "existing": 0, "failed": 0, "bytes": 0}
+        tasks = []
         with self.session_factory() as session:
             rows = session.query(MarketplaceProductMedia).filter(
                 MarketplaceProductMedia.active.is_(True)
-            ).order_by(MarketplaceProductMedia.id).all()
-        totals = {"downloaded": 0, "existing": 0, "failed": 0, "bytes": 0}
-        tasks = []
-        for row in rows:
-            if (
-                row.download_status == "downloaded"
-                and row.local_path
-                and self.storage.verify(
-                    row.local_path, size=row.file_size, sha256=row.file_sha256
-                )
-            ):
-                totals["existing"] += 1
-                continue
-            tasks.append({
-                "id": row.id,
-                "url": row.source_url,
-                "marketplace": row.marketplace,
-                "article": row.offer_id,
-                "external_product_id": row.external_product_id,
-                "media_type": row.media_type,
-                "position": row.position,
-                "source_key": row.source_key,
-            })
-        if self.download_limit:
-            tasks = tasks[:self.download_limit]
+            ).order_by(MarketplaceProductMedia.id).yield_per(500)
+            for row in rows:
+                if (
+                    row.download_status == "downloaded"
+                    and row.local_path
+                    and self.storage.verify(
+                        row.local_path, size=row.file_size, sha256=row.file_sha256
+                    )
+                ):
+                    totals["existing"] += 1
+                    continue
+                tasks.append({
+                    "id": row.id,
+                    "url": row.source_url,
+                    "marketplace": row.marketplace,
+                    "article": row.offer_id,
+                    "external_product_id": row.external_product_id,
+                    "media_type": row.media_type,
+                    "position": row.position,
+                    "source_key": row.source_key,
+                })
+                if self.download_limit and len(tasks) >= self.download_limit:
+                    break
         with ThreadPoolExecutor(max_workers=self.workers) as executor:
             futures = {executor.submit(self.storage.download, **{k: v for k, v in task.items() if k != "id"}): task for task in tasks}
             for future in as_completed(futures):
