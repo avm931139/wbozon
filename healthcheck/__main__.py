@@ -206,7 +206,7 @@ def _product_catalog_check(session, current: datetime) -> Check:
     if latest.error:
         detail += f", error={latest.error[:300]}"
     return Check(
-        latest.status in {"completed", "running"}
+        latest.status in {"completed", "partial", "running"}
         and age <= timedelta(seconds=PRODUCT_CATALOG_MAX_AGE_SECONDS),
         "product catalog media sync",
         detail,

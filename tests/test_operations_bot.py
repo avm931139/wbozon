@@ -11,6 +11,7 @@ from app.models import (
     OperationsEventDelivery,
     OperationsMonitorState,
     OzonSyncRun,
+    ProductCatalogSyncRun,
     WBSyncRun,
     WBTelegramDelivery,
     WBDocumentSyncRun,
@@ -48,6 +49,31 @@ def settings(**kwargs):
         batch_size=25,
         **kwargs,
     )
+
+
+def test_partial_product_media_run_is_not_an_operational_error():
+    service = OperationsNotificationService(
+        client=RecordingTelegramClient(),
+        settings=settings(),
+    )
+    now = datetime(2026, 9, 17, 14, 20, tzinfo=timezone.utc)
+    event = service._product_catalog_event(ProductCatalogSyncRun(
+        id="partial-media",
+        started_at=now,
+        finished_at=now,
+        status="partial",
+        source_rows=178,
+        media_rows=2315,
+        attribute_rows=4046,
+        snapshots_created=161,
+        files_downloaded=38,
+        files_existing=2208,
+        files_failed=69,
+        bytes_downloaded=5951915,
+    ))
+
+    assert event.severity == "success"
+    assert "69" in event.detail
 
 
 def test_operations_digest_reports_successes_and_explains_failures(operations_db):

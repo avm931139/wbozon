@@ -14,8 +14,6 @@ def main() -> None:
     kwargs = {} if args.download_limit is None else {"download_limit": args.download_limit}
     result = ProductCatalogService(**kwargs).run(download=not args.no_download)
     print(json.dumps(result, ensure_ascii=False, default=str))
-    if result["status"] == "partial":
-        raise SystemExit(1)
 
 
 if __name__ == "__main__":

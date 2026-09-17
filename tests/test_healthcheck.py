@@ -5,7 +5,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
-from app.models import HealthcheckRun, OzonSyncRun, WBDocumentSyncRun, YandexMarketSyncRun
+from app.models import (
+    HealthcheckRun,
+    OzonSyncRun,
+    ProductCatalogSyncRun,
+    WBDocumentSyncRun,
+    YandexMarketSyncRun,
+)
 from healthcheck.__main__ import (
     Check,
     OZON_TASK_MAX_AGES,
@@ -13,11 +19,41 @@ from healthcheck.__main__ import (
     _error_message,
     _failure_signature,
     _ozon_task_checks,
+    _product_catalog_check,
     _systemctl_active,
     _yandex_market_task_checks,
     collect_checks,
     record_healthcheck,
 )
+
+
+def test_product_catalog_partial_media_download_is_healthy():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    now = datetime(2026, 9, 17, 17, 20, tzinfo=ZoneInfo("Europe/Moscow"))
+    with factory() as session:
+        session.add(ProductCatalogSyncRun(
+            id="partial-media",
+            started_at=now,
+            finished_at=now,
+            status="partial",
+            source_rows=178,
+            media_rows=2315,
+            attribute_rows=4046,
+            snapshots_created=161,
+            files_downloaded=38,
+            files_existing=2208,
+            files_failed=69,
+            bytes_downloaded=5951915,
+        ))
+        session.commit()
+
+        check = _product_catalog_check(session, now)
+
+    assert check.ok is True
+    assert "partial" in check.detail
+    assert "failed=69" in check.detail
 
 
 def test_backup_status_check_accepts_fresh_completed_status(tmp_path):

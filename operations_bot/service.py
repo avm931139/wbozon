@@ -519,7 +519,11 @@ class OperationsNotificationService:
         if row.status == "completed":
             severity = "success"
         elif row.status == "partial":
-            severity = "error"
+            # Card data and media metadata are already safely persisted. Some
+            # marketplace CDN links may be temporary or unavailable, so this
+            # is a retryable optional-media result rather than an application
+            # failure. The failed count and per-file errors remain in the DB.
+            severity = "success"
         else:
             severity = "error"
         if row.status in {"completed", "partial"}:
