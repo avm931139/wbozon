@@ -388,6 +388,7 @@ sudo chown wbozon:wbozon /etc/wbozon/restic-password
 sudo chmod 600 /etc/wbozon/restic-password
 sudoedit /etc/wbozon/backup.env
 sudo -u postgres createdb --owner=wbozon wbozon_restore_test
+sudo -u postgres psql --dbname=wbozon_restore_test --command='ALTER SCHEMA public OWNER TO wbozon;'
 ```
 
 Если проверочная БД уже существует, `createdb` завершится ошибкой `already exists` —
