@@ -742,11 +742,11 @@ class DashboardService:
     def _expense_category(label: str) -> tuple[str, str]:
         normalized = label.casefold()
         categories = (
-            ("advertising", "Реклама и продвижение", ("реклам", "продвиж", "буст", "promotion", "payperclick")),
+            ("advertising", "Реклама и продвижение", ("реклам", "продвиж", "буст", "рассыл", "promotion", "payperclick", "campaign")),
             ("returns", "Возвраты и обратная логистика", ("возврат", "return", "обратн")),
-            ("logistics", "Логистика и доставка", ("логист", "достав", "delivery", "перевоз")),
-            ("storage", "Хранение", ("хран", "storage")),
-            ("acceptance", "Приёмка", ("прием", "приём", "acceptance")),
+            ("logistics", "Логистика и доставка", ("логист", "достав", "delivery", "перевоз", "crossdock", "кросс-док")),
+            ("storage", "Хранение", ("хран", "размещ", "storage", "placement")),
+            ("acceptance", "Приёмка", ("прием", "приём", "обработк", "acceptance", "supplyinbound")),
             ("commission", "Комиссия и вознаграждение площадки", ("комисс", "вознагражд", "commission", "agency")),
             ("acquiring", "Эквайринг и платежи", ("эквайр", "платеж", "payment", "acquiring")),
             ("partner_services", "Услуги партнёров", ("партнер", "партнёр", "partner")),
@@ -774,10 +774,14 @@ class DashboardService:
             if abs(amount) < 0.005:
                 continue
             label = str(row.get("label") or "Прочая операция")
-            category, category_label = DashboardService._expense_category(label)
+            key = str(row.get("key") or f"line-{index}")
+            # Marketplace dictionaries often provide a readable Russian label and
+            # a more stable English operation code.  Use both for categorisation:
+            # for example, "Оплата за клик" is identified by PayPerClick.
+            category, category_label = DashboardService._expense_category(f"{label} {key}")
             allocated += amount
             lines.append({
-                "key": str(row.get("key") or f"line-{index}"),
+                "key": key,
                 "label": label,
                 "category": category,
                 "category_label": category_label,
@@ -825,14 +829,35 @@ class DashboardService:
             {"key": "penalties", "label": "Штрафы", "amount": wb.get("penalties")},
             {"key": "deductions", "label": "Удержания и прочие услуги", "amount": wb.get("deductions")},
         ]
-        ozon_rows = self._many(db, """SELECT
-            coalesce(nullif(accrual_name,''),accrual_type,'Прочая операция') label,
-            coalesce(accrual_type,'unknown')||':'||coalesce(accrual_name,'') key,
-            greatest(-sum(amount),0) amount
-            FROM ozon_finance_accruals
-            WHERE accrual_date BETWEEN :b AND :e
-            GROUP BY accrual_type,accrual_name HAVING sum(amount)<0
-            ORDER BY greatest(-sum(amount),0) DESC""", b=begin, e=finish)
+        ozon_rows = self._many(db, """WITH expense_rows AS (
+            SELECT t.name key,
+                   coalesce(nullif(t.description,''),t.name) label,
+                   sum(nullif(fee->'accrued'->>'amount','')::numeric) signed_amount
+            FROM ozon_finance_accruals a
+            CROSS JOIN LATERAL jsonb_path_query(
+                a.raw_data::jsonb,
+                'strict $.** ? (exists(@.type_id) && exists(@.accrued))'
+            ) fee
+            JOIN ozon_finance_accrual_types t
+              ON t.type_id=(fee->>'type_id')::integer
+            WHERE a.accrual_date BETWEEN :b AND :e
+              AND t.name<>'SaleCommission'
+            GROUP BY t.name,t.description
+            UNION ALL
+            SELECT t.name key,
+                   coalesce(nullif(t.description,''),t.name) label,
+                   sum(p.accrued) signed_amount
+            FROM ozon_finance_posting_accruals p
+            JOIN ozon_finance_accrual_types t ON t.type_id=p.type_id
+            WHERE p.accrual_date BETWEEN :b AND :e
+              AND t.name='SaleCommission'
+            GROUP BY t.name,t.description
+        )
+        SELECT key,label,greatest(-sum(signed_amount),0) amount
+        FROM expense_rows
+        GROUP BY key,label
+        HAVING sum(signed_amount)<0
+        ORDER BY greatest(-sum(signed_amount),0) DESC""", b=begin, e=finish)
         yandex_rows = self._many(db, """SELECT
             coalesce(nullif(product_or_service,''),nullif(transaction_source,''),transaction_type,'Прочая операция') label,
             coalesce(product_or_service,'')||':'||coalesce(transaction_source,'')||':'||coalesce(transaction_type,'unknown') key,
@@ -849,8 +874,8 @@ class DashboardService:
                 "rows": wb_rows,
             },
             "ozon": {
-                "table": "ozon_finance_accruals",
-                "endpoint": "/v1/finance/accrual/by-day",
+                "table": "ozon_finance_accruals + ozon_finance_posting_accruals",
+                "endpoint": "/v1/finance/accrual/by-day + /v1/finance/accrual/postings",
                 "updated_at": self._one(
                     db,
                     "SELECT max(fetched_at) updated_at FROM ozon_finance_accruals WHERE accrual_date BETWEEN :b AND :e",

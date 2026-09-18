@@ -151,7 +151,13 @@ P&L cards use these definitions:
 
 - WB uses only detailed realization report rows and is available only when
   synchronized reports cover every date in the requested period;
-- Ozon uses the daily accrual ledger and posting-level `SaleCommission` rows;
+- Ozon uses the daily accrual ledger and posting-level `SaleCommission` rows.
+  P&L expense articles combine `SaleCommission` from
+  `ozon_finance_posting_accruals` with the nested typed charges from
+  `ozon_finance_accruals.raw_data`; names come from
+  `ozon_finance_accrual_types`. This exposes commission, advertising,
+  logistics, acquiring, returns, placement and the other Ozon services
+  without double-counting posting-level logistics;
 - Yandex Market uses only the official `united-netting` payment report;
 - revenue is positive financial accruals including saved compensation;
 - marketplace expenses are all financial retentions and charges, excluding

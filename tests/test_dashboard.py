@@ -129,6 +129,10 @@ def test_pnl_shows_expense_breakdown_comparisons_and_source_tooltips():
     source = inspect.getsource(DashboardService._pnl_expense_breakdowns)
     assert "wb_financial_sales_rows" in source
     assert "ozon_finance_accruals" in source
+    assert "jsonb_path_query" in source
+    assert "ozon_finance_posting_accruals" in source
+    assert "ozon_finance_accrual_types" in source
+    assert "t.name='SaleCommission'" in source
     assert "yandex_market_finance_transactions" in source
 
 
@@ -144,6 +148,17 @@ def test_pnl_expense_lines_reconcile_to_authoritative_finance_total():
     assert lines[0]["category"] == "logistics"
     assert lines[0]["share_percent"] == 10
     assert lines[1]["key"] == "reconciliation_adjustment"
+
+
+def test_pnl_expense_category_uses_stable_marketplace_operation_code():
+    lines = DashboardService._expense_lines(
+        [{"key": "PayPerClick", "label": "Оплата за клик", "amount": 25}],
+        revenue=100,
+        expected_total=25,
+        source="Ozon finance detail",
+    )
+
+    assert lines[0]["category"] == "advertising"
 
 
 def test_stock_dashboard_has_three_market_images_and_refresh_dates():
