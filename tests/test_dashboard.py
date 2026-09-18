@@ -122,6 +122,10 @@ def test_pnl_shows_expense_breakdown_comparisons_and_source_tooltips():
     assert "source_endpoint" in PNL_HTML
     assert "updated_at" in PNL_HTML
     assert "Процент = статья расходов ÷ выручка × 100%" in PNL_HTML
+    assert 'class="total-layout"' in PNL_HTML
+    assert 'class="total-summary"' in PNL_HTML
+    assert 'class="total-breakdown"' in PNL_HTML
+    assert "@media(max-width:1000px)" in PNL_HTML
     source = inspect.getsource(DashboardService._pnl_expense_breakdowns)
     assert "wb_financial_sales_rows" in source
     assert "ozon_finance_accruals" in source
