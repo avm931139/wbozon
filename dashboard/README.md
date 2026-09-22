@@ -184,9 +184,14 @@ and profit remain unavailable until the financial report closes. Revenue in the
 exact mode is retail sales at the agreed seller discount net of
 returns plus compensation. Expenses are the difference between that revenue
 and the reconstructed net payout, so marketplace commission and every saved
-delivery, storage, penalty and acceptance charge are included once. Technical
-`deduction` and `rebill_logistic_cost` detail fields are not subtracted again:
-WB has already reflected their effect in the payable financial operations.
+delivery, storage, penalty, acceptance and other deduction are included once.
+The WB commission is reconstructed from sale/return revenue, `forPay` and the
+signed acquiring charge. `deduction` reduces payout as shown by the weekly
+report header; `rebill_logistic_cost` remains audit-only because adding it to
+`deliveryService` again would duplicate logistics. The resulting expense lines
+reconcile to the sum of the reports' `bankPaymentSum`, so the generic
+reconciliation line should only appear for a genuinely new or inconsistent WB
+operation.
 Operational sales remain a fallback only until the first Sales Funnel sync.
 Product cost is shown without a redundant `100% coverage` label; a warning is
 shown only when one or more purchased items have no imported cost. Ozon revenue is net sales and

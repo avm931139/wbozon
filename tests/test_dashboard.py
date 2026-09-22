@@ -292,8 +292,18 @@ def test_dashboard_uses_wb_finance_rows_for_closed_period_metrics():
     assert 'wb["data_status"] = "preliminary"' in source
     assert "Бронирование товара через самовывоз" in source
     net_payout_sql = source.split("net_payout", 1)[0].rsplit("coalesce(sum(", 1)[-1]
-    assert "deduction" not in net_payout_sql
+    assert "deduction" in net_payout_sql
     assert "rebill_logistic_cost" not in net_payout_sql
+
+
+def test_wb_pnl_expands_commission_and_does_not_duplicate_rebill_logistics():
+    import inspect
+
+    source = inspect.getsource(DashboardService._pnl_expense_breakdowns)
+    assert "retail_price_with_discount*quantity-for_pay-acquiring_fee" in source
+    assert '"key": "commission"' in source
+    assert "coalesce(sum(delivery_service),0) logistics" in source
+    assert "delivery_service+rebill_logistic_cost" not in source
 
 
 def test_dashboard_uses_ozon_finance_accruals_for_buyouts_and_profit():

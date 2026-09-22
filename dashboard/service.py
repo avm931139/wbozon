@@ -498,7 +498,7 @@ class DashboardService:
                             ELSE 0 END),0)
                             + coalesce(sum(CASE WHEN seller_operation_name NOT IN ('Продажа','Возврат','Бронирование товара через самовывоз') THEN for_pay ELSE 0 END),0)
                             + coalesce(sum(additional_payment),0)
-                            - coalesce(sum(delivery_service+penalty+paid_storage+paid_acceptance),0) net_payout
+                            - coalesce(sum(delivery_service+penalty+paid_storage+paid_acceptance+deduction),0) net_payout
                     FROM wb_financial_sales_rows WHERE rr_date>=:b AND rr_date<:u
                 ) SELECT rows,finance_buyouts,finance_buyouts_amount,compensation,
                     finance_buyouts_amount+compensation revenue,
@@ -838,10 +838,19 @@ class DashboardService:
     ) -> dict[str, dict[str, Any]]:
         until = finish + timedelta(days=1)
         wb = self._one(db, """SELECT
-            coalesce(sum(delivery_service+rebill_logistic_cost),0) logistics,
+            coalesce(sum(CASE
+                WHEN seller_operation_name='Возврат'
+                    THEN -(retail_price_with_discount*quantity-for_pay-acquiring_fee)
+                WHEN seller_operation_name IN ('Продажа','Бронирование товара через самовывоз')
+                    THEN retail_price_with_discount*quantity-for_pay-acquiring_fee
+                ELSE 0 END),0) commission,
+            coalesce(sum(delivery_service),0) logistics,
             coalesce(sum(paid_storage),0) storage,
             coalesce(sum(paid_acceptance),0) acceptance,
-            coalesce(sum(acquiring_fee),0) acquiring,
+            coalesce(sum(CASE
+                WHEN seller_operation_name='Возврат' THEN -acquiring_fee
+                WHEN seller_operation_name IN ('Продажа','Бронирование товара через самовывоз') THEN acquiring_fee
+                ELSE 0 END),0) acquiring,
             coalesce(sum(penalty),0) penalties,
             coalesce(sum(deduction),0) deductions,
             max(r.details_synced_at) updated_at
@@ -849,6 +858,7 @@ class DashboardService:
             JOIN wb_financial_sales_reports r ON r.id=x.report_id
             WHERE x.rr_date>=:b AND x.rr_date<:u""", b=begin, u=until)
         wb_rows = [] if "error" in wb else [
+            {"key": "commission", "label": "Комиссия Wildberries", "amount": wb.get("commission")},
             {"key": "logistics", "label": "Логистика и доставка", "amount": wb.get("logistics")},
             {"key": "storage", "label": "Хранение", "amount": wb.get("storage")},
             {"key": "acceptance", "label": "Платная приёмка", "amount": wb.get("acceptance")},
