@@ -193,4 +193,11 @@ revenue. Yandex Market calculations use the official payment ledger
 Until this ledger is synchronized, Yandex finance is deliberately returned as
 unavailable; order totals and advertising attribution are never presented as
 P&L revenue. Yandex product cost is matched from positive `Начисление`
-and negative `Возврат` product rows of the same united-netting report.
+and negative `Возврат` product events of the same united-netting report.
+Payment components belonging to the same order, offer, date and event are
+collapsed before counting units, because buyer money, Market discount points
+and Yandex Plus points repeat the item quantity. Product returns reduce P&L
+revenue instead of being presented as marketplace expenses. Service accrual
+reversals reduce marketplace expenses instead of increasing revenue. Expense
+detail excludes product rows and therefore groups only commissions, logistics,
+promotion, acquiring and the other service operations.

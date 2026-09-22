@@ -522,12 +522,28 @@ class DashboardService:
                     sales.finance_buyouts_amount+ledger.compensation-ledger.net_accrual expenses,
                     ledger.finance_from,ledger.finance_through
                 FROM ledger CROSS JOIN sales""", b=begin, e=finish),
-            "yandex_market": one("""SELECT coalesce(sum(amount) FILTER (WHERE amount>0),0) revenue,
-                abs(coalesce(sum(amount) FILTER (WHERE amount<0),0)) expenses,count(*) rows,
-                coalesce(sum(CASE WHEN transaction_type='Начисление' AND amount>0 AND offer_id IS NOT NULL THEN quantity
-                    WHEN transaction_type='Возврат' AND amount<0 AND offer_id IS NOT NULL THEN -quantity ELSE 0 END),0) finance_buyouts,
-                min(transaction_at)::date finance_from,max(transaction_at)::date finance_through
-                FROM yandex_market_finance_transactions WHERE transaction_at>=:b AND transaction_at<:u""", b=begin, u=until),
+            "yandex_market": one("""WITH ledger AS (
+                    SELECT *,transaction_at::date transaction_date,
+                        transaction_type IN ('Начисление','Возврат') AND quantity>0 product_transaction
+                    FROM yandex_market_finance_transactions
+                    WHERE transaction_at>=:b AND transaction_at<:u
+                ), product_events AS (
+                    SELECT business_id,order_id,offer_id,transaction_date,transaction_type,
+                        max(quantity) quantity,sum(amount) amount
+                    FROM ledger WHERE product_transaction
+                    GROUP BY business_id,order_id,offer_id,transaction_date,transaction_type
+                ), totals AS (
+                    SELECT count(*) rows,
+                        coalesce(sum(amount) FILTER (WHERE product_transaction),0) revenue,
+                        greatest(-coalesce(sum(amount) FILTER (WHERE NOT product_transaction),0),0) expenses,
+                        min(transaction_at)::date finance_from,max(transaction_at)::date finance_through
+                    FROM ledger
+                ), units AS (
+                    SELECT coalesce(sum(CASE WHEN transaction_type='Начисление' THEN quantity
+                        WHEN transaction_type='Возврат' THEN -quantity ELSE 0 END),0) finance_buyouts
+                    FROM product_events
+                )
+                SELECT totals.*,units.finance_buyouts FROM totals CROSS JOIN units""", b=begin, u=until),
         }
         costs = {
             "wb": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC),
@@ -560,11 +576,16 @@ class DashboardService:
                     coalesce(sum(s.quantity) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
                 FROM sold s LEFT JOIN sku_master m ON m.sku=s.sku LEFT JOIN c ON c.master_product_id=m.master_product_id""", b=begin, e=finish),
             "yandex_market": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC),
-                sold AS (SELECT business_id,offer_id,
-                    sum(CASE WHEN transaction_type='Начисление' AND amount>0 THEN quantity
-                        WHEN transaction_type='Возврат' AND amount<0 THEN -quantity ELSE 0 END) quantity
+                events AS (SELECT business_id,order_id,offer_id,transaction_at::date transaction_date,transaction_type,
+                        max(quantity) quantity
                     FROM yandex_market_finance_transactions
-                    WHERE transaction_at>=:b AND transaction_at<:u AND offer_id IS NOT NULL GROUP BY business_id,offer_id)
+                    WHERE transaction_at>=:b AND transaction_at<:u AND offer_id IS NOT NULL
+                        AND transaction_type IN ('Начисление','Возврат') AND quantity>0
+                    GROUP BY business_id,order_id,offer_id,transaction_at::date,transaction_type),
+                sold AS (SELECT business_id,offer_id,
+                    sum(CASE WHEN transaction_type='Начисление' THEN quantity
+                        WHEN transaction_type='Возврат' THEN -quantity ELSE 0 END) quantity
+                    FROM events GROUP BY business_id,offer_id)
                 SELECT coalesce(sum(s.quantity*coalesce(c.unit_cost,0)),0) cost_of_goods,
                     coalesce(sum(s.quantity) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
                 FROM sold s LEFT JOIN marketplace_product_links l ON l.marketplace='yandex_market' AND l.active
@@ -741,8 +762,14 @@ class DashboardService:
     @staticmethod
     def _expense_category(label: str) -> tuple[str, str]:
         normalized = label.casefold()
+        if "размещение товарных предложений" in normalized:
+            return "commission", "Комиссия и вознаграждение площадки"
+        if "приём платежа" in normalized or "прием платежа" in normalized:
+            return "acquiring", "Эквайринг и платежи"
+        if "возврат списания" in normalized or "скидка за лояльность" in normalized:
+            return "discounts", "Скидки и корректировки акций"
         categories = (
-            ("advertising", "Реклама и продвижение", ("реклам", "продвиж", "буст", "рассыл", "promotion", "payperclick", "campaign")),
+            ("advertising", "Реклама и продвижение", ("реклам", "продвиж", "буст", "рассыл", "отзывы за баллы", "promotion", "payperclick", "campaign")),
             ("returns", "Возвраты и обратная логистика", ("возврат", "return", "обратн")),
             ("logistics", "Логистика и доставка", ("логист", "достав", "delivery", "перевоз", "crossdock", "кросс-док")),
             ("storage", "Хранение", ("хран", "размещ", "storage", "placement")),
@@ -859,13 +886,15 @@ class DashboardService:
         HAVING sum(signed_amount)<0
         ORDER BY greatest(-sum(signed_amount),0) DESC""", b=begin, e=finish)
         yandex_rows = self._many(db, """SELECT
-            coalesce(nullif(product_or_service,''),nullif(transaction_source,''),transaction_type,'Прочая операция') label,
+            concat_ws(' · ',nullif(product_or_service,''),nullif(transaction_source,''),transaction_type) label,
             coalesce(product_or_service,'')||':'||coalesce(transaction_source,'')||':'||coalesce(transaction_type,'unknown') key,
-            greatest(-sum(amount),0) amount
+            -sum(amount) amount
             FROM yandex_market_finance_transactions
             WHERE transaction_at>=:b AND transaction_at<:u
-            GROUP BY product_or_service,transaction_source,transaction_type HAVING sum(amount)<0
-            ORDER BY greatest(-sum(amount),0) DESC""", b=begin, u=until)
+              AND NOT (transaction_type IN ('Начисление','Возврат') AND quantity>0)
+            GROUP BY product_or_service,transaction_source,transaction_type
+            HAVING abs(sum(amount))>=0.005
+            ORDER BY abs(sum(amount)) DESC""", b=begin, u=until)
         metadata = {
             "wb": {
                 "table": "wb_financial_sales_rows",

@@ -161,6 +161,23 @@ def test_pnl_expense_category_uses_stable_marketplace_operation_code():
     assert lines[0]["category"] == "advertising"
 
 
+def test_pnl_yandex_contra_expense_is_preserved_without_reconciliation_residual():
+    lines = DashboardService._expense_lines(
+        [
+            {"key": "placement", "label": "Размещение товарных предложений", "amount": 100},
+            {"key": "reversal", "label": "Возврат списания · Скидка за лояльность", "amount": -10},
+        ],
+        revenue=200,
+        expected_total=90,
+        source="Yandex united netting",
+    )
+
+    assert sum(line["amount"] for line in lines) == 90
+    assert lines[0]["category"] == "commission"
+    assert lines[1]["category"] == "discounts"
+    assert all(line["key"] != "reconciliation_adjustment" for line in lines)
+
+
 def test_stock_dashboard_has_three_market_images_and_refresh_dates():
     assert "/api/stocks?date=" in STOCKS_HTML
     assert "Фото WB" in STOCKS_HTML
@@ -251,6 +268,9 @@ def test_pnl_uses_finance_rows_for_yandex_cost_of_goods():
     assert "FROM yandex_market_finance_transactions" in source
     assert "yandex_market_order_items" not in source
     assert "united_netting" in source
+    assert "product_events" in source
+    assert "max(quantity) quantity" in source
+    assert "NOT product_transaction" in source
 
 
 def test_dashboard_uses_wb_finance_rows_for_closed_period_metrics():
