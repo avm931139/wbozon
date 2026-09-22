@@ -60,10 +60,17 @@ the current Moscow date. Its filter supports both an arbitrary date range and a
 month picker; selecting a month immediately loads its first through last day.
 For the current month, its end is capped at today; future dates are rejected by
 the server so they cannot distort an equal-period comparison.
-P&L opens on the previous full calendar month because closed marketplace
-finance data is usually not available for the current day. Every period metric
-is compared with the immediately preceding period of the same length. Labels
-are bilingual Russian/Chinese.
+P&L opens on the first day of the month containing the latest fully elapsed
+Sunday and ends on that Sunday. A Sunday that is still in progress is not
+included. For example, on 2026-09-22 the initial range is
+2026-09-01 through 2026-09-20; before the first elapsed Sunday of a new month,
+the range belongs to the preceding month. This aligns the default range with
+the latest closed WB weekly realization report. Ozon daily accruals and Yandex
+Market united-netting rows are restricted to the same dates: they are financial
+API data, not operational orders, but an open month's marketplace ledger can
+still be corrected later by the marketplace. Every period metric is compared
+with the immediately preceding period of the same length. Labels are bilingual
+Russian/Chinese.
 
 P&L starts with a consolidated result and then shows each marketplace. Revenue,
 marketplace expenses, payout before cost, cost of goods, profit and their

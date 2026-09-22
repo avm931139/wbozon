@@ -111,6 +111,14 @@ def test_pnl_dashboard_uses_only_financial_labels_and_separate_endpoint():
     assert "value.orders_amount" not in PNL_HTML
 
 
+def test_pnl_defaults_to_month_through_latest_elapsed_sunday():
+    assert "function defaultPnlPeriod(now)" in PNL_HTML
+    assert "daysAfterSunday=last.getDay()||7" in PNL_HTML
+    assert "new Date(last.getFullYear(),last.getMonth(),1)" in PNL_HTML
+    assert "defaultPeriod=defaultPnlPeriod(now)" in PNL_HTML
+    assert "now.getMonth()-1" not in PNL_HTML
+
+
 def test_pnl_shows_expense_breakdown_comparisons_and_source_tooltips():
     import inspect
 
