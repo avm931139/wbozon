@@ -165,6 +165,31 @@ journalctl -u wbozon-product-mapping.service -n 50 --no-pager
 
 Не включайте одновременно systemd timer и эквивалентную cron-строку. Повторный параллельный запуск дополнительно закрыт advisory lock.
 
+## Единые финансовые продажи и возвраты
+
+После построения `product_master` примените миграцию и выполните независимую
+первичную пересборку каждой площадки:
+
+```bash
+./.venv/bin/python -m alembic upgrade head
+./.venv/bin/python -m analytics_facts --marketplace wb
+./.venv/bin/python -m analytics_facts --marketplace ozon
+./.venv/bin/python -m analytics_facts --marketplace yandex_market
+```
+
+После сверки счётчиков включите почасовые timers:
+
+```bash
+sudo systemctl enable --now \
+  wbozon-analytics-facts@wb.timer \
+  wbozon-analytics-facts@ozon.timer \
+  wbozon-analytics-facts@yandex_market.timer
+```
+
+Задания читают только сохранённые финансовые документы и не вызывают API.
+Каждый instance заменяет только свой `marketplace`; сбой не удаляет ранее
+успешно построенные факты благодаря одной атомарной транзакции.
+
 ## Карточки и локальные фото/видео
 
 В 03:00 МСК, после построения единого справочника, отдельная задача нормализует карточки и докачивает медиа:

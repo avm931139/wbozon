@@ -1,0 +1,82 @@
+# Нормализованные финансовые продажи
+
+`analytics_facts` строит единый аналитический слой поверх сохранённых
+финансовых документов WB, Ozon и Яндекс Маркета. Пакет не обращается к API и не
+изменяет исходные таблицы.
+
+Источники:
+
+- WB — продажи и возвраты из `wb_financial_sales_rows`;
+- Ozon — товарные операции `SaleCommission` из
+  `ozon_finance_posting_accruals`;
+- Яндекс Маркет — товарные `Начисление` и `Возврат` из
+  `yandex_market_finance_transactions`.
+
+Оперативные заказы, комиссии, логистика, реклама и другие услуги в
+`fact_sales` не записываются. Для расходов будет отдельный финансовый факт.
+
+## Таблицы
+
+- `fact_sales` — подтверждённые продажи и возвраты в едином формате;
+- `fact_sale_sources` — связь факта со всеми исходными строками;
+- `product_barcodes` — любое количество штрихкодов одной карточки;
+- `analytics_fact_sync_runs` — статус и счётчики каждого независимого запуска.
+
+Яндекс может представить один товар несколькими строками: оплата покупателя,
+баллы Маркета и баллы Яндекс Плюс. Они объединяются по кабинету, заказу,
+артикулу, точному времени и типу финансового события. Количество берётся один раз, а все
+исходные строки остаются доступными через `fact_sale_sources`. Компоненты
+объединяются по точному времени финансовой операции, а не только по дню: две
+разные операции одного заказа в одну дату не сольются.
+
+## Деньги
+
+Поля `*_exact` сохраняют точность источника `NUMERIC(20, 6)`. Все отчётные
+поля `*_kopecks` имеют тип `BIGINT`. Конвертация выполняется через `Decimal` и
+`ROUND_HALF_UP`, без `float`. Остаток округления распределяется внутри одного
+кабинета, дня и валюты, поэтому сумма копеек совпадает с округлённой контрольной
+суммой источника.
+
+Возвраты имеют отрицательные `quantity`, `return_amount_kopecks`,
+`net_revenue_kopecks` и `cost_amount_kopecks`. Поэтому итог можно получать
+обычным `SUM`.
+
+## Запуск
+
+```bash
+python -m analytics_facts --marketplace wb
+python -m analytics_facts --marketplace ozon
+python -m analytics_facts --marketplace yandex_market
+python -m analytics_facts --marketplace all
+```
+
+Каждая площадка использует отдельную транзакцию и advisory lock. Пересборка
+атомарно заменяет только факты выбранной площадки. При ошибке старые факты
+остаются доступными.
+
+Production timers запускаются после почасовых финансовых загрузок:
+
+```bash
+sudo systemctl enable --now \
+  wbozon-analytics-facts@wb.timer \
+  wbozon-analytics-facts@ozon.timer \
+  wbozon-analytics-facts@yandex_market.timer
+```
+
+Пример быстрой агрегации:
+
+```sql
+SELECT business_date,
+       marketplace,
+       SUM(quantity) AS quantity,
+       SUM(sales_amount_kopecks) AS sales_kopecks,
+       SUM(return_amount_kopecks) AS returns_kopecks,
+       SUM(net_revenue_kopecks) AS net_revenue_kopecks,
+       SUM(cost_amount_kopecks) AS cost_kopecks
+FROM fact_sales
+GROUP BY business_date, marketplace
+ORDER BY business_date, marketplace;
+```
+
+`calculation_version`, `source_payload_hash` и `fact_sale_sources` позволяют
+объяснить каждую цифру до строки исходного финансового документа.

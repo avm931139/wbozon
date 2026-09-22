@@ -1727,6 +1727,165 @@ class MarketplaceProductLink(Base):
     matched_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class ProductBarcode(Base):
+    """A marketplace barcode attached to a normalized product.
+
+    Barcodes are deliberately one-to-many and are never used as the identity of
+    a product or a financial fact.
+    """
+
+    __tablename__ = "product_barcodes"
+    __table_args__ = (
+        UniqueConstraint(
+            "marketplace", "account_id", "barcode",
+            name="uq_product_barcode_marketplace_account",
+        ),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    master_product_id = Column(
+        Integer, ForeignKey("master_products.id", ondelete="RESTRICT"),
+        nullable=False, index=True,
+    )
+    marketplace_product_link_id = Column(
+        Integer, ForeignKey("marketplace_product_links.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    marketplace = Column(String(30), nullable=False, index=True)
+    account_id = Column(String, nullable=False, default="", index=True)
+    external_product_id = Column(String, nullable=False, index=True)
+    barcode = Column(String, nullable=False, index=True)
+    barcode_type = Column(String(30), nullable=False, default="marketplace")
+    is_primary = Column(Boolean, nullable=False, default=False)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    source_table = Column(String(100), nullable=False)
+    source_record_id = Column(String, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), nullable=True)
+    normalized_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class AnalyticsFactSyncRun(Base):
+    __tablename__ = "analytics_fact_sync_runs"
+
+    id = Column(String(32), primary_key=True)
+    marketplace = Column(String(30), nullable=False, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(20), nullable=False, index=True)
+    source_rows = Column(Integer, nullable=False, default=0)
+    facts_written = Column(Integer, nullable=False, default=0)
+    lineage_rows = Column(Integer, nullable=False, default=0)
+    barcode_rows = Column(Integer, nullable=False, default=0)
+    unmatched_products = Column(Integer, nullable=False, default=0)
+    error = Column(Text, nullable=True)
+
+
+class FactSale(Base):
+    """Financially confirmed marketplace sale, return or product correction."""
+
+    __tablename__ = "fact_sales"
+    __table_args__ = (
+        UniqueConstraint(
+            "marketplace", "account_id", "source_event_key",
+            name="uq_fact_sales_source_event",
+        ),
+        Index("ix_fact_sales_marketplace_business_date", "marketplace", "business_date"),
+        Index("ix_fact_sales_product_business_date", "master_product_id", "business_date"),
+        Index("ix_fact_sales_account_business_date", "account_id", "business_date"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    marketplace = Column(String(30), nullable=False, index=True)
+    account_id = Column(String, nullable=False, default="", index=True)
+    store_id = Column(String, nullable=True, index=True)
+    master_product_id = Column(
+        Integer, ForeignKey("master_products.id", ondelete="RESTRICT"),
+        nullable=True, index=True,
+    )
+    marketplace_product_link_id = Column(
+        Integer, ForeignKey("marketplace_product_links.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    seller_sku = Column(String, nullable=True, index=True)
+    marketplace_sku = Column(String, nullable=True, index=True)
+    offer_id = Column(String, nullable=True, index=True)
+    order_id = Column(String, nullable=True, index=True)
+    posting_id = Column(String, nullable=True, index=True)
+    operation_id = Column(String, nullable=True, index=True)
+    fulfillment_type = Column(String(20), nullable=True, index=True)
+    warehouse_id = Column(String, nullable=True, index=True)
+    event_type = Column(String(30), nullable=False, index=True)
+    event_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    business_date = Column(Date, nullable=False, index=True)
+    order_date = Column(DateTime(timezone=True), nullable=True)
+    delivery_date = Column(DateTime(timezone=True), nullable=True)
+    return_date = Column(DateTime(timezone=True), nullable=True)
+    quantity = Column(Integer, nullable=False)
+    status = Column(String, nullable=True)
+
+    # Source precision is retained for audit. Reporting uses integer kopecks.
+    unit_price_exact = Column(Numeric(20, 6), nullable=False, default=0)
+    gross_amount_exact = Column(Numeric(20, 6), nullable=False, default=0)
+    discount_amount_exact = Column(Numeric(20, 6), nullable=False, default=0)
+    marketplace_discount_exact = Column(Numeric(20, 6), nullable=False, default=0)
+    customer_paid_exact = Column(Numeric(20, 6), nullable=False, default=0)
+    sales_amount_exact = Column(Numeric(20, 6), nullable=False, default=0)
+    return_amount_exact = Column(Numeric(20, 6), nullable=False, default=0)
+    compensation_amount_exact = Column(Numeric(20, 6), nullable=False, default=0)
+    net_revenue_exact = Column(Numeric(20, 6), nullable=False, default=0)
+    unit_cost_exact = Column(Numeric(20, 6), nullable=True)
+    cost_amount_exact = Column(Numeric(20, 6), nullable=True)
+
+    unit_price_kopecks = Column(BigInteger, nullable=False, default=0)
+    gross_amount_kopecks = Column(BigInteger, nullable=False, default=0)
+    discount_amount_kopecks = Column(BigInteger, nullable=False, default=0)
+    marketplace_discount_kopecks = Column(BigInteger, nullable=False, default=0)
+    customer_paid_kopecks = Column(BigInteger, nullable=False, default=0)
+    sales_amount_kopecks = Column(BigInteger, nullable=False, default=0)
+    return_amount_kopecks = Column(BigInteger, nullable=False, default=0)
+    compensation_amount_kopecks = Column(BigInteger, nullable=False, default=0)
+    net_revenue_kopecks = Column(BigInteger, nullable=False, default=0)
+    unit_cost_kopecks = Column(BigInteger, nullable=True)
+    cost_amount_kopecks = Column(BigInteger, nullable=True)
+    currency = Column(String(10), nullable=False, default="RUB", index=True)
+    cost_record_id = Column(
+        Integer, ForeignKey("product_cost_records.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    cost_status = Column(String(20), nullable=False, default="missing", index=True)
+
+    source_event_key = Column(String(128), nullable=False)
+    source_table = Column(String(100), nullable=False)
+    source_record_id = Column(String, nullable=True)
+    source_operation_key = Column(String, nullable=False)
+    source_payload_hash = Column(String(64), nullable=False, index=True)
+    calculation_version = Column(String(30), nullable=False)
+    is_financial = Column(Boolean, nullable=False, default=True, index=True)
+    is_preliminary = Column(Boolean, nullable=False, default=False, index=True)
+    loaded_at = Column(DateTime(timezone=True), nullable=True)
+    normalized_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class FactSaleSource(Base):
+    __tablename__ = "fact_sale_sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "fact_sale_id", "source_table", "source_record_id",
+            name="uq_fact_sale_source_row",
+        ),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    fact_sale_id = Column(
+        BigInteger, ForeignKey("fact_sales.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    source_table = Column(String(100), nullable=False, index=True)
+    source_record_id = Column(String, nullable=False)
+    source_operation_key = Column(String, nullable=True)
+    source_payload_hash = Column(String(64), nullable=True)
+
+
 class ProductCatalogSyncRun(Base):
     __tablename__ = "product_catalog_sync_runs"
 

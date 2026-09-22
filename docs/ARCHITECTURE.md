@@ -18,6 +18,7 @@
 | Ozon | `python -m ozon --task <task>` | `wbozon-ozon@<task>.service` и отдельные timers | независимые задания каталога, заказов, поставок, продаж, финансов и рекламы |
 | Документы Ozon | `python -m ozon --task documents` | `wbozon-ozon-documents.timer` | асинхронные бухгалтерские отчёты, локальные файлы и JSON-снимки |
 | Сверка FBO Ozon | `python -m ozon --task supply_reconciliation` | `wbozon-ozon-supply-reconciliation.timer` | отправленный состав, акты приёмки и расхождения по SKU; ежедневно в 03:20 МСК |
+| Финансовые факты | `python -m analytics_facts --marketplace <mp>` | `wbozon-analytics-facts@<mp>.timer` | независимая нормализация подтверждённых продаж/возвратов и денег в копейках |
 | Остатки WB | `python -m inventory_sync --marketplace wb` | `wbozon-inventory@wb.service` | WB FBS, доступный FBO, полный физический складской отчёт и дневные срезы; дашборд исключает FBS |
 | Остатки Ozon | `python -m inventory_sync --marketplace ozon` | `wbozon-inventory@ozon.service` | агрегатные и складские остатки Ozon и дневные срезы |
 | Остатки Яндекс Маркета | `python -m inventory_sync --marketplace yandex_market` | `wbozon-inventory@yandex_market.service` | остатки кампаний и дневные срезы |
@@ -40,6 +41,8 @@
 - Три inventory worker используют разные PostgreSQL advisory locks и отдельные записи `inventory_sync_runs.marketplace`.
 - Ошибка API одного маркетплейса не откатывает текущие остатки и дневной срез другого маркетплейса.
 - Каждый Ozon task имеет собственный advisory lock и запись в `ozon_sync_runs`.
+- Финансовые факты WB, Ozon и Яндекса пересобираются отдельными транзакциями;
+  ошибка одной площадки не изменяет готовые факты двух других.
 - Excel-файлы имеют независимые ключи доставки: уже отправленный файл не дублируется при повторе другого.
 - Личные уведомления читают завершённые события из БД через собственную очередь; недоступность Telegram не меняет результат workers.
 - PostgreSQL и runtime-файлы защищает зашифрованный внешний Restic-снимок; сам
