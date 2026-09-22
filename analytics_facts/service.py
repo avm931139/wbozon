@@ -21,6 +21,7 @@ from app.models import (
     MarketplaceProductLink,
     OzonFinanceAccrualType,
     OzonFinancePostingAccrual,
+    OzonPosting,
     OzonProduct,
     ProductBarcode,
     ProductCostRecord,
@@ -380,6 +381,39 @@ class FinancialSalesFactService:
             int(row.sku): row
             for row in session.query(OzonProduct).filter(OzonProduct.sku.is_not(None))
         }
+        links_by_offer: dict[tuple[str, str], MarketplaceProductLink | None] = {}
+        for candidate in links.values():
+            if candidate.marketplace != "ozon" or not candidate.offer_id:
+                continue
+            key = (candidate.account_id, candidate.offer_id)
+            previous = links_by_offer.get(key)
+            if previous is None and key not in links_by_offer:
+                links_by_offer[key] = candidate
+            elif previous is not None and previous.master_product_id != candidate.master_product_id:
+                # An ambiguous seller article must never be guessed.
+                links_by_offer[key] = None
+
+        posting_products: dict[tuple[str, str], dict[str, Any] | None] = {}
+        for posting in session.query(OzonPosting).all():
+            for item in posting.products or []:
+                if not isinstance(item, dict):
+                    continue
+                sku = _as_string(item.get("sku"))
+                offer_id = _as_string(item.get("offer_id") or item.get("offerId"))
+                if not sku or not offer_id:
+                    continue
+                key = (posting.posting_number, sku)
+                value = {
+                    "offer_id": offer_id,
+                    "name": _as_string(item.get("name")),
+                    "scheme": posting.scheme,
+                }
+                previous = posting_products.get(key)
+                if previous is None and key not in posting_products:
+                    posting_products[key] = value
+                elif previous is not None and previous["offer_id"] != offer_id:
+                    # The posting evidence is inconsistent, so leave the fact unmatched.
+                    posting_products[key] = None
         facts: list[PendingFact] = []
         for row in rows:
             if row.accrual_date is None:
@@ -393,8 +427,17 @@ class FinancialSalesFactService:
             unit_price = abs(seller_price)
             amount = unit_price * quantity
             product = products.get(int(row.sku)) if row.sku is not None else None
+            posting_product = posting_products.get(
+                (row.posting_number, _as_string(row.sku) or "")
+            )
+            offer_id = (
+                product.offer_id if product else
+                posting_product.get("offer_id") if posting_product else None
+            )
             external_product_id = _as_string(product.product_id if product else None)
             link = links.get(("ozon", account_id, external_product_id or ""))
+            if link is None and offer_id:
+                link = links_by_offer.get((account_id, offer_id))
             payload_hash = _payload_hash(row.raw_data)
             event_at = datetime.combine(row.accrual_date, time.min, tzinfo=timezone.utc)
             values = self._base_values(
@@ -409,12 +452,15 @@ class FinancialSalesFactService:
             )
             values.update(self._link_values(link))
             values.update({
-                "seller_sku": product.offer_id if product else None,
+                "seller_sku": offer_id,
                 "marketplace_sku": _as_string(row.sku),
-                "offer_id": product.offer_id if product else None,
+                "offer_id": offer_id,
                 "order_id": row.posting_number,
                 "posting_id": row.posting_number,
                 "operation_id": row.source_hash,
+                "fulfillment_type": (
+                    posting_product.get("scheme") if posting_product else None
+                ),
                 "status": "SaleCommission",
                 "customer_paid_exact": amount,
             })

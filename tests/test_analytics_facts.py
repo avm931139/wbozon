@@ -17,6 +17,7 @@ from app.models import (
     MasterProduct,
     OzonFinanceAccrualType,
     OzonFinancePostingAccrual,
+    OzonPosting,
     OzonProduct,
     ProductBarcode,
     ProductCostImportRun,
@@ -243,4 +244,53 @@ def test_ozon_posting_finance_uses_product_link_and_all_catalog_barcodes(monkeyp
         assert fact.quantity == -1
         assert fact.net_revenue_kopecks == -25001
         assert fact.master_product_id is not None
+
+
+def test_ozon_old_sku_uses_confirmed_offer_from_saved_posting(monkeypatch):
+    session_factory = _session_factory()
+    now = datetime(2026, 9, 22, 8, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(fact_service, "OZON_CLIENT_ID", "client-1")
+    with session_factory() as session:
+        master = MasterProduct(
+            article="OLD-1", name="Historical Ozon product", active=True,
+            created_at=now, updated_at=now,
+        )
+        session.add(master)
+        session.flush()
+        session.add(MarketplaceProductLink(
+            master_product_id=master.id, marketplace="ozon", account_id="client-1",
+            external_product_id="current-product-id", offer_id="OLD-1",
+            source_article="OLD-1", normalized_article="OLD-1",
+            match_method="exact", is_test_variant=False, active=True,
+            matched_at=now,
+        ))
+        session.add(OzonFinanceAccrualType(
+            type_id=10, name="SaleCommission", description="Sale",
+            raw_data={}, fetched_at=now,
+        ))
+        session.add(OzonPosting(
+            posting_number="old-posting", order_id=1, order_number="1",
+            scheme="fbo", status="delivered", substatus=None,
+            in_process_at=now, shipment_date=now,
+            products=[{"sku": 999, "offer_id": "OLD-1", "name": "Old item"}],
+            analytics_data=None, financial_data=None, raw_data={},
+            created_at=now, updated_at=now,
+        ))
+        session.add(OzonFinancePostingAccrual(
+            source_hash="c" * 64, posting_number="old-posting",
+            accrual_date=now.date(), type_id=10, sku=999, quantity=1,
+            seller_price=Decimal("123.45"), accrued=Decimal("10"),
+            currency="RUB", raw_data={"posting": "old-posting"}, fetched_at=now,
+        ))
+        session.commit()
+
+    result = FinancialSalesFactService("ozon", session_factory=session_factory).run()["result"]
+    assert result["unmatched_products"] == 0
+    with session_factory() as session:
+        fact = session.scalar(select(FactSale))
+        assert fact.master_product_id is not None
+        assert fact.seller_sku == "OLD-1"
+        assert fact.offer_id == "OLD-1"
+        assert fact.marketplace_sku == "999"
+        assert fact.fulfillment_type == "fbo"
 
