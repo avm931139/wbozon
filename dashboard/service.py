@@ -498,7 +498,10 @@ class DashboardService:
                             ELSE 0 END),0)
                             + coalesce(sum(CASE WHEN seller_operation_name NOT IN ('Продажа','Возврат','Бронирование товара через самовывоз') THEN for_pay ELSE 0 END),0)
                             + coalesce(sum(additional_payment),0)
-                            - coalesce(sum(delivery_service+penalty+paid_storage+paid_acceptance+deduction),0) net_payout
+                            - coalesce(sum(
+                                delivery_service+penalty+paid_storage+paid_acceptance+deduction
+                                +coalesce(nullif(raw_data->>'paymentSchedule','')::numeric,0)
+                            ),0) net_payout
                     FROM wb_financial_sales_rows WHERE rr_date>=:b AND rr_date<:u
                 ) SELECT rows,finance_buyouts,finance_buyouts_amount,compensation,
                     finance_buyouts_amount+compensation revenue,
@@ -853,6 +856,7 @@ class DashboardService:
                 ELSE 0 END),0) acquiring,
             coalesce(sum(penalty),0) penalties,
             coalesce(sum(deduction),0) deductions,
+            coalesce(sum(coalesce(nullif(x.raw_data->>'paymentSchedule','')::numeric,0)),0) payment_schedule,
             max(r.details_synced_at) updated_at
             FROM wb_financial_sales_rows x
             JOIN wb_financial_sales_reports r ON r.id=x.report_id
@@ -865,6 +869,7 @@ class DashboardService:
             {"key": "acquiring", "label": "Эквайринг", "amount": wb.get("acquiring")},
             {"key": "penalties", "label": "Штрафы", "amount": wb.get("penalties")},
             {"key": "deductions", "label": "Удержания и прочие услуги", "amount": wb.get("deductions")},
+            {"key": "payment_schedule", "label": "Изменение срока единовременной выплаты", "amount": wb.get("payment_schedule")},
         ]
         ozon_rows = self._many(db, """WITH expense_rows AS (
             SELECT t.name key,

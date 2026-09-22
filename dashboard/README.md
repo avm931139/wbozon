@@ -189,7 +189,8 @@ The WB commission is reconstructed from sale/return revenue, `forPay` and the
 signed acquiring charge. `deduction` reduces payout as shown by the weekly
 report header; `rebill_logistic_cost` remains audit-only because adding it to
 `deliveryService` again would duplicate logistics. The resulting expense lines
-reconcile to the sum of the reports' `bankPaymentSum`, so the generic
+also include the rare `paymentSchedule` charge for changing the one-time payout
+period. They reconcile to the sum of the reports' `bankPaymentSum`, so the generic
 reconciliation line should only appear for a genuinely new or inconsistent WB
 operation.
 Operational sales remain a fallback only until the first Sales Funnel sync.

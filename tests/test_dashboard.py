@@ -304,6 +304,8 @@ def test_wb_pnl_expands_commission_and_does_not_duplicate_rebill_logistics():
     assert '"key": "commission"' in source
     assert "coalesce(sum(delivery_service),0) logistics" in source
     assert "delivery_service+rebill_logistic_cost" not in source
+    assert "paymentSchedule" in source
+    assert '"key": "payment_schedule"' in source
 
 
 def test_dashboard_uses_ozon_finance_accruals_for_buyouts_and_profit():
