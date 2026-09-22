@@ -81,6 +81,26 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Dashboard request failed: %s", self.path)
             self._send(500, b"internal error", "text/plain")
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        try:
+            if parsed.path != "/api/product-cost":
+                self._send(404, b"not found", "text/plain"); return
+            length = int(self.headers.get("Content-Length") or 0)
+            if length < 1 or length > 4096:
+                raise ValueError("invalid request size")
+            payload = json.loads(self.rfile.read(length))
+            if not isinstance(payload, dict):
+                raise ValueError("JSON object expected")
+            result = self.service.update_product_cost(
+                int(payload.get("master_product_id")), payload.get("unit_cost")
+            )
+            self._send(200, json.dumps(result, ensure_ascii=False).encode(), "application/json")
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._send(400, str(exc).encode(), "text/plain; charset=utf-8")
+        except Exception:
+            logger.exception("Dashboard request failed: %s", self.path)
+            self._send(500, b"internal error", "text/plain")
     def _send(self, status, content, content_type):
         self.send_response(status); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(content))); self.send_header("Cache-Control", "no-store"); self.send_header("X-Content-Type-Options", "nosniff"); self.send_header("X-Frame-Options", "DENY"); self.end_headers(); self.wfile.write(content)
     def log_message(self, fmt, *args): return

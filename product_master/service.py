@@ -26,6 +26,20 @@ TEST_SUFFIX_RE = re.compile(
     r"(?:[\s_-]+(?:OLD|TEST\d*|ТЕСТ\d*|D(?:D|\d*)))$",
     re.IGNORECASE,
 )
+ARTICLE_ALIASES = {
+    "8410/6+3 WHT": ("8410/6+3", True),
+    "MDL29829": ("NVL0056", False),
+    "MDL29929": ("NVL0057", False),
+}
+DERIVED_MASTER_TABLES = (
+    "product_barcodes",
+    "fact_sales",
+    "marketplace_product_media",
+    "marketplace_product_attributes",
+    "marketplace_product_catalog_snapshots",
+    "marketplace_current_prices",
+    "marketplace_price_snapshots",
+)
 LOCK_ID = zlib.crc32(b"wbozon:product-master-mapping")
 
 
@@ -46,6 +60,9 @@ def normalize_article(value: str) -> str:
 
 def match_article(article: str, known_articles: set[str]) -> tuple[str, str]:
     """Return an exact article or a known base after a conservative test suffix."""
+    alias = ARTICLE_ALIASES.get(article)
+    if alias and alias[0] in known_articles:
+        return alias[0], "alias_variant" if alias[1] else "alias"
     candidate = TEST_SUFFIX_RE.sub("", article).rstrip(" _-")
     if candidate and candidate != article and candidate in known_articles:
         return candidate, "suffix"
@@ -177,11 +194,11 @@ class ProductMappingService:
                 link.source_article = item.article
                 link.normalized_article = normalized
                 link.match_method = effective_method
-                link.is_test_variant = effective_method == "suffix"
+                link.is_test_variant = effective_method in {"suffix", "alias_variant"}
                 link.product_name = item.name
                 link.active = True
                 link.matched_at = now
-                if effective_method == "suffix":
+                if effective_method != "exact":
                     suffix_links += 1
                 else:
                     exact_links += 1
@@ -194,6 +211,19 @@ class ProductMappingService:
                     inactive_links += 1
 
             session.flush()
+            for alias_article, (canonical_article, _) in ARTICLE_ALIASES.items():
+                alias_master = masters.get(alias_article)
+                canonical_master = masters.get(canonical_article)
+                if (
+                    alias_master is None or canonical_master is None
+                    or alias_master.id == canonical_master.id
+                ):
+                    continue
+                for table_name in DERIVED_MASTER_TABLES:
+                    session.execute(text(
+                        f"UPDATE {table_name} SET master_product_id=:canonical "
+                        "WHERE master_product_id=:alias"
+                    ), {"canonical": canonical_master.id, "alias": alias_master.id})
             active_master_ids = {
                 value for value, in session.query(MarketplaceProductLink.master_product_id).filter_by(
                     active=True

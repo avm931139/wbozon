@@ -41,6 +41,34 @@ def test_article_normalization_and_conservative_suffix_matching():
     assert match_article("UNKNOWN_TEST", known) == ("UNKNOWN_TEST", "exact")
 
 
+def test_explicit_cross_marketplace_article_aliases():
+    known = {"8410/6+3", "NVL0056", "NVL0057"}
+    assert match_article("8410/6+3 WHT", known) == ("8410/6+3", "alias_variant")
+    assert match_article("MDL29829", known) == ("NVL0056", "alias")
+    assert match_article("MDL29929", known) == ("NVL0057", "alias")
+
+
+def test_explicit_alias_sources_share_one_master_product():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    service = StubMappingService([
+        source("ozon", "1", "NVL0056"),
+        source("wb", "2", "NVL0056"),
+        source("yandex_market", "MDL29829", "MDL29829", account_id="3"),
+    ], session_factory=factory)
+
+    service.run()
+
+    with factory() as session:
+        canonical = session.query(MasterProduct).filter_by(article="NVL0056").one()
+        links = session.query(MarketplaceProductLink).filter_by(active=True).all()
+        assert {link.master_product_id for link in links} == {canonical.id}
+        alias = next(link for link in links if link.source_article == "MDL29829")
+        assert alias.match_method == "alias"
+        assert alias.is_test_variant is False
+
+
 def test_mapping_groups_exact_articles_and_known_test_suffixes_idempotently():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

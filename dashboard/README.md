@@ -86,6 +86,11 @@ sources; the card footer identifies the API/report, PostgreSQL table, coverage
 dates and last database refresh. Operational orders and advertising attribution
 are never used as a P&L fallback.
 
+The stocks page shows the latest unit cost beside every normalized product.
+Saving a changed value appends a dated `product_cost_records` row through
+`POST /api/product-cost`; previous values are retained for audit and are not
+overwritten.
+
 The operational page is ordered for daily sales management:
 
 1. a combined all-marketplace summary: ordered products, purchases,

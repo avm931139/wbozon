@@ -1,4 +1,11 @@
+from datetime import datetime, timezone
+
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.db import Base
+from app.models import MasterProduct, ProductCostRecord
 from dashboard.__main__ import HTML, PNL_HTML, STOCKS_HTML
 from dashboard.service import DashboardService
 
@@ -197,6 +204,36 @@ def test_stock_dashboard_has_three_market_images_and_refresh_dates():
     assert "только товары с остатком" in STOCKS_HTML
     assert 'href="/stocks"' in HTML
     assert 'href="/stocks"' in PNL_HTML
+    assert "Себестоимость, ₽" in STOCKS_HTML
+    assert "/api/product-cost" in STOCKS_HTML
+    assert "saveCost(masterId)" in STOCKS_HTML
+
+
+def test_stock_dashboard_cost_edit_appends_history_record():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    now = datetime.now(timezone.utc)
+    with factory() as session:
+        product = MasterProduct(
+            article="SKU-1", name="Product", active=True,
+            created_at=now, updated_at=now,
+        )
+        session.add(product)
+        session.commit()
+        product_id = product.id
+
+    service = DashboardService(session_factory=factory)
+    first = service.update_product_cost(product_id, "123.456")
+    second = service.update_product_cost(product_id, "150.25")
+
+    assert first["unit_cost"] == 123.456
+    assert second["unit_cost"] == 150.25
+    with factory() as session:
+        rows = session.query(ProductCostRecord).order_by(ProductCostRecord.id).all()
+        assert len(rows) == 2
+        assert float(rows[-1].unit_cost) == 150.25
+        assert rows[-1].note == "Изменено вручную на странице остатков"
 
 
 def test_stock_details_uses_current_rows_and_historical_snapshots():

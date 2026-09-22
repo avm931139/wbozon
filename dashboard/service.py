@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
-from decimal import Decimal
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import hashlib
 import mimetypes
 from pathlib import Path
 from typing import Any, Callable
+import uuid
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.config import DASHBOARD_DATABASE_URL, PRODUCT_MEDIA_STORAGE_DIR
+from app.models import MasterProduct, ProductCostImportRun, ProductCostRecord
 
 
 def _number(value: Any) -> float:
@@ -137,10 +140,16 @@ class DashboardService:
                   AND pm.download_status='downloaded' AND pm.local_path IS NOT NULL
             ), images AS (
                 SELECT id,marketplace,row_key FROM media_ranked WHERE rank=1
+            ), costs AS (
+                SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost,effective_at
+                FROM product_cost_records
+                ORDER BY master_product_id,effective_at DESC,id DESC
             )
-            SELECT k.row_key,coalesce(mp.article,wb.source_article,ozon.source_article,
+            SELECT k.row_key,k.master_product_id,
+                   coalesce(mp.article,wb.source_article,ozon.source_article,
                        yandex_market.source_article) article,
                    coalesce(mp.name,wb.source_name,ozon.source_name,yandex_market.source_name) name,
+                   costs.unit_cost,costs.effective_at cost_updated_at,
                    wb.units wb_units,wb.refreshed_at wb_updated_at,wb.data_date wb_data_date,
                    ozon.units ozon_units,ozon.refreshed_at ozon_updated_at,ozon.data_date ozon_data_date,
                    yandex_market.units yandex_units,yandex_market.refreshed_at yandex_updated_at,
@@ -148,6 +157,7 @@ class DashboardService:
                    wb_image.id wb_image_id,ozon_image.id ozon_image_id,
                    yandex_image.id yandex_image_id
             FROM product_keys k LEFT JOIN master_products mp ON mp.id=k.master_product_id
+            LEFT JOIN costs ON costs.master_product_id=k.master_product_id
             LEFT JOIN wb ON wb.row_key=k.row_key LEFT JOIN ozon ON ozon.row_key=k.row_key
             LEFT JOIN yandex_market ON yandex_market.row_key=k.row_key
             LEFT JOIN images wb_image ON wb_image.row_key=k.row_key AND wb_image.marketplace='wb'
@@ -160,8 +170,12 @@ class DashboardService:
             records = [dict(row) for row in db.execute(text(sql), {"d": requested}).mappings().all()]
         rows = []
         for record in records:
-            row = {"key": record["row_key"], "article": record.get("article") or "—",
-                   "name": record.get("name") or ""}
+            row = {"key": record["row_key"],
+                   "master_product_id": record.get("master_product_id"),
+                   "article": record.get("article") or "—",
+                   "name": record.get("name") or "",
+                   "unit_cost": _number(record["unit_cost"]) if record.get("unit_cost") is not None else None,
+                   "cost_updated_at": record.get("cost_updated_at")}
             for marketplace, prefix in (("wb", "wb"), ("ozon", "ozon"),
                                         ("yandex_market", "yandex")):
                 image_id = record.get(f"{prefix}_image_id")
@@ -183,6 +197,53 @@ class DashboardService:
             for marketplace in ("wb", "ozon", "yandex_market")
         }
         return {"requested_date": requested, "current": current, "totals": totals, "rows": rows}
+
+    def update_product_cost(self, master_product_id: int, value: Any) -> dict[str, Any]:
+        if isinstance(master_product_id, bool) or master_product_id <= 0:
+            raise ValueError("invalid master product ID")
+        try:
+            unit_cost = Decimal(str(value)).quantize(
+                Decimal("0.000001"), rounding=ROUND_HALF_UP
+            )
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("invalid unit cost")
+        if unit_cost < 0 or unit_cost > Decimal("1000000000"):
+            raise ValueError("unit cost is outside the allowed range")
+
+        now = datetime.now(timezone.utc)
+        run_id = uuid.uuid4().hex
+        source_hash = hashlib.sha256(
+            f"dashboard:{run_id}:{master_product_id}:{unit_cost}".encode()
+        ).hexdigest()
+        with self.session_factory() as session:
+            product = session.get(MasterProduct, master_product_id)
+            if product is None or not product.active:
+                raise ValueError("active master product was not found")
+            previous = session.query(ProductCostRecord).filter_by(
+                master_product_id=master_product_id
+            ).order_by(
+                ProductCostRecord.effective_at.desc(), ProductCostRecord.id.desc()
+            ).first()
+            session.add(ProductCostImportRun(
+                id=run_id, source_file="dashboard-manual-edit",
+                source_sha256=source_hash, started_at=now, finished_at=now,
+                status="completed", rows_total=1, rows_imported=1,
+                rows_skipped_blank=0,
+            ))
+            session.add(ProductCostRecord(
+                import_run_id=run_id, master_product_id=product.id,
+                article=product.article, product_name=product.name,
+                unit_cost=unit_cost,
+                quantity=int(previous.quantity if previous else 0),
+                currency="RUB", effective_at=now, source_row=1,
+                note="Изменено вручную на странице остатков", created_at=now,
+            ))
+            session.commit()
+            article = product.article
+        return {
+            "master_product_id": master_product_id, "article": article,
+            "unit_cost": float(unit_cost), "effective_at": now.isoformat(),
+        }
 
     def product_image(self, media_id: int) -> tuple[Path, str]:
         with self.session_factory() as db:
