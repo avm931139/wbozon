@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime, time
 from io import BytesIO
 from typing import Any
 
@@ -8,6 +9,12 @@ from openpyxl.styles import Font, PatternFill
 
 
 MARKET_NAMES = {"wb": "Wildberries", "ozon": "Ozon", "yandex_market": "Яндекс Маркет"}
+
+
+def _cell_value(value: Any) -> Any:
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    return value
 
 
 def _finish(workbook: Workbook) -> bytes:
@@ -91,9 +98,11 @@ def stocks_excel(data: dict[str, Any]) -> bytes:
                   "WB, шт.", "WB обновлено", "Ozon, шт.", "Ozon обновлено",
                   "Яндекс, шт.", "Яндекс обновлено"])
     for row in data.get("rows", []):
-        sheet.append([row.get("article"), row.get("name"), row.get("unit_cost"),
-                      row.get("cost_updated_at"), row["wb"].get("quantity"),
-                      row["wb"].get("updated_at"), row["ozon"].get("quantity"),
-                      row["ozon"].get("updated_at"), row["yandex_market"].get("quantity"),
-                      row["yandex_market"].get("updated_at")])
+        sheet.append([_cell_value(value) for value in (
+            row.get("article"), row.get("name"), row.get("unit_cost"),
+            row.get("cost_updated_at"), row["wb"].get("quantity"),
+            row["wb"].get("updated_at"), row["ozon"].get("quantity"),
+            row["ozon"].get("updated_at"), row["yandex_market"].get("quantity"),
+            row["yandex_market"].get("updated_at"),
+        )])
     return _finish(workbook)

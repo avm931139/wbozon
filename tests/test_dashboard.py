@@ -252,14 +252,16 @@ def test_dashboard_excel_exports_are_valid_workbooks():
     assert finance_book.sheetnames == ["P&L", "Расходы"]
     assert finance_book["P&L"]["B2"].value == "2026-09-01"
 
+    aware_time = datetime(2026, 9, 1, 1, tzinfo=timezone.utc)
     stock_row = {"article": "SKU-1", "name": "Товар", "unit_cost": 30,
-                 "cost_updated_at": "2026-09-01T00:00:00+03:00"}
-    stock_row.update({key: {"quantity": 2, "updated_at": "2026-09-01T01:00:00+03:00"}
+                 "cost_updated_at": aware_time}
+    stock_row.update({key: {"quantity": 2, "updated_at": aware_time}
                       for key in markets})
     stock = stocks_excel({"rows": [stock_row]})
     stock_book = load_workbook(BytesIO(stock), read_only=True)
     assert stock_book.sheetnames == ["Остатки"]
     assert stock_book["Остатки"]["A2"].value == "SKU-1"
+    assert stock_book["Остатки"]["D2"].value == "2026-09-01T01:00:00+00:00"
 
 
 def test_stock_dashboard_cost_edit_appends_history_record():
