@@ -67,10 +67,11 @@ def allocate_ozon_advertising(
     weights: dict[str, int],
     direct: dict[str, int],
 ) -> tuple[dict[str, int], int, str]:
-    """Keep SKU-level spend and allocate campaign-only Ozon spend by revenue."""
+    """Keep SKU-level spend and allocate only campaign-level spend by revenue."""
     advertising = {key: int(direct.get(key, 0)) for key in weights}
     mapped_total = sum(advertising.values())
-    residual = int(total) - mapped_total
+    unmatched_direct = int(direct.get("unallocated", 0))
+    residual = int(total) - mapped_total - unmatched_direct
     allocated = allocate_kopecks(residual, weights)
     for key, value in allocated.items():
         advertising[key] += value
@@ -401,6 +402,10 @@ class ProductEconomicsBuilder:
                     {
                         key: direct_ads.get((account, business_date, key), 0)
                         for key in day_rows
+                    } | {
+                        "unallocated": direct_ads.get(
+                            (account, business_date, "unallocated"), 0
+                        )
                     },
                 )
             else:
@@ -408,8 +413,22 @@ class ProductEconomicsBuilder:
                     key: direct_ads.get((account, business_date, key), 0)
                     for key in day_rows
                 }
+                direct_unallocated = direct_ads.get(
+                    (account, business_date, "unallocated"), 0
+                )
+                total_advertising = ad_totals.get((account, business_date), 0)
+                residual = total_advertising - sum(advertising.values()) - direct_unallocated
+                ad_unallocated = direct_unallocated + residual
                 ad_method = "direct_product_report"
-                ad_unallocated = ad_totals.get((account, business_date), 0) - sum(advertising.values())
+                if residual < 0 and (advertising or direct_unallocated):
+                    reconciliation_weights = dict(advertising)
+                    if direct_unallocated:
+                        reconciliation_weights["unallocated"] = direct_unallocated
+                    corrections = allocate_kopecks(residual, reconciliation_weights)
+                    for key in advertising:
+                        advertising[key] += corrections.get(key, 0)
+                    ad_unallocated = direct_unallocated + corrections.get("unallocated", 0)
+                    ad_method = "direct_reconciled"
             needs_unallocated = not day_rows and any((
                 target["revenue"], target["expense"], target["logistics"],
                 ad_totals.get((account, business_date), 0),
@@ -452,6 +471,7 @@ class ProductEconomicsBuilder:
                 ))
                 detail = ad_details.get((account, business_date, key), {})
                 ad_spend = advertising.get(key, 0)
+                direct_ad_spend = direct_ads.get((account, business_date, key), 0)
                 if ad_spend or any(int(detail.get(field) or 0) for field in (
                     "views", "clicks", "orders", "attributed_revenue_kopecks"
                 )):
@@ -468,6 +488,8 @@ class ProductEconomicsBuilder:
                         clicks=int(detail.get("clicks") or 0),
                         orders=int(detail.get("orders") or 0),
                         spend_kopecks=ad_spend,
+                        direct_spend_kopecks=direct_ad_spend,
+                        allocated_spend_kopecks=ad_spend - direct_ad_spend,
                         attributed_revenue_kopecks=int(
                             detail.get("attributed_revenue_kopecks") or 0
                         ),

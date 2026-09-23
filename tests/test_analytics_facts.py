@@ -74,6 +74,17 @@ def test_ozon_advertising_without_sales_stays_explicitly_unallocated():
     assert method == "allocated_by_revenue"
 
 
+def test_unmatched_direct_advertising_is_not_allocated_to_other_products():
+    advertising, unallocated, method = allocate_ozon_advertising(
+        5000,
+        {"sku-a": 10000},
+        {"sku-a": 1000, "unallocated": 1500},
+    )
+    assert advertising == {"sku-a": 3500}
+    assert unallocated == 1500
+    assert method == "direct_plus_revenue"
+
+
 def test_kopeck_reconciliation_preserves_group_control_total():
     rows = [
         PendingFact({
@@ -200,6 +211,8 @@ def test_yandex_financial_components_become_one_sale_and_one_return_fact():
         advertising = session.scalar(select(FactAdvertisingDaily))
         assert advertising.master_product_id == economics.master_product_id
         assert advertising.spend_kopecks == 1000
+        assert advertising.direct_spend_kopecks == 1000
+        assert advertising.allocated_spend_kopecks == 0
         assert advertising.views == 10
         assert advertising.clicks == 3
         assert advertising.orders == 1

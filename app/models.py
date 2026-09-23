@@ -2002,6 +2002,8 @@ class FactAdvertisingDaily(Base):
     clicks = Column(BigInteger, nullable=False, default=0)
     orders = Column(BigInteger, nullable=False, default=0)
     spend_kopecks = Column(BigInteger, nullable=False, default=0)
+    direct_spend_kopecks = Column(BigInteger, nullable=False, default=0)
+    allocated_spend_kopecks = Column(BigInteger, nullable=False, default=0)
     attributed_revenue_kopecks = Column(BigInteger, nullable=False, default=0)
     allocation_method = Column(String(40), nullable=False)
     calculation_version = Column(String(30), nullable=False)
