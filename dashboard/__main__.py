@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 from app.config import DASHBOARD_HOST, DASHBOARD_PORT
 from dashboard.service import DashboardService
+from dashboard.excel import operational_excel, pnl_excel, stocks_excel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -72,6 +73,20 @@ class Handler(BaseHTTPRequestHandler):
                 query = parse_qs(parsed.query); image_id = int((query.get("id") or [""])[0])
                 target, content_type = self.service.product_image(image_id)
                 self._send(200, target.read_bytes(), content_type)
+            elif parsed.path == "/api/export":
+                query = parse_qs(parsed.query); report = (query.get("report") or [""])[0]
+                if report == "operational":
+                    payload = self.service.summary((query.get("from") or [None])[0], (query.get("to") or [None])[0])
+                    content = operational_excel(payload); filename = f"operational_{payload['period']['from']}_{payload['period']['to']}.xlsx"
+                elif report == "pnl":
+                    payload = self.service.pnl((query.get("from") or [None])[0], (query.get("to") or [None])[0])
+                    content = pnl_excel(payload); filename = f"pnl_{payload['period']['from']}_{payload['period']['to']}.xlsx"
+                elif report == "stocks":
+                    payload = self.service.stock_details((query.get("date") or [None])[0])
+                    content = stocks_excel(payload); filename = f"stocks_{payload['requested_date']}.xlsx"
+                else:
+                    raise ValueError("unknown export report")
+                self._send(200, content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", {"Content-Disposition": f'attachment; filename="{filename}"'})
             elif parsed.path == "/": self._send(200, HTML.encode(), "text/html; charset=utf-8")
             elif parsed.path == "/pnl": self._send(200, PNL_HTML.encode(), "text/html; charset=utf-8")
             elif parsed.path == "/stocks": self._send(200, STOCKS_HTML.encode(), "text/html; charset=utf-8")
@@ -101,8 +116,10 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Dashboard request failed: %s", self.path)
             self._send(500, b"internal error", "text/plain")
-    def _send(self, status, content, content_type):
-        self.send_response(status); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(content))); self.send_header("Cache-Control", "no-store"); self.send_header("X-Content-Type-Options", "nosniff"); self.send_header("X-Frame-Options", "DENY"); self.end_headers(); self.wfile.write(content)
+    def _send(self, status, content, content_type, headers=None):
+        self.send_response(status); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(content))); self.send_header("Cache-Control", "no-store"); self.send_header("X-Content-Type-Options", "nosniff"); self.send_header("X-Frame-Options", "DENY")
+        for key,value in (headers or {}).items(): self.send_header(key,value)
+        self.end_headers(); self.wfile.write(content)
     def log_message(self, fmt, *args): return
 
 

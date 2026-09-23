@@ -1,12 +1,15 @@
 from datetime import datetime, timezone
+from io import BytesIO
 
 import pytest
+from openpyxl import load_workbook
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
 from app.models import MasterProduct, ProductCostRecord
 from dashboard.__main__ import HTML, PNL_HTML, STOCKS_HTML
+from dashboard.excel import operational_excel, pnl_excel, stocks_excel
 from dashboard.service import DashboardService
 
 def test_dashboard_period_defaults_to_current_day():
@@ -207,6 +210,56 @@ def test_stock_dashboard_has_three_market_images_and_refresh_dates():
     assert "Себестоимость, ₽" in STOCKS_HTML
     assert "/api/product-cost" in STOCKS_HTML
     assert "saveCost(masterId)" in STOCKS_HTML
+
+
+def test_all_dashboard_pages_export_the_selected_filter_to_excel():
+    assert "Выгрузить в Excel" in HTML
+    assert "report:'operational',from:fromInput.value,to:toInput.value" in HTML
+    assert "Выгрузить в Excel" in PNL_HTML
+    assert "report:'pnl',from:from.value,to:to.value" in PNL_HTML
+    assert "Выгрузить в Excel" in STOCKS_HTML
+    assert "report:'stocks',date:dateInput.value" in STOCKS_HTML
+
+
+def test_dashboard_excel_exports_are_valid_workbooks():
+    markets = {
+        key: {"orders": 1, "orders_amount": 100, "cancelled": 0,
+              "buyouts": 1, "buyouts_amount": 90}
+        for key in ("wb", "ozon", "yandex_market")
+    }
+    operations = operational_excel({
+        "marketplaces": markets,
+        "ads": {key: {"spend": 5} for key in markets},
+        "stocks": {key: {"units": 2, "cost_value": 50} for key in markets},
+        "cabinet_analytics": {key: {"complete": True, "coverage_days": 1,
+                                     "expected_days": 1, "ordered_items": 1,
+                                     "ordered_amount": 100, "source": "API"} for key in markets},
+        "series": [{"day": "2026-09-01", "marketplace": "wb", "orders": 1, "revenue": 100}],
+    })
+    operational_book = load_workbook(BytesIO(operations), read_only=True)
+    assert operational_book.sheetnames == ["Показатели", "Кабинетная аналитика", "Заказы по дням"]
+    assert operational_book["Показатели"]["A2"].value == "Wildberries"
+
+    available = {"available": True, "sales_revenue": 100, "compensation": 1,
+                 "revenue": 101, "expenses": 20, "net_payout": 81,
+                 "cost_of_goods": 30, "profit": 51,
+                 "expense_lines": [{"label": "Комиссия", "category_label": "Комиссия",
+                                    "amount": 20, "share_percent": 19.8, "source": "API"}]}
+    finance = pnl_excel({"period": {"from": "2026-09-01", "to": "2026-09-07"},
+                         "total": available,
+                         "marketplaces": {key: available for key in markets}})
+    finance_book = load_workbook(BytesIO(finance), read_only=True)
+    assert finance_book.sheetnames == ["P&L", "Расходы"]
+    assert finance_book["P&L"]["B2"].value == "2026-09-01"
+
+    stock_row = {"article": "SKU-1", "name": "Товар", "unit_cost": 30,
+                 "cost_updated_at": "2026-09-01T00:00:00+03:00"}
+    stock_row.update({key: {"quantity": 2, "updated_at": "2026-09-01T01:00:00+03:00"}
+                      for key in markets})
+    stock = stocks_excel({"rows": [stock_row]})
+    stock_book = load_workbook(BytesIO(stock), read_only=True)
+    assert stock_book.sheetnames == ["Остатки"]
+    assert stock_book["Остатки"]["A2"].value == "SKU-1"
 
 
 def test_stock_dashboard_cost_edit_appends_history_record():

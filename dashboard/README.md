@@ -91,6 +91,12 @@ Saving a changed value appends a dated `product_cost_records` row through
 `POST /api/product-cost`; previous values are retained for audit and are not
 overwritten.
 
+Every page has an `Выгрузить в Excel` button. Operational and P&L exports use
+the date range currently selected in the page filters; the stock export uses
+the selected stock date. Files are built from the same service payload as the
+visible page through `/api/export?report=operational|pnl|stocks`, so exporting
+does not trigger marketplace API requests.
+
 The operational page is ordered for daily sales management:
 
 1. a combined all-marketplace summary: ordered products, purchases,

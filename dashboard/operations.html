@@ -37,6 +37,7 @@
       <div class="field"><label for="to">По дату</label><input id="to" type="date" title="Конец периода"></div>
       <div class="field"><label for="month">Быстрый выбор месяца</label><input id="month" type="month" title="Выбрать месяц" onchange="selectMonth()"></div>
       <button onclick="load()">Обновить</button>
+      <button onclick="exportExcel()">Выгрузить в Excel</button>
     </div>
   </header>
   <main>
@@ -92,6 +93,10 @@
       const [year,value]=monthInput.value.split('-').map(Number);
       const lastDay=new Date(year,value,0);
       fromInput.value=`${monthInput.value}-01`;toInput.value=iso(lastDay>now?now:lastDay);load();
+    }
+    function exportExcel(){
+      const query=new URLSearchParams({report:'operational',from:fromInput.value,to:toInput.value});
+      window.location.href='/api/export?'+query;
     }
     function monthProjection(rows,marketplace,period){
       const month=period.to.slice(0,7),monthStart=`${month}-01`,sampleStart=period.from>monthStart?period.from:monthStart;
