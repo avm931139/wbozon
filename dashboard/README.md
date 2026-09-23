@@ -19,6 +19,21 @@ authentication, and is not exposed on the public VPS address. Files are in
 `deploy/nginx/wbozon-dashboard.conf` and
 `deploy/systemd/wbozon-dashboard.service`.
 
+The initial installer creates a self-signed leaf certificate. To replace it
+with a proper private CA and a server certificate containing
+`subjectAltName=IP:10.8.0.1`, run:
+
+```bash
+sudo bash deploy/install-dashboard-ca.sh wbozon
+```
+
+The script never restarts or edits OpenVPN. It validates `tun0`, backs up the
+previous server certificate, tests Nginx before reload, keeps the private CA
+key root-only in `/etc/nginx/ssl`, and exports only the public trust certificate
+to `/home/wbozon/wbozon-dashboard-ca.crt`. Copy that public file to each client
+and add it to the operating system's trusted root certificate store. Never copy
+`/etc/nginx/ssl/wbozon-dashboard-ca.key` from the VPS.
+
 On the production VPS, installation is one interactive command (the script asks
 for the dashboard password and does not print or store it in the repository):
 

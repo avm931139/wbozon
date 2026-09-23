@@ -148,6 +148,36 @@ stat -c '%a %U:%G %n' /home/wbozon/wbozon/.env /home/wbozon/.ssh/telegram_relay
 https://10.8.0.1:28443
 ```
 
+### Доверенный внутренний сертификат дашборда
+
+Первичная установка использует самоподписанный сертификат. Чтобы браузер не
+показывал предупреждение, создайте внутренний CA и подпишите им сертификат
+VPN-адреса:
+
+```bash
+cd /home/wbozon/wbozon
+sudo bash deploy/install-dashboard-ca.sh wbozon
+```
+
+Скрипт не меняет и не перезапускает OpenVPN. Предыдущая пара сертификата и
+ключа сохраняется в root-only каталоге `/etc/nginx/ssl/dashboard-cert-backup.*`,
+а Nginx получает только `reload` после успешного `nginx -t`.
+
+Публичный корневой сертификат появится в
+`/home/wbozon/wbozon-dashboard-ca.crt`. На рабочем компьютере Windows его нужно
+скачать, проверить отпечаток и установить из PowerShell от администратора:
+
+```powershell
+(Get-PfxCertificate .\wbozon-dashboard-ca.crt).Thumbprint
+certutil -addstore -f Root .\wbozon-dashboard-ca.crt
+```
+
+Первую строку сравните с отпечатком SHA1, напечатанным установочным скриптом
+(двоеточия в выводе OpenSSL не учитываются), и только затем выполняйте импорт.
+
+Закрытый файл `/etc/nginx/ssl/wbozon-dashboard-ca.key` нельзя скачивать или
+передавать: он должен оставаться доступным только root на VPS.
+
 После входа доступны два независимых раздела:
 
 - `/` — оперативные заказы, выкупы, отмены, реклама и остатки;
