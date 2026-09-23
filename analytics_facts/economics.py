@@ -9,6 +9,7 @@ from sqlalchemy import delete
 
 from app.config import OZON_CLIENT_ID
 from app.models import (
+    FactAdvertisingDaily,
     FactProductEconomicsControl,
     FactProductEconomicsDaily,
     MarketplaceProductLink,
@@ -59,6 +60,28 @@ def allocate_kopecks(total: int, weights: dict[str, int]) -> dict[str, int]:
     for _, key in sorted(remainders, key=lambda item: (-item[0], item[1]))[:residual]:
         result[key] += sign
     return result
+
+
+def allocate_ozon_advertising(
+    total: int,
+    weights: dict[str, int],
+    direct: dict[str, int],
+) -> tuple[dict[str, int], int, str]:
+    """Keep SKU-level spend and allocate campaign-only Ozon spend by revenue."""
+    advertising = {key: int(direct.get(key, 0)) for key in weights}
+    mapped_total = sum(advertising.values())
+    residual = int(total) - mapped_total
+    allocated = allocate_kopecks(residual, weights)
+    for key, value in allocated.items():
+        advertising[key] += value
+    unallocated = int(total) - sum(advertising.values())
+    if mapped_total and residual:
+        method = "direct_plus_revenue"
+    elif mapped_total:
+        method = "direct_product_report"
+    else:
+        method = "allocated_by_revenue"
+    return advertising, unallocated, method
 
 
 def _dates(first: date, last: date) -> Iterable[date]:
@@ -225,9 +248,24 @@ class ProductEconomicsBuilder:
             target["cost"] = raw_by_day[key]["cost"]
         return targets
 
-    def _advertising(self, session: Any, links: dict[tuple[str, str, str], MarketplaceProductLink]) -> tuple[dict[tuple[str, date], int], dict[tuple[str, date, str], int]]:
+    def _advertising(
+        self,
+        session: Any,
+        links: dict[tuple[str, str, str], MarketplaceProductLink],
+    ) -> tuple[
+        dict[tuple[str, date], int],
+        dict[tuple[str, date, str], int],
+        dict[tuple[str, date, str], dict[str, Any]],
+    ]:
         totals: dict[tuple[str, date], int] = defaultdict(int)
         products: dict[tuple[str, date, str], int] = defaultdict(int)
+        details: dict[tuple[str, date, str], dict[str, Any]] = defaultdict(
+            lambda: {
+                "views": 0, "clicks": 0, "orders": 0,
+                "attributed_revenue_kopecks": 0,
+                "seller_sku": None, "marketplace_sku": None,
+            }
+        )
         if self.marketplace == "wb":
             daily = {row.id: row for row in session.query(WBAdvertDailyStat).all()}
             for row in daily.values():
@@ -239,19 +277,74 @@ class ProductEconomicsBuilder:
                 link = links.get(("wb", "", str(row.nm_id)))
                 key = f"m:{link.master_product_id}" if link else "unallocated"
                 products[("", parent.stat_date.date(), key)] += _kopecks(row.spend)
+                detail = details[("", parent.stat_date.date(), key)]
+                detail["views"] += int(row.views or 0)
+                detail["clicks"] += int(row.clicks or 0)
+                detail["orders"] += int(row.orders or 0)
+                detail["attributed_revenue_kopecks"] += _kopecks(row.order_sum)
+                detail["seller_sku"] = link.offer_id if link else None
+                detail["marketplace_sku"] = str(row.nm_id)
         elif self.marketplace == "ozon":
             account = str(OZON_CLIENT_ID or "")
             sku_product = {str(row.sku): row for row in session.query(OzonProduct).filter(OzonProduct.sku.isnot(None))}
             for row in session.query(OzonAdDailyStat).all():
-                totals[(account, row.stat_date)] += _kopecks(row.spend)
+                if int(row.sku or 0) == 0:
+                    totals[(account, row.stat_date)] += _kopecks(row.spend)
+                    continue
                 product = sku_product.get(str(row.sku))
                 link = links.get(("ozon", account, str(product.product_id))) if product else None
                 key = f"m:{link.master_product_id}" if link else "unallocated"
                 products[(account, row.stat_date, key)] += _kopecks(row.spend)
+                detail = details[(account, row.stat_date, key)]
+                detail["views"] += int(row.views or 0)
+                detail["clicks"] += int(row.clicks or 0)
+                detail["orders"] += int(row.orders or 0)
+                detail["attributed_revenue_kopecks"] += _kopecks(row.orders_money)
+                detail["seller_sku"] = product.offer_id if product else None
+                detail["marketplace_sku"] = str(row.sku)
+            product_day_totals: dict[tuple[str, date], int] = defaultdict(int)
+            for (row_account, day, _), spend in products.items():
+                product_day_totals[(row_account, day)] += spend
+            for day_key, spend in product_day_totals.items():
+                if day_key not in totals:
+                    totals[day_key] = spend
         else:
             for row in session.query(YandexMarketAdDailyStat).all():
-                totals[(str(row.business_id), row.stat_date)] += _kopecks(row.spend)
-        return totals, products
+                account = str(row.business_id)
+                totals[(account, row.stat_date)] += _kopecks(row.spend)
+                if not row.offer_id and row.source == "sales_boost":
+                    for item in (row.raw_data or {}).get("rows") or []:
+                        offer_id = str(item.get("shopSku") or "")
+                        if not offer_id:
+                            continue
+                        link = links.get(("yandex_market", account, offer_id))
+                        key = f"m:{link.master_product_id}" if link else "unallocated"
+                        products[(account, row.stat_date, key)] += _kopecks(
+                            item.get("billedAmount")
+                        )
+                        detail = details[(account, row.stat_date, key)]
+                        detail["views"] += int(item.get("showsWithFee") or 0)
+                        detail["clicks"] += int(item.get("clicksVendorWithFee") or 0)
+                        detail["orders"] += int(item.get("orderItemsDeliveredWithFee") or 0)
+                        detail["attributed_revenue_kopecks"] += _kopecks(
+                            item.get("ordersGvmDeliveredWithFee")
+                        )
+                        detail["seller_sku"] = offer_id
+                        detail["marketplace_sku"] = offer_id
+                    continue
+                if not row.offer_id:
+                    continue
+                link = links.get(("yandex_market", account, str(row.offer_id)))
+                key = f"m:{link.master_product_id}" if link else "unallocated"
+                products[(account, row.stat_date, key)] += _kopecks(row.spend)
+                detail = details[(account, row.stat_date, key)]
+                detail["views"] += int(row.views or 0)
+                detail["clicks"] += int(row.clicks or 0)
+                detail["orders"] += int(row.orders or 0)
+                detail["attributed_revenue_kopecks"] += _kopecks(row.attributed_revenue)
+                detail["seller_sku"] = str(row.offer_id)
+                detail["marketplace_sku"] = str(row.offer_id)
+        return totals, products, details
 
     def build(
         self,
@@ -262,12 +355,15 @@ class ProductEconomicsBuilder:
     ) -> tuple[int, int]:
         base = self._base_rows(pending_values)
         targets = self._targets(session, base)
-        ad_totals, direct_ads = self._advertising(session, links)
+        ad_totals, direct_ads, ad_details = self._advertising(session, links)
         session.execute(delete(FactProductEconomicsDaily).where(
             FactProductEconomicsDaily.marketplace == self.marketplace
         ))
         session.execute(delete(FactProductEconomicsControl).where(
             FactProductEconomicsControl.marketplace == self.marketplace
+        ))
+        session.execute(delete(FactAdvertisingDaily).where(
+            FactAdvertisingDaily.marketplace == self.marketplace
         ))
         day_keys = set(targets) | set(ad_totals) | {(account, day) for account, day, _ in base}
         economics_count = 0
@@ -298,16 +394,22 @@ class ProductEconomicsBuilder:
             compensation = allocate_kopecks(int(target["revenue"]) - raw_revenue, weights)
             expenses = allocate_kopecks(int(target["expense"]), weights)
             logistics = allocate_kopecks(int(target["logistics"]), weights)
-            if self.marketplace == "yandex_market":
-                advertising = allocate_kopecks(ad_totals.get((account, business_date), 0), weights)
-                ad_method = "allocated_by_revenue"
+            if self.marketplace in {"ozon", "yandex_market"}:
+                advertising, ad_unallocated, ad_method = allocate_ozon_advertising(
+                    ad_totals.get((account, business_date), 0),
+                    weights,
+                    {
+                        key: direct_ads.get((account, business_date, key), 0)
+                        for key in day_rows
+                    },
+                )
             else:
                 advertising = {
                     key: direct_ads.get((account, business_date, key), 0)
                     for key in day_rows
                 }
                 ad_method = "direct_product_report"
-            ad_unallocated = ad_totals.get((account, business_date), 0) - sum(advertising.values())
+                ad_unallocated = ad_totals.get((account, business_date), 0) - sum(advertising.values())
             needs_unallocated = not day_rows and any((
                 target["revenue"], target["expense"], target["logistics"],
                 ad_totals.get((account, business_date), 0),
@@ -348,6 +450,31 @@ class ProductEconomicsBuilder:
                     calculation_version=CALCULATION_VERSION,
                     normalized_at=normalized_at,
                 ))
+                detail = ad_details.get((account, business_date, key), {})
+                ad_spend = advertising.get(key, 0)
+                if ad_spend or any(int(detail.get(field) or 0) for field in (
+                    "views", "clicks", "orders", "attributed_revenue_kopecks"
+                )):
+                    session.add(FactAdvertisingDaily(
+                        marketplace=self.marketplace,
+                        account_id=account,
+                        business_date=business_date,
+                        product_key=key,
+                        master_product_id=row.get("master_product_id"),
+                        seller_sku=detail.get("seller_sku") or row.get("seller_sku"),
+                        marketplace_sku=detail.get("marketplace_sku"),
+                        is_unallocated=key == "unallocated",
+                        views=int(detail.get("views") or 0),
+                        clicks=int(detail.get("clicks") or 0),
+                        orders=int(detail.get("orders") or 0),
+                        spend_kopecks=ad_spend,
+                        attributed_revenue_kopecks=int(
+                            detail.get("attributed_revenue_kopecks") or 0
+                        ),
+                        allocation_method=ad_method,
+                        calculation_version=CALCULATION_VERSION,
+                        normalized_at=normalized_at,
+                    ))
                 economics_count += 1
             actual_revenue = sum(
                 int(row["sales_revenue_kopecks"]) + compensation.get(key, 0)

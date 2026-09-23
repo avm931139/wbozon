@@ -146,6 +146,29 @@ def test_no_data_report_is_saved_as_zero_day():
         assert row.spend == 0
 
 
+def test_sales_boost_rows_keep_offer_identity_instead_of_collapsing_products():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    service = YandexMarketAdvertisingService(
+        api=object(), session_factory=factory, business_id=777
+    )
+
+    saved = service._replace("sales_boost", date(2026, 9, 6), [
+        {"shopSku": "SKU-1", "billedAmount": 10},
+        {"shopSku": "SKU-2", "billedAmount": 20},
+    ])
+
+    assert saved == 2
+    with factory() as session:
+        rows = session.query(YandexMarketAdDailyStat).order_by(
+            YandexMarketAdDailyStat.offer_id
+        ).all()
+        assert [(row.offer_id, row.spend) for row in rows] == [
+            ("SKU-1", 10), ("SKU-2", 20),
+        ]
+
+
 def test_business_id_is_discovered_from_identity_data():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

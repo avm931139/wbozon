@@ -60,8 +60,111 @@ class OzonPerformanceService:
             session.commit()
         return len(rows)
 
+    def sync_product_stats(self, *, history_from: date | None = None) -> int:
+        history_floor = date.fromisoformat(OZON_HISTORY_FROM)
+        end = self.today() - timedelta(days=1)
+        with SessionLocal() as session:
+            latest = session.query(OzonAdDailyStat.stat_date).filter(
+                OzonAdDailyStat.sku != 0
+            ).order_by(OzonAdDailyStat.stat_date.desc()).first()
+        start = max(history_floor, history_from) if history_from else (
+            max(history_floor, latest[0] - timedelta(days=OZON_SYNC_OVERLAP_DAYS))
+            if latest else history_floor
+        )
+        if start > end:
+            return 0
+        saved = 0
+        cursor = start
+        while cursor <= end:
+            chunk_end = min(end, cursor + timedelta(days=61))
+            with SessionLocal() as session:
+                campaign_ids = [
+                    str(value) for value, in session.query(
+                        OzonAdDailyStat.campaign_id
+                    ).join(
+                        OzonAdCampaign,
+                        OzonAdCampaign.campaign_id == OzonAdDailyStat.campaign_id,
+                    ).filter(
+                        OzonAdCampaign.campaign_type == "SKU",
+                        OzonAdDailyStat.sku == 0,
+                        OzonAdDailyStat.spend != 0,
+                        OzonAdDailyStat.stat_date.between(cursor, chunk_end),
+                    ).distinct().order_by(OzonAdDailyStat.campaign_id).all()
+                ]
+            for offset in range(0, len(campaign_ids), 10):
+                batch = campaign_ids[offset:offset + 10]
+                rows = self.api.historical_product_statistics(batch, cursor, chunk_end)
+                saved += self._replace_product_stats(batch, cursor, chunk_end, rows)
+            cursor = chunk_end + timedelta(days=1)
+        return saved
+
+    @staticmethod
+    def _report_date(value: Any) -> date | None:
+        text = str(value or "").strip()
+        for pattern in ("%d.%m.%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(text, pattern).date()
+            except ValueError:
+                pass
+        return None
+
+    def _replace_product_stats(
+        self,
+        campaign_ids: list[str],
+        date_from: date,
+        date_to: date,
+        rows: list[dict[str, Any]],
+    ) -> int:
+        now = datetime.now(timezone.utc)
+        grouped: dict[tuple[date, int, int], dict[str, Any]] = {}
+        for item in rows:
+            day = self._report_date(item.get("date"))
+            campaign_id = item.get("campaignId")
+            sku = item.get("sku")
+            if day is None or campaign_id in (None, "") or sku in (None, "", "0", 0):
+                continue
+            key = (day, int(campaign_id), int(sku))
+            value = grouped.setdefault(key, {
+                "views": 0, "clicks": 0, "orders": 0,
+                "orders_money": Decimal("0"), "spend": Decimal("0"), "rows": [],
+            })
+            value["views"] += int(item.get("views") or 0)
+            value["clicks"] += int(item.get("clicks") or 0)
+            value["orders"] += int(item.get("orders") or item.get("models") or 0)
+            orders_money = _money(item.get("ordersMoney"))
+            value["orders_money"] += orders_money or _money(item.get("modelsMoney"))
+            value["spend"] += _money(item.get("moneySpent") or item.get("expense"))
+            value["rows"].append(item)
+        with SessionLocal() as session:
+            session.query(OzonAdDailyStat).filter(
+                OzonAdDailyStat.campaign_id.in_([int(value) for value in campaign_ids]),
+                OzonAdDailyStat.sku != 0,
+                OzonAdDailyStat.stat_date.between(date_from, date_to),
+            ).delete(synchronize_session=False)
+            for (day, campaign_id, sku), item in grouped.items():
+                session.add(OzonAdDailyStat(
+                    stat_date=day,
+                    campaign_id=campaign_id,
+                    sku=sku,
+                    views=item["views"],
+                    clicks=item["clicks"],
+                    orders=item["orders"],
+                    orders_money=item["orders_money"],
+                    spend=item["spend"],
+                    raw_data={"rows": item["rows"]},
+                    fetched_at=now,
+                ))
+            session.commit()
+        return len(grouped)
+
     def sync_all(self) -> dict[str, int]:
-        return {"campaigns": len(self.sync_campaigns()), "daily_stats": self.sync_daily_stats()}
+        campaigns = len(self.sync_campaigns())
+        daily_stats = self.sync_daily_stats()
+        return {
+            "campaigns": campaigns,
+            "daily_stats": daily_stats,
+            "product_stats": self.sync_product_stats(),
+        }
 
     @staticmethod
     def summary(date_from: date, date_to: date) -> dict[str, Any]:

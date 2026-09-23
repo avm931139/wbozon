@@ -1578,7 +1578,7 @@ class YandexMarketAdDailyStat(Base):
     __tablename__ = "yandex_market_ad_daily_stats"
     __table_args__ = (
         UniqueConstraint(
-            "business_id", "stat_date", "source", "campaign_id",
+            "business_id", "stat_date", "source", "campaign_id", "offer_id",
             name="uq_yandex_market_ad_daily_stat",
         ),
     )
@@ -1588,6 +1588,7 @@ class YandexMarketAdDailyStat(Base):
     source = Column(String(30), nullable=False, index=True)
     business_id = Column(BigInteger, nullable=False, index=True)
     campaign_id = Column(BigInteger, nullable=False, default=0, index=True)
+    offer_id = Column(String, nullable=False, default="", index=True)
     campaign_name = Column(String, nullable=True)
     views = Column(Integer, nullable=False, default=0)
     clicks = Column(Integer, nullable=False, default=0)
@@ -1962,6 +1963,47 @@ class FactProductEconomicsControl(Base):
     product_rows = Column(Integer, nullable=False, default=0)
     unmatched_rows = Column(Integer, nullable=False, default=0)
     source_complete = Column(Boolean, nullable=False, default=True)
+    calculation_version = Column(String(30), nullable=False)
+    normalized_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class FactAdvertisingDaily(Base):
+    """Normalized daily advertising metrics at the unified-product grain."""
+
+    __tablename__ = "fact_advertising_daily"
+    __table_args__ = (
+        UniqueConstraint(
+            "marketplace", "account_id", "business_date", "product_key",
+            name="uq_fact_advertising_daily_product",
+        ),
+        Index(
+            "ix_fact_advertising_market_date",
+            "marketplace", "business_date",
+        ),
+        Index(
+            "ix_fact_advertising_product_date",
+            "master_product_id", "business_date",
+        ),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    marketplace = Column(String(30), nullable=False, index=True)
+    account_id = Column(String, nullable=False, default="", index=True)
+    business_date = Column(Date, nullable=False, index=True)
+    product_key = Column(String(160), nullable=False, index=True)
+    master_product_id = Column(
+        Integer, ForeignKey("master_products.id", ondelete="RESTRICT"),
+        nullable=True, index=True,
+    )
+    seller_sku = Column(String, nullable=True, index=True)
+    marketplace_sku = Column(String, nullable=True, index=True)
+    is_unallocated = Column(Boolean, nullable=False, default=False, index=True)
+    views = Column(BigInteger, nullable=False, default=0)
+    clicks = Column(BigInteger, nullable=False, default=0)
+    orders = Column(BigInteger, nullable=False, default=0)
+    spend_kopecks = Column(BigInteger, nullable=False, default=0)
+    attributed_revenue_kopecks = Column(BigInteger, nullable=False, default=0)
+    allocation_method = Column(String(40), nullable=False)
     calculation_version = Column(String(30), nullable=False)
     normalized_at = Column(DateTime(timezone=True), nullable=False, index=True)
 

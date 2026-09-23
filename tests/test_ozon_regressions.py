@@ -5,6 +5,7 @@ import pytest
 
 from ozon.exceptions import OzonHTTPError, OzonParseError, OzonRateLimitError
 from ozon.performance.client import OzonPerformanceClient
+from ozon.performance.api import OzonPerformanceAPI
 from ozon.services.overview_service import OzonOverviewService, _finance_operation_id
 from ozon.services.sync_service import OzonSyncService
 from ozon.supplies import OzonSuppliesAPI
@@ -87,6 +88,29 @@ def test_performance_client_rejects_invalid_json():
     client.token = "token"
     with pytest.raises(OzonParseError):
         client.request("GET", "/test")
+
+
+def test_historical_product_statistics_flattens_campaign_json_report():
+    calls = []
+
+    class Client:
+        def request(self, method, path, **kwargs):
+            calls.append((method, path, kwargs))
+            if path == "/api/client/statistics/json":
+                return {"UUID": "report-1"}
+            if path == "/api/client/statistics/report?UUID=report-1":
+                return {"42": {"report": {"rows": [{"date": "01.08.2026", "sku": "7"}]}}}
+            return {"state": "OK", "link": "/api/client/statistics/report?UUID=report-1"}
+
+    rows = OzonPerformanceAPI(Client()).historical_product_statistics(
+        ["42"], date(2026, 8, 1), date(2026, 8, 31), poll_seconds=0
+    )
+
+    assert rows == [{
+        "date": "01.08.2026", "sku": "7",
+        "campaignId": "42", "reportUUID": "report-1",
+    }]
+    assert calls[0][2]["json_body"]["groupBy"] == "DATE"
 
 
 def test_daily_sales_retries_after_exhausted_short_client_rate_limit():

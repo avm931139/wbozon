@@ -13,6 +13,7 @@ from app.db import Base
 from app.models import (
     FactSale,
     FactSaleSource,
+    FactAdvertisingDaily,
     FactProductEconomicsControl,
     FactProductEconomicsDaily,
     MarketplaceProductLink,
@@ -27,10 +28,11 @@ from app.models import (
     WBFinancialSalesReport,
     WBFinancialSalesRow,
     YandexMarketFinanceTransaction,
+    YandexMarketAdDailyStat,
     YandexMarketOffer,
 )
 from analytics_facts import service as fact_service
-from analytics_facts.economics import allocate_kopecks
+from analytics_facts.economics import allocate_kopecks, allocate_ozon_advertising
 
 
 def _session_factory():
@@ -51,6 +53,25 @@ def test_product_economics_allocation_never_loses_a_kopeck():
     assert allocated["a"] > allocated["b"] > allocated["c"]
     negative = allocate_kopecks(-101, {"a": 1, "b": 1})
     assert sum(negative.values()) == -101
+
+
+def test_ozon_campaign_only_advertising_is_allocated_without_losing_total():
+    advertising, unallocated, method = allocate_ozon_advertising(
+        10001,
+        {"sku-a": 300, "sku-b": 100},
+        {"sku-a": 1000, "sku-b": 0},
+    )
+    assert advertising == {"sku-a": 7751, "sku-b": 2250}
+    assert sum(advertising.values()) == 10001
+    assert unallocated == 0
+    assert method == "direct_plus_revenue"
+
+
+def test_ozon_advertising_without_sales_stays_explicitly_unallocated():
+    advertising, unallocated, method = allocate_ozon_advertising(1234, {}, {})
+    assert advertising == {}
+    assert unallocated == 1234
+    assert method == "allocated_by_revenue"
 
 
 def test_kopeck_reconciliation_preserves_group_control_total():
@@ -129,6 +150,16 @@ def test_yandex_financial_components_become_one_sale_and_one_return_fact():
                 quantity=quantity, amount=Decimal(amount),
                 raw_data={"source": source_hash}, fetched_at=now,
             ))
+        session.add(YandexMarketAdDailyStat(
+            stat_date=now.date(), source="sales_boost", business_id=216,
+            campaign_id=0, offer_id="", views=10, clicks=3, orders=1,
+            spend=Decimal("10.00"), attributed_revenue=Decimal("90.00"),
+            raw_data={"rows": [{
+                "shopSku": "SKU-1", "showsWithFee": 10,
+                "clicksVendorWithFee": 3, "orderItemsDeliveredWithFee": 1,
+                "billedAmount": "10.00", "ordersGvmDeliveredWithFee": "90.00",
+            }]}, fetched_at=now,
+        ))
         session.commit()
 
     result = FinancialSalesFactService(
@@ -165,7 +196,15 @@ def test_yandex_financial_components_become_one_sale_and_one_return_fact():
         assert economics.cost_kopecks == 4001
         assert economics.profit_kopecks == 3500
         assert economics.expense_allocation_method == "allocated_by_revenue"
-        assert economics.advertising_allocation_method == "allocated_by_revenue"
+        assert economics.advertising_allocation_method == "direct_product_report"
+        advertising = session.scalar(select(FactAdvertisingDaily))
+        assert advertising.master_product_id == economics.master_product_id
+        assert advertising.spend_kopecks == 1000
+        assert advertising.views == 10
+        assert advertising.clicks == 3
+        assert advertising.orders == 1
+        assert advertising.attributed_revenue_kopecks == 9000
+        assert advertising.allocation_method == "direct_product_report"
         assert control.revenue_kopecks == 7501
         assert control.profit_kopecks == 3500
 

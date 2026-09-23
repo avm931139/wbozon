@@ -194,7 +194,7 @@ class YandexMarketAdvertisingService:
         business_id: int | None = None,
     ) -> int:
         business_id = business_id or self._business_id()
-        grouped: dict[int, dict[str, Any]] = defaultdict(lambda: {
+        grouped: dict[tuple[int, str], dict[str, Any]] = defaultdict(lambda: {
             "campaign_name": None,
             "views": 0,
             "clicks": 0,
@@ -213,7 +213,8 @@ class YandexMarketAdvertisingService:
             campaign_id = 0 if source == "sales_boost" else int(
                 row.get("saleCampaignId") or row.get("campaignId") or 0
             )
-            item = grouped[campaign_id]
+            offer_id = str(row.get("shopSku") or "") if source == "sales_boost" else ""
+            item = grouped[(campaign_id, offer_id)]
             item["campaign_name"] = (
                 row.get("saleCampaignName") or row.get("campaignName") or item["campaign_name"]
             )
@@ -233,19 +234,20 @@ class YandexMarketAdvertisingService:
                 item["attributed_revenue"] += _decimal(row.get("orderedAmount"))
             item["rows"].append(row)
         if not grouped:
-            grouped[0]
+            grouped[(0, "")]
 
         now = datetime.now(timezone.utc)
         with self.session_factory() as session:
             session.query(YandexMarketAdDailyStat).filter_by(
                 business_id=business_id, stat_date=stat_date, source=source
             ).delete(synchronize_session=False)
-            for campaign_id, item in grouped.items():
+            for (campaign_id, offer_id), item in grouped.items():
                 session.add(YandexMarketAdDailyStat(
                     stat_date=stat_date,
                     source=source,
                     business_id=business_id,
                     campaign_id=campaign_id,
+                    offer_id=offer_id,
                     campaign_name=item["campaign_name"],
                     views=item["views"],
                     clicks=item["clicks"],

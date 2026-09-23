@@ -121,9 +121,12 @@ does not trigger marketplace API requests.
 The ABC workbook contains the visible matrix, a kopeck-precision SKU
 calculation sheet, marketplace reconciliation controls, and methodology. The
 daily analytical layer allocates shared financial expenses and logistics by
-positive net revenue without losing kopecks. WB and Ozon advertising is linked
-from product reports; Yandex advertising is explicitly marked as allocated by
-revenue because its current consolidated reports contain no SKU dimension.
+positive net revenue without losing kopecks. WB advertising is linked from its
+product report. Ozon historical Performance reports provide direct SKU spend;
+campaign formats without SKU are allocated by daily revenue. Yandex Sales Boost
+is linked directly by `shopSku`, while formats without a product dimension are
+allocated by revenue. The normalized result is also persisted independently in
+`fact_advertising_daily` with its allocation method.
 
 The operational page is ordered for daily sales management:
 
