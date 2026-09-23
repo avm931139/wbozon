@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 from app.config import DASHBOARD_HOST, DASHBOARD_PORT
 from dashboard.service import DashboardService
-from dashboard.excel import operational_excel, pnl_excel, stocks_excel
+from dashboard.excel import abc_excel, operational_excel, pnl_excel, stocks_excel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -52,6 +52,7 @@ let now=new Date(),last=new Date(now.getFullYear(),now.getMonth(),now.getDate())
 HTML = Path(__file__).with_name("operations.html").read_text(encoding="utf-8")
 PNL_HTML = Path(__file__).with_name("pnl.html").read_text(encoding="utf-8")
 STOCKS_HTML = Path(__file__).with_name("stocks.html").read_text(encoding="utf-8")
+ABC_HTML = Path(__file__).with_name("abc.html").read_text(encoding="utf-8")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -69,6 +70,9 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/stocks":
                 query = parse_qs(parsed.query); payload = self.service.stock_details((query.get("date") or [None])[0])
                 self._send(200, json.dumps(payload, ensure_ascii=False, default=str).encode(), "application/json")
+            elif parsed.path == "/api/abc":
+                query = parse_qs(parsed.query); payload = self.service.abc((query.get("from") or [None])[0], (query.get("to") or [None])[0])
+                self._send(200, json.dumps(payload, ensure_ascii=False, default=str).encode(), "application/json")
             elif parsed.path == "/api/product-image":
                 query = parse_qs(parsed.query); image_id = int((query.get("id") or [""])[0])
                 target, content_type = self.service.product_image(image_id)
@@ -84,12 +88,16 @@ class Handler(BaseHTTPRequestHandler):
                 elif report == "stocks":
                     payload = self.service.stock_details((query.get("date") or [None])[0])
                     content = stocks_excel(payload); filename = f"stocks_{payload['requested_date']}.xlsx"
+                elif report == "abc":
+                    payload = self.service.abc((query.get("from") or [None])[0], (query.get("to") or [None])[0])
+                    content = abc_excel(payload); filename = f"abc_products_{payload['period']['from']}_{payload['period']['to']}.xlsx"
                 else:
                     raise ValueError("unknown export report")
                 self._send(200, content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", {"Content-Disposition": f'attachment; filename="{filename}"'})
             elif parsed.path == "/": self._send(200, HTML.encode(), "text/html; charset=utf-8")
             elif parsed.path == "/pnl": self._send(200, PNL_HTML.encode(), "text/html; charset=utf-8")
             elif parsed.path == "/stocks": self._send(200, STOCKS_HTML.encode(), "text/html; charset=utf-8")
+            elif parsed.path == "/abc": self._send(200, ABC_HTML.encode(), "text/html; charset=utf-8")
             else: self._send(404, b"not found", "text/plain")
         except FileNotFoundError: self._send(404, b"not found", "text/plain")
         except (ValueError, TypeError) as exc: self._send(400, str(exc).encode(), "text/plain; charset=utf-8")

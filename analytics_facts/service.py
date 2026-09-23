@@ -33,6 +33,7 @@ from app.models import (
     YandexMarketFinanceTransaction,
     YandexMarketOffer,
 )
+from analytics_facts.economics import ProductEconomicsBuilder
 
 
 CALCULATION_VERSION = "financial-sales-v1"
@@ -177,6 +178,9 @@ class FinancialSalesFactService:
                     ))
                     lineage_rows += 1
             barcode_rows = self._sync_barcodes(session, links, now)
+            economics_rows, economics_control_days = ProductEconomicsBuilder(
+                self.marketplace
+            ).build(session, [item.values for item in facts], links, now)
             session.commit()
 
         return {
@@ -184,6 +188,8 @@ class FinancialSalesFactService:
             "facts_written": len(facts),
             "lineage_rows": lineage_rows,
             "barcode_rows": barcode_rows,
+            "economics_rows": economics_rows,
+            "economics_control_days": economics_control_days,
             "unmatched_products": sum(
                 item.values.get("master_product_id") is None for item in facts
             ),

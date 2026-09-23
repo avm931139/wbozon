@@ -106,3 +106,74 @@ def stocks_excel(data: dict[str, Any]) -> bytes:
             row["yandex_market"].get("updated_at"),
         )])
     return _finish(workbook)
+
+
+def abc_excel(data: dict[str, Any]) -> bytes:
+    workbook = Workbook()
+    matrix = workbook.active
+    matrix.title = "ABC-матрица"
+    scopes = (("total", "Итого"), ("wb", "Wildberries"), ("ozon", "Ozon"),
+              ("yandex_market", "Яндекс Маркет"))
+    header = ["Артикул", "Наименование", "Нераспределённая строка"]
+    for _, name in scopes:
+        header.extend([
+            f"{name}: выручка, ₽", f"{name}: ABC выручки", f"{name}: доля выручки, %",
+            f"{name}: прибыль, ₽", f"{name}: ABC прибыли", f"{name}: маржа, %",
+            f"{name}: реклама, ₽", f"{name}: ДРР, %",
+            f"{name}: логистика, ₽", f"{name}: логистика, %", f"{name}: логистика на шт., ₽",
+        ])
+    matrix.append(header)
+    for row in data.get("rows", []):
+        values: list[Any] = [row.get("article"), row.get("name"), bool(row.get("is_unallocated"))]
+        for key, _ in scopes:
+            metric = row.get(key) or {}
+            if not metric.get("available"):
+                values.extend([None] * 11)
+                continue
+            values.extend([
+                metric.get("revenue_kopecks", 0) / 100, metric.get("revenue_category"),
+                metric.get("revenue_share_percent"), metric.get("profit_kopecks", 0) / 100,
+                metric.get("profit_category"), metric.get("profit_margin_percent"),
+                metric.get("advertising_kopecks", 0) / 100, metric.get("advertising_drr_percent"),
+                metric.get("logistics_kopecks", 0) / 100, metric.get("logistics_share_percent"),
+                (metric["logistics_per_unit_kopecks"] / 100
+                 if metric.get("logistics_per_unit_kopecks") is not None else None),
+            ])
+        matrix.append(values)
+
+    calculation = workbook.create_sheet("Расчёт по SKU")
+    calculation.append(["Площадка", "Артикул", "Наименование", "Количество",
+                        "Выручка, коп.", "Расходы МП, коп.", "Себестоимость, коп.",
+                        "Прибыль, коп.", "Реклама, коп.", "Логистика, коп.",
+                        "Метод расходов", "Метод рекламы", "Строк без себестоимости"])
+    for row in data.get("rows", []):
+        for key, name in scopes[1:]:
+            metric = row.get(key)
+            if not metric:
+                continue
+            calculation.append([name, row.get("article"), row.get("name"), metric.get("units"),
+                                metric.get("revenue_kopecks"), metric.get("expense_kopecks"),
+                                metric.get("cost_kopecks"), metric.get("profit_kopecks"),
+                                metric.get("advertising_kopecks"), metric.get("logistics_kopecks"),
+                                metric.get("expense_allocation_method"),
+                                metric.get("advertising_allocation_method"),
+                                metric.get("missing_cost_rows")])
+
+    control = workbook.create_sheet("Контроль")
+    control.append(["Площадка", "Покрытие", "Дней", "Ожидалось", "Выручка слоя, коп.",
+                    "Выручка строк, коп.", "Разница, коп.", "Прибыль слоя, коп.",
+                    "Прибыль строк, коп.", "Разница, коп.", "Нераспределённая реклама, коп."])
+    for key, name in scopes[1:]:
+        item = data.get("controls", {}).get(key, {})
+        control.append([name, bool(item.get("available")), item.get("coverage_days"),
+                        item.get("expected_days"), item.get("revenue_kopecks"),
+                        item.get("revenue_actual_kopecks"), item.get("revenue_delta_kopecks"),
+                        item.get("profit_kopecks"), item.get("profit_actual_kopecks"),
+                        item.get("profit_delta_kopecks"), item.get("advertising_unallocated_kopecks")])
+
+    methodology = workbook.create_sheet("Методика")
+    methodology.append(["Параметр", "Значение"])
+    methodology.append(["Период", f"{data['period']['from']} — {data['period']['to']}"])
+    for key, value in data.get("methodology", {}).items():
+        methodology.append([key, value])
+    return _finish(workbook)

@@ -1886,6 +1886,86 @@ class FactSaleSource(Base):
     source_payload_hash = Column(String(64), nullable=True)
 
 
+class FactProductEconomicsDaily(Base):
+    """Daily SKU economics reconciled to the marketplace financial ledger."""
+
+    __tablename__ = "fact_product_economics_daily"
+    __table_args__ = (
+        UniqueConstraint(
+            "marketplace", "account_id", "business_date", "product_key",
+            name="uq_fact_product_economics_daily_key",
+        ),
+        Index(
+            "ix_fact_product_economics_market_date",
+            "marketplace", "business_date",
+        ),
+        Index(
+            "ix_fact_product_economics_product_date",
+            "master_product_id", "business_date",
+        ),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    marketplace = Column(String(30), nullable=False, index=True)
+    account_id = Column(String, nullable=False, default="", index=True)
+    business_date = Column(Date, nullable=False, index=True)
+    product_key = Column(String(160), nullable=False, index=True)
+    master_product_id = Column(
+        Integer, ForeignKey("master_products.id", ondelete="RESTRICT"),
+        nullable=True, index=True,
+    )
+    seller_sku = Column(String, nullable=True, index=True)
+    product_name = Column(String, nullable=True)
+    is_unallocated = Column(Boolean, nullable=False, default=False, index=True)
+    quantity = Column(Integer, nullable=False, default=0)
+    sales_revenue_kopecks = Column(BigInteger, nullable=False, default=0)
+    compensation_kopecks = Column(BigInteger, nullable=False, default=0)
+    revenue_kopecks = Column(BigInteger, nullable=False, default=0)
+    marketplace_expense_kopecks = Column(BigInteger, nullable=False, default=0)
+    logistics_kopecks = Column(BigInteger, nullable=False, default=0)
+    advertising_kopecks = Column(BigInteger, nullable=False, default=0)
+    cost_kopecks = Column(BigInteger, nullable=False, default=0)
+    profit_kopecks = Column(BigInteger, nullable=False, default=0)
+    missing_cost_rows = Column(Integer, nullable=False, default=0)
+    expense_allocation_method = Column(String(40), nullable=False)
+    advertising_allocation_method = Column(String(40), nullable=False)
+    calculation_version = Column(String(30), nullable=False)
+    normalized_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class FactProductEconomicsControl(Base):
+    """Daily marketplace control totals for the SKU economics layer."""
+
+    __tablename__ = "fact_product_economics_controls"
+    __table_args__ = (
+        UniqueConstraint(
+            "marketplace", "account_id", "business_date",
+            name="uq_fact_product_economics_control_day",
+        ),
+        Index(
+            "ix_fact_product_economics_control_market_date",
+            "marketplace", "business_date",
+        ),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    marketplace = Column(String(30), nullable=False, index=True)
+    account_id = Column(String, nullable=False, default="", index=True)
+    business_date = Column(Date, nullable=False, index=True)
+    revenue_kopecks = Column(BigInteger, nullable=False, default=0)
+    marketplace_expense_kopecks = Column(BigInteger, nullable=False, default=0)
+    logistics_kopecks = Column(BigInteger, nullable=False, default=0)
+    advertising_kopecks = Column(BigInteger, nullable=False, default=0)
+    advertising_unallocated_kopecks = Column(BigInteger, nullable=False, default=0)
+    cost_kopecks = Column(BigInteger, nullable=False, default=0)
+    profit_kopecks = Column(BigInteger, nullable=False, default=0)
+    product_rows = Column(Integer, nullable=False, default=0)
+    unmatched_rows = Column(Integer, nullable=False, default=0)
+    source_complete = Column(Boolean, nullable=False, default=True)
+    calculation_version = Column(String(30), nullable=False)
+    normalized_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class ProductCatalogSyncRun(Base):
     __tablename__ = "product_catalog_sync_runs"
 

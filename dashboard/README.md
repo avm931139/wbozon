@@ -58,6 +58,12 @@ The UI is deliberately split into two pages:
   WB → Ozon → Yandex order, quantity and database refresh time. Today uses the
   current stock tables; a past date uses the latest daily snapshot on or before
   that date and clearly displays the actual snapshot date.
+- `/abc` is the financial SKU matrix. It reads only
+  `fact_product_economics_daily` and `fact_product_economics_controls`, never
+  the raw marketplace API tables. Revenue and profit receive independent
+  80/15/5 ABC classes; zero or negative profit is marked `У`. Each marketplace
+  and the consolidated result show revenue, profit, advertising and logistics.
+  The default period is the last fully closed calendar month.
 
 For WB, stock on both the operational page and `/stocks` means physical goods
 on Wildberries warehouses from `/api/v1/warehouse_remains` (`Всего находится
@@ -111,6 +117,13 @@ the date range currently selected in the page filters; the stock export uses
 the selected stock date. Files are built from the same service payload as the
 visible page through `/api/export?report=operational|pnl|stocks`, so exporting
 does not trigger marketplace API requests.
+
+The ABC workbook contains the visible matrix, a kopeck-precision SKU
+calculation sheet, marketplace reconciliation controls, and methodology. The
+daily analytical layer allocates shared financial expenses and logistics by
+positive net revenue without losing kopecks. WB and Ozon advertising is linked
+from product reports; Yandex advertising is explicitly marked as allocated by
+revenue because its current consolidated reports contain no SKU dimension.
 
 The operational page is ordered for daily sales management:
 

@@ -19,6 +19,12 @@ def _number(value: Any) -> float:
     return float(Decimal(str(value or 0)))
 
 
+def _kopecks(value: Any) -> int:
+    return int((Decimal(str(value or 0)) * 100).quantize(
+        Decimal("1"), rounding=ROUND_HALF_UP
+    ))
+
+
 class DashboardService:
     def __init__(self, session_factory: Callable[..., Any] | None = None) -> None:
         if session_factory is None:
@@ -1067,4 +1073,470 @@ class DashboardService:
             "marketplaces": current, "previous_marketplaces": previous,
             "total": self._total_pnl(current),
             "previous_total": self._total_pnl(previous),
+        }
+
+    @staticmethod
+    def _allocate_kopecks(total: int, weights: dict[str, int]) -> dict[str, int]:
+        """Allocate an integer total without losing a kopeck."""
+        positive = {key: max(int(value), 0) for key, value in weights.items()}
+        denominator = sum(positive.values())
+        if not denominator:
+            return {key: 0 for key in weights}
+        sign = -1 if total < 0 else 1
+        absolute = abs(int(total))
+        allocated: dict[str, int] = {}
+        remainders: list[tuple[int, str]] = []
+        for key, weight in positive.items():
+            amount, remainder = divmod(absolute * weight, denominator)
+            allocated[key] = amount * sign
+            remainders.append((remainder, key))
+        residual = absolute - sum(abs(value) for value in allocated.values())
+        for _, key in sorted(remainders, key=lambda item: (-item[0], item[1]))[:residual]:
+            allocated[key] += sign
+        return allocated
+
+    @staticmethod
+    def _abc_categories(values: dict[str, int], *, loss_class: bool = False) -> dict[str, str]:
+        """Classify positive contributions as 80/15/5 while keeping ties together."""
+        result = {
+            key: ("У" if loss_class and int(value) <= 0 else "—")
+            for key, value in values.items()
+        }
+        positive = [(key, int(value)) for key, value in values.items() if int(value) > 0]
+        total = sum(value for _, value in positive)
+        if not total:
+            return result
+        cumulative = 0
+        by_value: dict[int, list[str]] = {}
+        for key, value in positive:
+            by_value.setdefault(value, []).append(key)
+        for value in sorted(by_value, reverse=True):
+            share_before = cumulative / total
+            category = "A" if share_before < 0.80 else "B" if share_before < 0.95 else "C"
+            for key in sorted(by_value[value]):
+                result[key] = category
+            cumulative += value * len(by_value[value])
+        return result
+
+    @staticmethod
+    def _closed_month_period(start: str | None, end: str | None) -> tuple[date, date]:
+        if start or end:
+            return DashboardService.period(start, end)
+        first_current = date.today().replace(day=1)
+        finish = first_current - timedelta(days=1)
+        return finish.replace(day=1), finish
+
+    def _legacy_abc_unused(self, start: str | None, end: str | None) -> dict[str, Any]:
+        """Build a P&L-reconciled product matrix from financial facts."""
+        begin, finish = self._closed_month_period(start, end)
+        pnl = self.pnl(begin.isoformat(), finish.isoformat())
+        market_keys = ("wb", "ozon", "yandex_market")
+        with self.session_factory() as db:
+            products = self._many(db, """SELECT mp.id master_product_id,mp.article,mp.name,
+                    (SELECT media.id FROM marketplace_product_media media
+                     WHERE media.master_product_id=mp.id AND media.active
+                       AND media.media_type='image' AND media.download_status='downloaded'
+                       AND media.local_path IS NOT NULL
+                     ORDER BY CASE media.marketplace WHEN 'wb' THEN 0 WHEN 'ozon' THEN 1 ELSE 2 END,
+                       CASE WHEN lower(media.role) IN ('main','primary','cover') THEN 0 ELSE 1 END,
+                       media.position,media.id LIMIT 1) image_id
+                FROM master_products mp WHERE mp.active ORDER BY mp.article""")
+            facts = self._many(db, """WITH base AS (
+                    SELECT f.marketplace,f.master_product_id,
+                        coalesce('m:'||f.master_product_id::text,
+                            f.marketplace||':'||coalesce(f.seller_sku,f.offer_id,
+                                f.marketplace_sku,'unmatched')) row_key,
+                        coalesce(mp.article,f.seller_sku,f.offer_id,f.marketplace_sku,'—') article,
+                        coalesce(mp.name,f.seller_sku,f.offer_id,f.marketplace_sku,'') name,
+                        f.quantity,f.net_revenue_kopecks,
+                        coalesce(f.cost_amount_kopecks,0) cost_amount_kopecks,
+                        f.cost_status
+                    FROM fact_sales f LEFT JOIN master_products mp ON mp.id=f.master_product_id
+                    WHERE f.business_date BETWEEN :b AND :e AND f.is_financial
+                ) SELECT marketplace,master_product_id,row_key,max(article) article,max(name) name,
+                    sum(quantity)::bigint units,sum(net_revenue_kopecks)::bigint revenue_kopecks,
+                    sum(cost_amount_kopecks)::bigint cost_kopecks,
+                    count(*) FILTER (WHERE cost_status<>'matched') missing_cost_rows
+                FROM base GROUP BY marketplace,master_product_id,row_key""", b=begin, e=finish)
+            ad_rows = self._many(db, """WITH wb AS (
+                    SELECT 'wb' marketplace,l.master_product_id,
+                        sum(p.spend) spend
+                    FROM wb_advert_product_daily_stats p
+                    JOIN wb_advert_daily_stats d ON d.id=p.daily_stat_id
+                    LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active
+                        AND l.external_product_id=p.nm_id::text
+                    WHERE d.stat_date>=:b AND d.stat_date<CAST(:e AS date)+1
+                    GROUP BY l.master_product_id
+                ), ozon AS (
+                    SELECT 'ozon' marketplace,l.master_product_id,sum(a.spend) spend
+                    FROM ozon_ad_daily_stats a
+                    LEFT JOIN ozon_products p ON p.sku=a.sku
+                    LEFT JOIN marketplace_product_links l ON l.marketplace='ozon' AND l.active
+                        AND l.external_product_id=p.product_id::text
+                    WHERE a.stat_date BETWEEN :b AND :e GROUP BY l.master_product_id
+                ) SELECT * FROM wb UNION ALL SELECT * FROM ozon""", b=begin, e=finish)
+            advertising = self._advertising_metrics(db, begin, finish)
+
+        rows: dict[str, dict[str, Any]] = {}
+        for product in products:
+            if product.get("error"):
+                raise RuntimeError(product["error"])
+            key = f"m:{product['master_product_id']}"
+            rows[key] = {
+                "key": key, "master_product_id": product["master_product_id"],
+                "article": product.get("article") or "—", "name": product.get("name") or "",
+                "image_url": f"/api/product-image?id={product['image_id']}" if product.get("image_id") else None,
+                **{marketplace: None for marketplace in market_keys},
+            }
+        grouped_facts: dict[str, dict[str, dict[str, Any]]] = {key: {} for key in market_keys}
+        for fact in facts:
+            if fact.get("error"):
+                raise RuntimeError(fact["error"])
+            marketplace = fact["marketplace"]
+            row_key = fact["row_key"]
+            rows.setdefault(row_key, {
+                "key": row_key, "master_product_id": fact.get("master_product_id"),
+                "article": fact.get("article") or "—", "name": fact.get("name") or "",
+                "image_url": None, **{key: None for key in market_keys},
+            })
+            grouped_facts[marketplace][row_key] = fact
+
+        direct_ads: dict[str, dict[str, int]] = {key: {} for key in market_keys}
+        unlinked_advertising = {key: 0 for key in market_keys}
+        for ad in ad_rows:
+            if ad.get("error"):
+                raise RuntimeError(ad["error"])
+            marketplace = ad["marketplace"]
+            amount = _kopecks(ad.get("spend"))
+            if ad.get("master_product_id") is None:
+                unlinked_advertising[marketplace] += amount
+            else:
+                key = f"m:{ad['master_product_id']}"
+                direct_ads[marketplace][key] = direct_ads[marketplace].get(key, 0) + amount
+
+        allocation_notes: dict[str, dict[str, Any]] = {}
+        for marketplace in market_keys:
+            view = pnl["marketplaces"][marketplace]
+            facts_by_key = grouped_facts[marketplace]
+            if not view.get("available"):
+                allocation_notes[marketplace] = {
+                    "available": False, "notice": view.get("notice"),
+                    "unallocated_advertising_kopecks": 0,
+                }
+                continue
+            weights = {key: max(int(fact.get("revenue_kopecks") or 0), 0)
+                       for key, fact in facts_by_key.items()}
+            if not sum(weights.values()):
+                weights = {key: abs(int(fact.get("revenue_kopecks") or 0))
+                           for key, fact in facts_by_key.items()}
+            revenue_target = _kopecks(view.get("revenue"))
+            expense_target = _kopecks(view.get("expenses"))
+            cost_target = _kopecks(view.get("cost_of_goods"))
+            revenue_raw = sum(int(fact.get("revenue_kopecks") or 0) for fact in facts_by_key.values())
+            cost_raw = sum(int(fact.get("cost_kopecks") or 0) for fact in facts_by_key.values())
+            revenue_adjustments = self._allocate_kopecks(revenue_target - revenue_raw, weights)
+            expense_allocations = self._allocate_kopecks(expense_target, weights)
+            cost_adjustments = self._allocate_kopecks(cost_target - cost_raw, weights)
+            logistics_target = sum(
+                _kopecks(line.get("amount")) for line in view.get("expense_lines", [])
+                if line.get("category") in {"logistics", "returns"}
+            )
+            logistics_allocations = self._allocate_kopecks(logistics_target, weights)
+            ad_target = _kopecks(advertising.get(marketplace, {}).get("performance_spend"))
+            if marketplace == "yandex_market":
+                ads_by_key = self._allocate_kopecks(ad_target, weights)
+                ad_method = "allocated_by_revenue"
+                ad_unallocated = ad_target - sum(ads_by_key.values())
+            else:
+                ads_by_key = direct_ads[marketplace]
+                ad_method = "direct_product_report"
+                ad_unallocated = ad_target - sum(ads_by_key.values())
+            ad_unallocated += unlinked_advertising[marketplace]
+            for key, fact in facts_by_key.items():
+                revenue = int(fact.get("revenue_kopecks") or 0) + revenue_adjustments.get(key, 0)
+                cost = int(fact.get("cost_kopecks") or 0) + cost_adjustments.get(key, 0)
+                expense = expense_allocations.get(key, 0)
+                units = int(fact.get("units") or 0)
+                logistics = logistics_allocations.get(key, 0)
+                ads = ads_by_key.get(key, 0)
+                rows[key][marketplace] = {
+                    "available": True, "units": units,
+                    "revenue_kopecks": revenue, "expense_kopecks": expense,
+                    "cost_kopecks": cost, "profit_kopecks": revenue - expense - cost,
+                    "advertising_kopecks": ads, "advertising_method": ad_method,
+                    "logistics_kopecks": logistics,
+                    "missing_cost_rows": int(fact.get("missing_cost_rows") or 0),
+                    "allocated_revenue_adjustment_kopecks": revenue_adjustments.get(key, 0),
+                    "allocated_expense_kopecks": expense,
+                    "allocated_cost_adjustment_kopecks": cost_adjustments.get(key, 0),
+                }
+            allocation_notes[marketplace] = {
+                "available": True, "advertising_method": ad_method,
+                "unallocated_advertising_kopecks": ad_unallocated,
+                "revenue_target_kopecks": revenue_target,
+                "expense_target_kopecks": expense_target,
+                "cost_target_kopecks": cost_target,
+                "logistics_target_kopecks": logistics_target,
+            }
+
+        for row in rows.values():
+            total = {
+                "available": any(row[key] and row[key].get("available") for key in market_keys),
+                "units": 0, "revenue_kopecks": 0, "expense_kopecks": 0,
+                "cost_kopecks": 0, "profit_kopecks": 0,
+                "advertising_kopecks": 0, "logistics_kopecks": 0,
+                "missing_cost_rows": 0,
+            }
+            for marketplace in market_keys:
+                values = row[marketplace]
+                if not values:
+                    continue
+                for field in ("units", "revenue_kopecks", "expense_kopecks", "cost_kopecks",
+                              "profit_kopecks", "advertising_kopecks", "logistics_kopecks",
+                              "missing_cost_rows"):
+                    total[field] += int(values.get(field) or 0)
+            row["total"] = total
+
+        scopes = ("total", *market_keys)
+        for scope in scopes:
+            values = {key: int(row[scope]["revenue_kopecks"])
+                      for key, row in rows.items() if row.get(scope) and row[scope].get("available")}
+            profits = {key: int(row[scope]["profit_kopecks"])
+                       for key, row in rows.items() if row.get(scope) and row[scope].get("available")}
+            revenue_classes = self._abc_categories(values)
+            profit_classes = self._abc_categories(profits, loss_class=True)
+            positive_revenue = sum(max(value, 0) for value in values.values())
+            positive_profit = sum(max(value, 0) for value in profits.values())
+            for key, revenue in values.items():
+                metric = rows[key][scope]
+                profit = profits[key]
+                metric.update({
+                    "revenue_category": revenue_classes[key],
+                    "revenue_share_percent": revenue / positive_revenue * 100 if positive_revenue else 0,
+                    "profit_category": profit_classes[key],
+                    "profit_share_percent": profit / positive_profit * 100 if positive_profit else 0,
+                    "profit_margin_percent": profit / revenue * 100 if revenue else 0,
+                    "advertising_drr_percent": metric["advertising_kopecks"] / revenue * 100 if revenue else 0,
+                    "logistics_share_percent": metric["logistics_kopecks"] / revenue * 100 if revenue else 0,
+                    "logistics_per_unit_kopecks": (
+                        int(round(metric["logistics_kopecks"] / metric["units"]))
+                        if metric["units"] > 0 else None
+                    ),
+                })
+
+        result_rows = sorted(rows.values(), key=lambda row: (
+            -int(row["total"].get("revenue_kopecks") or 0), row["article"], row["key"]
+        ))
+        total_metric = {
+            field: sum(int(row["total"].get(field) or 0) for row in result_rows)
+            for field in ("revenue_kopecks", "profit_kopecks", "advertising_kopecks", "logistics_kopecks")
+        }
+        total_metric.update({
+            "sku_count": sum(bool(row["total"].get("revenue_kopecks")) for row in result_rows),
+            "unprofitable_count": sum(row["total"].get("profit_category") == "У" for row in result_rows),
+            "classes": {
+                kind: {category: sum(row["total"].get(f"{kind}_category") == category for row in result_rows)
+                       for category in ("A", "B", "C", "У")}
+                for kind in ("revenue", "profit")
+            },
+        })
+        controls = {}
+        for marketplace in market_keys:
+            expected = pnl["marketplaces"][marketplace]
+            actual_revenue = sum(int(row.get(marketplace, {}).get("revenue_kopecks") or 0)
+                                 for row in result_rows)
+            actual_profit = sum(int(row.get(marketplace, {}).get("profit_kopecks") or 0)
+                                for row in result_rows)
+            controls[marketplace] = {
+                "available": bool(expected.get("available")),
+                "revenue_expected_kopecks": _kopecks(expected.get("revenue")) if expected.get("available") else None,
+                "revenue_actual_kopecks": actual_revenue,
+                "revenue_delta_kopecks": actual_revenue - _kopecks(expected.get("revenue")) if expected.get("available") else None,
+                "profit_expected_kopecks": _kopecks(expected.get("profit")) if expected.get("available") else None,
+                "profit_actual_kopecks": actual_profit,
+                "profit_delta_kopecks": actual_profit - _kopecks(expected.get("profit")) if expected.get("available") else None,
+            }
+        return {
+            "period": {"from": begin.isoformat(), "to": finish.isoformat()},
+            "rows": result_rows, "summary": total_metric,
+            "allocation": allocation_notes, "controls": controls,
+            "methodology": {
+                "abc": "A=first 80%, B=next 15%, C=last 5%; ties stay together",
+                "profit": "financial revenue - P&L expenses allocated by net revenue - product cost",
+                "logistics": "P&L logistics and return-logistics allocated by net revenue",
+            },
+        }
+
+    def abc(self, start: str | None, end: str | None) -> dict[str, Any]:
+        """Read the ABC matrix exclusively from normalized analytical facts."""
+        begin, finish = self._closed_month_period(start, end)
+        market_keys = ("wb", "ozon", "yandex_market")
+        expected_days = (finish - begin).days + 1
+        with self.session_factory() as db:
+            products = self._many(db, """SELECT mp.id master_product_id,mp.article,mp.name,
+                    (SELECT media.id FROM marketplace_product_media media
+                     WHERE media.master_product_id=mp.id AND media.active
+                       AND media.media_type='image' AND media.download_status='downloaded'
+                       AND media.local_path IS NOT NULL
+                     ORDER BY CASE media.marketplace WHEN 'wb' THEN 0 WHEN 'ozon' THEN 1 ELSE 2 END,
+                       CASE WHEN lower(media.role) IN ('main','primary','cover') THEN 0 ELSE 1 END,
+                       media.position,media.id LIMIT 1) image_id
+                FROM master_products mp WHERE mp.active ORDER BY mp.article""")
+            facts = self._many(db, """SELECT marketplace,product_key,
+                    max(master_product_id) master_product_id,max(seller_sku) seller_sku,
+                    max(product_name) product_name,bool_or(is_unallocated) is_unallocated,
+                    sum(quantity) units,sum(revenue_kopecks) revenue_kopecks,
+                    sum(marketplace_expense_kopecks) expense_kopecks,
+                    sum(logistics_kopecks) logistics_kopecks,
+                    sum(advertising_kopecks) advertising_kopecks,
+                    sum(cost_kopecks) cost_kopecks,sum(profit_kopecks) profit_kopecks,
+                    sum(missing_cost_rows) missing_cost_rows,
+                    min(expense_allocation_method) expense_allocation_method,
+                    min(advertising_allocation_method) advertising_allocation_method
+                FROM fact_product_economics_daily
+                WHERE business_date BETWEEN :b AND :e
+                GROUP BY marketplace,product_key""", b=begin, e=finish)
+            control_rows = self._many(db, """SELECT marketplace,
+                    count(DISTINCT business_date) FILTER (WHERE source_complete) coverage_days,
+                    min(business_date) FILTER (WHERE source_complete) data_from,
+                    max(business_date) FILTER (WHERE source_complete) data_to,
+                    sum(revenue_kopecks) revenue_kopecks,
+                    sum(marketplace_expense_kopecks) expense_kopecks,
+                    sum(logistics_kopecks) logistics_kopecks,
+                    sum(advertising_kopecks) advertising_kopecks,
+                    sum(advertising_unallocated_kopecks) advertising_unallocated_kopecks,
+                    sum(cost_kopecks) cost_kopecks,sum(profit_kopecks) profit_kopecks,
+                    sum(unmatched_rows) unmatched_rows,max(normalized_at) normalized_at
+                FROM fact_product_economics_controls
+                WHERE business_date BETWEEN :b AND :e GROUP BY marketplace""", b=begin, e=finish)
+
+        rows: dict[str, dict[str, Any]] = {}
+        for product in products:
+            if product.get("error"):
+                raise RuntimeError(product["error"])
+            key = f"m:{product['master_product_id']}"
+            rows[key] = {
+                "key": key, "master_product_id": product["master_product_id"],
+                "article": product.get("article") or "—", "name": product.get("name") or "",
+                "image_url": f"/api/product-image?id={product['image_id']}" if product.get("image_id") else None,
+                "is_unallocated": False,
+                **{marketplace: None for marketplace in market_keys},
+            }
+        controls = {key: {
+            "available": False, "coverage_days": 0, "expected_days": expected_days,
+            "notice": "аналитический слой не покрывает выбранный период",
+        } for key in market_keys}
+        for control in control_rows:
+            if control.get("error"):
+                raise RuntimeError(control["error"])
+            marketplace = control["marketplace"]
+            coverage_days = int(control.get("coverage_days") or 0)
+            available = coverage_days == expected_days
+            controls[marketplace] = {
+                **control, "coverage_days": coverage_days,
+                "expected_days": expected_days, "available": available,
+                "notice": None if available else f"покрытие {coverage_days}/{expected_days} дней",
+            }
+        for fact in facts:
+            if fact.get("error"):
+                raise RuntimeError(fact["error"])
+            marketplace = fact["marketplace"]
+            key = fact["product_key"]
+            is_unallocated = bool(fact.get("is_unallocated"))
+            rows.setdefault(key, {
+                "key": key, "master_product_id": fact.get("master_product_id"),
+                "article": "НЕРАСПРЕДЕЛЕНО" if is_unallocated else fact.get("seller_sku") or "—",
+                "name": fact.get("product_name") or ("Нераспределённые финансовые операции" if is_unallocated else ""),
+                "image_url": None, "is_unallocated": is_unallocated,
+                **{item: None for item in market_keys},
+            })
+            if controls[marketplace]["available"]:
+                fact["available"] = True
+                rows[key][marketplace] = fact
+
+        for row in rows.values():
+            total = {
+                "available": False, "units": 0, "revenue_kopecks": 0,
+                "expense_kopecks": 0, "cost_kopecks": 0, "profit_kopecks": 0,
+                "advertising_kopecks": 0, "logistics_kopecks": 0,
+                "missing_cost_rows": 0,
+            }
+            for marketplace in market_keys:
+                values = row.get(marketplace)
+                if not values:
+                    continue
+                total["available"] = True
+                for field in ("units", "revenue_kopecks", "expense_kopecks", "cost_kopecks",
+                              "profit_kopecks", "advertising_kopecks", "logistics_kopecks",
+                              "missing_cost_rows"):
+                    total[field] += int(values.get(field) or 0)
+            row["total"] = total
+
+        scopes = ("total", *market_keys)
+        for scope in scopes:
+            revenue_values = {
+                key: int(row[scope]["revenue_kopecks"])
+                for key, row in rows.items()
+                if not row["is_unallocated"] and row.get(scope) and row[scope].get("available")
+            }
+            profit_values = {
+                key: int(row[scope]["profit_kopecks"])
+                for key, row in rows.items()
+                if not row["is_unallocated"] and row.get(scope) and row[scope].get("available")
+            }
+            revenue_classes = self._abc_categories(revenue_values)
+            profit_classes = self._abc_categories(profit_values, loss_class=True)
+            positive_revenue = sum(max(value, 0) for value in revenue_values.values())
+            positive_profit = sum(max(value, 0) for value in profit_values.values())
+            for key, revenue in revenue_values.items():
+                metric = rows[key][scope]
+                profit = profit_values[key]
+                metric.update({
+                    "revenue_category": revenue_classes[key],
+                    "revenue_share_percent": revenue / positive_revenue * 100 if positive_revenue else 0,
+                    "profit_category": profit_classes[key],
+                    "profit_share_percent": profit / positive_profit * 100 if positive_profit else 0,
+                    "profit_margin_percent": profit / revenue * 100 if revenue else 0,
+                    "advertising_drr_percent": metric["advertising_kopecks"] / revenue * 100 if revenue else 0,
+                    "logistics_share_percent": metric["logistics_kopecks"] / revenue * 100 if revenue else 0,
+                    "logistics_per_unit_kopecks": (
+                        int(round(metric["logistics_kopecks"] / metric["units"]))
+                        if metric["units"] > 0 else None
+                    ),
+                })
+
+        result_rows = sorted(rows.values(), key=lambda row: (
+            row["is_unallocated"], -int(row["total"].get("revenue_kopecks") or 0),
+            row["article"], row["key"],
+        ))
+        summary = {
+            field: sum(int(row["total"].get(field) or 0) for row in result_rows)
+            for field in ("revenue_kopecks", "profit_kopecks", "advertising_kopecks", "logistics_kopecks")
+        }
+        summary.update({
+            "sku_count": sum(not row["is_unallocated"] and bool(row["total"].get("revenue_kopecks")) for row in result_rows),
+            "unprofitable_count": sum(not row["is_unallocated"] and row["total"].get("profit_category") == "У" for row in result_rows),
+            "classes": {
+                kind: {category: sum(not row["is_unallocated"] and row["total"].get(f"{kind}_category") == category for row in result_rows)
+                       for category in ("A", "B", "C", "У")}
+                for kind in ("revenue", "profit")
+            },
+        })
+        for marketplace, control in controls.items():
+            actual_revenue = sum(int((row.get(marketplace) or {}).get("revenue_kopecks") or 0) for row in result_rows)
+            actual_profit = sum(int((row.get(marketplace) or {}).get("profit_kopecks") or 0) for row in result_rows)
+            if control.get("available"):
+                control["revenue_actual_kopecks"] = actual_revenue
+                control["revenue_delta_kopecks"] = actual_revenue - int(control.get("revenue_kopecks") or 0)
+                control["profit_actual_kopecks"] = actual_profit
+                control["profit_delta_kopecks"] = actual_profit - int(control.get("profit_kopecks") or 0)
+        return {
+            "period": {"from": begin.isoformat(), "to": finish.isoformat()},
+            "rows": result_rows, "summary": summary, "controls": controls,
+            "methodology": {
+                "source": "fact_product_economics_daily + fact_product_economics_controls",
+                "abc": "A=first 80%, B=next 15%, C=last 5%; ties stay together",
+                "profit": "financial revenue - allocated marketplace expenses - product cost",
+                "logistics": "financial logistics and return logistics allocated by daily net revenue",
+            },
         }

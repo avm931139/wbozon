@@ -13,6 +13,8 @@ from app.db import Base
 from app.models import (
     FactSale,
     FactSaleSource,
+    FactProductEconomicsControl,
+    FactProductEconomicsDaily,
     MarketplaceProductLink,
     MasterProduct,
     OzonFinanceAccrualType,
@@ -28,6 +30,7 @@ from app.models import (
     YandexMarketOffer,
 )
 from analytics_facts import service as fact_service
+from analytics_facts.economics import allocate_kopecks
 
 
 def _session_factory():
@@ -40,6 +43,14 @@ def test_money_to_kopecks_uses_decimal_half_up():
     assert money_to_kopecks("1234.56") == 123456
     assert money_to_kopecks("10.005") == 1001
     assert money_to_kopecks("-10.005") == -1001
+
+
+def test_product_economics_allocation_never_loses_a_kopeck():
+    allocated = allocate_kopecks(10001, {"a": 3, "b": 2, "c": 1})
+    assert sum(allocated.values()) == 10001
+    assert allocated["a"] > allocated["b"] > allocated["c"]
+    negative = allocate_kopecks(-101, {"a": 1, "b": 1})
+    assert sum(negative.values()) == -101
 
 
 def test_kopeck_reconciliation_preserves_group_control_total():
@@ -129,6 +140,8 @@ def test_yandex_financial_components_become_one_sale_and_one_return_fact():
         "facts_written": 2,
         "lineage_rows": 4,
         "barcode_rows": 2,
+        "economics_rows": 1,
+        "economics_control_days": 1,
         "unmatched_products": 0,
     }
     with session_factory() as session:
@@ -146,6 +159,15 @@ def test_yandex_financial_components_become_one_sale_and_one_return_fact():
         assert sum(row.cost_amount_kopecks for row in facts) == 4001
         assert session.scalar(select(func.count()).select_from(FactSaleSource)) == 4
         assert session.scalar(select(func.count()).select_from(ProductBarcode)) == 2
+        economics = session.scalar(select(FactProductEconomicsDaily))
+        control = session.scalar(select(FactProductEconomicsControl))
+        assert economics.revenue_kopecks == 7501
+        assert economics.cost_kopecks == 4001
+        assert economics.profit_kopecks == 3500
+        assert economics.expense_allocation_method == "allocated_by_revenue"
+        assert economics.advertising_allocation_method == "allocated_by_revenue"
+        assert control.revenue_kopecks == 7501
+        assert control.profit_kopecks == 3500
 
     # A full rebuild is idempotent and does not duplicate facts or barcodes.
     FinancialSalesFactService("yandex_market", session_factory=session_factory).run()

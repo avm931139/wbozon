@@ -8,8 +8,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
 from app.models import MasterProduct, ProductCostRecord
-from dashboard.__main__ import HTML, PNL_HTML, STOCKS_HTML
-from dashboard.excel import operational_excel, pnl_excel, stocks_excel
+from dashboard.__main__ import ABC_HTML, HTML, PNL_HTML, STOCKS_HTML
+from dashboard.excel import abc_excel, operational_excel, pnl_excel, stocks_excel
 from dashboard.service import DashboardService
 
 def test_dashboard_period_defaults_to_current_day():
@@ -219,6 +219,8 @@ def test_all_dashboard_pages_export_the_selected_filter_to_excel():
     assert "report:'pnl',from:from.value,to:to.value" in PNL_HTML
     assert "Выгрузить в Excel" in STOCKS_HTML
     assert "report:'stocks',date:dateInput.value" in STOCKS_HTML
+    assert "Выгрузить в Excel" in ABC_HTML
+    assert "report:'abc',from:from.value,to:to.value" in ABC_HTML
 
 
 def test_dashboard_excel_exports_are_valid_workbooks():
@@ -262,6 +264,65 @@ def test_dashboard_excel_exports_are_valid_workbooks():
     assert stock_book.sheetnames == ["Остатки"]
     assert stock_book["Остатки"]["A2"].value == "SKU-1"
     assert stock_book["Остатки"]["D2"].value == "2026-09-01T01:00:00+00:00"
+
+
+def test_abc_dashboard_uses_only_normalized_product_economics_layer():
+    import inspect
+
+    source = inspect.getsource(DashboardService.abc)
+    assert "fact_product_economics_daily" in source
+    assert "fact_product_economics_controls" in source
+    assert "wb_financial_sales_rows" not in source
+    assert "ozon_finance_accruals" not in source
+    assert "yandex_market_finance_transactions" not in source
+    assert "ABC по товарам" in ABC_HTML
+    assert "Выручка" in ABC_HTML
+    assert "Прибыль" in ABC_HTML
+    assert "Реклама" in ABC_HTML
+    assert "Логистика" in ABC_HTML
+    assert "последний" not in ABC_HTML.lower()
+    assert "new Date(now.getFullYear(),now.getMonth(),0)" in ABC_HTML
+
+
+def test_abc_categories_use_80_15_5_and_separate_losses():
+    values = {"leader": 8000, "middle": 1500, "tail": 500, "zero": 0}
+    assert DashboardService._abc_categories(values) == {
+        "leader": "A", "middle": "B", "tail": "C", "zero": "—",
+    }
+    assert DashboardService._abc_categories(
+        {"profit": 100, "loss": -1, "zero": 0}, loss_class=True
+    ) == {"profit": "A", "loss": "У", "zero": "У"}
+
+
+def test_abc_excel_contains_matrix_calculation_control_and_methodology():
+    metric = {
+        "available": True, "units": 2, "revenue_kopecks": 10000,
+        "revenue_category": "A", "revenue_share_percent": 100,
+        "profit_kopecks": 3000, "profit_category": "A",
+        "profit_margin_percent": 30, "advertising_kopecks": 500,
+        "advertising_drr_percent": 5, "logistics_kopecks": 1000,
+        "logistics_share_percent": 10, "logistics_per_unit_kopecks": 500,
+        "expense_kopecks": 4000, "cost_kopecks": 3000,
+        "expense_allocation_method": "allocated_by_revenue",
+        "advertising_allocation_method": "direct_product_report",
+        "missing_cost_rows": 0,
+    }
+    payload = {
+        "period": {"from": "2026-08-01", "to": "2026-08-31"},
+        "rows": [{"article": "SKU-1", "name": "Товар", "is_unallocated": False,
+                  "total": metric, "wb": metric, "ozon": None, "yandex_market": None}],
+        "controls": {"wb": {"available": True, "coverage_days": 31, "expected_days": 31,
+                             "revenue_kopecks": 10000, "revenue_actual_kopecks": 10000,
+                             "revenue_delta_kopecks": 0, "profit_kopecks": 3000,
+                             "profit_actual_kopecks": 3000, "profit_delta_kopecks": 0},
+                     "ozon": {}, "yandex_market": {}},
+        "methodology": {"source": "fact_product_economics_daily"},
+    }
+    book = load_workbook(BytesIO(abc_excel(payload)), read_only=True)
+    assert book.sheetnames == ["ABC-матрица", "Расчёт по SKU", "Контроль", "Методика"]
+    assert book["ABC-матрица"]["A2"].value == "SKU-1"
+    assert book["ABC-матрица"]["Z2"].value is None
+    assert book["Контроль"]["A2"].value == "Wildberries"
 
 
 def test_stock_dashboard_cost_edit_appends_history_record():
