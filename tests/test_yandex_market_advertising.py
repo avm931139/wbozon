@@ -155,6 +155,30 @@ def test_no_data_report_is_saved_as_zero_day():
         assert row.spend == 0
 
 
+def test_sync_accepts_no_data_without_looking_for_report_sheets():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+
+    class API:
+        def generate(self, source, **kwargs):
+            return source
+
+        def wait(self, report_id, **kwargs):
+            return {"status": "NO_DATA", "rows": []}
+
+    service = YandexMarketAdvertisingService(
+        api=API(), session_factory=factory, business_id=777
+    )
+    result = service.sync(stat_date=date(2026, 9, 6))
+
+    assert all(
+        item["status"] == "no_data" for item in result["sources"].values()
+    )
+    with factory() as session:
+        assert session.query(YandexMarketAdDailyStat).count() == 4
+
+
 def test_sales_boost_rows_keep_offer_identity_instead_of_collapsing_products():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

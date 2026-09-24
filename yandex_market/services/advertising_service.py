@@ -61,7 +61,11 @@ class YandexMarketAdvertisingService:
                     attempts=YANDEX_MARKET_AD_POLL_ATTEMPTS,
                     pause_seconds=YANDEX_MARKET_AD_POLL_SECONDS,
                 )
-                rows = self._select_rows(source, report["rows"])
+                rows = (
+                    []
+                    if str(report["status"]).upper() == "NO_DATA"
+                    else self._select_rows(source, report["rows"])
+                )
                 saved = self._replace(source, stat_date, rows, business_id=business_id)
                 results[source] = {
                     "status": str(report["status"]).lower(),
