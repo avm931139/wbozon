@@ -77,6 +77,15 @@ def test_shelves_report_uses_click_attribution():
     assert client.calls[0][2]["json_body"]["attributionType"] == "CLICKS"
 
 
+def test_shows_boost_sheets_are_detected_by_fields_when_names_change():
+    rows = YandexMarketAdvertisingService._select_rows("shows_boost", [
+        ("renamed-summary.json", [{"saleCampaignId": 1, "realCost": 20}]),
+        ("renamed-products.json", [{"offerId": "SKU-1", "cost": 15}]),
+    ])
+
+    assert [row["_report_section"] for row in rows] == ["campaigns", "offers"]
+
+
 def test_advertising_service_persists_four_sources(monkeypatch):
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

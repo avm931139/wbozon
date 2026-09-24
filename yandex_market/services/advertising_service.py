@@ -183,20 +183,36 @@ class YandexMarketAdvertisingService:
     ) -> list[dict[str, Any]]:
         if source == "shows_boost":
             selected: list[dict[str, Any]] = []
+            matched_file = False
             expected_sections = {
                 "business_shows_boost_consolidated_campaigns": "campaigns",
                 "business_shows_boost_consolidated_offers": "offers",
             }
             for filename, rows in files:
                 stem = PurePosixPath(filename).stem.lower()
+                section = None
                 for expected, section in expected_sections.items():
                     if stem == expected or expected in stem:
-                        selected.extend({**row, "_report_section": section} for row in rows)
                         break
-            if selected:
+                else:
+                    section = None
+                if section is None and rows:
+                    if any(row.get("offerId") for row in rows):
+                        section = "offers"
+                    elif any(
+                        row.get("saleCampaignId") is not None
+                        or row.get("realCost") is not None
+                        for row in rows
+                    ):
+                        section = "campaigns"
+                if section is not None:
+                    matched_file = True
+                    selected.extend({**row, "_report_section": section} for row in rows)
+            if matched_file:
                 return selected
             raise ValueError(
-                "Yandex Market shows_boost report has no campaign or offer sheet"
+                "Yandex Market shows_boost report has no campaign or offer sheet; "
+                f"available files: {[name for name, _ in files]}"
             )
         expected = {
             "sales_boost": "business_boost_consolidated",
