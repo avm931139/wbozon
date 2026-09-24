@@ -9,7 +9,7 @@ def test_rolling_history_refresh_runs_raw_steps_before_analytics(monkeypatch):
     monkeypatch.setattr(
         HistoricalRefreshService,
         "_raw_steps",
-        staticmethod(lambda marketplace, start, finish, include_advertising: [
+        staticmethod(lambda marketplace, start, finish, mode, include_advertising: [
             ("finance", lambda: calls.append(("finance", start, finish)) or {"rows": 1}),
             ("advertising", lambda: calls.append(("advertising", start, finish)) or {"rows": 2}),
         ]),
@@ -40,7 +40,7 @@ def test_rolling_history_refresh_runs_raw_steps_before_analytics(monkeypatch):
 
 
 def test_history_refresh_keeps_marketplaces_independent(monkeypatch):
-    def steps(marketplace, start, finish, include_advertising):
+    def steps(marketplace, start, finish, mode, include_advertising):
         def execute():
             if marketplace == "ozon":
                 raise RuntimeError("rate limited")
@@ -65,3 +65,40 @@ def test_history_refresh_keeps_marketplaces_independent(monkeypatch):
     assert result["marketplaces"]["ozon"]["status"] == "partial"
     assert result["marketplaces"]["yandex_market"]["status"] == "completed"
     assert "rate limited" in result["marketplaces"]["ozon"]["finance_error"]
+
+
+def test_yandex_rolling_advertising_uses_attribution_window(monkeypatch):
+    calls = []
+
+    class Finance:
+        def sync_history(self, **kwargs):
+            return kwargs
+
+    class Advertising:
+        def sync_history(self, **kwargs):
+            calls.append(kwargs)
+            return kwargs
+
+    monkeypatch.setattr(
+        "historical_refresh.service.YandexMarketFinanceService", Finance
+    )
+    monkeypatch.setattr(
+        "historical_refresh.service.YandexMarketAdvertisingService", Advertising
+    )
+    monkeypatch.setattr(
+        "historical_refresh.service.YANDEX_MARKET_AD_REFRESH_DAYS", 14
+    )
+
+    steps = HistoricalRefreshService._raw_steps(
+        "yandex_market",
+        date(2026, 5, 1),
+        date(2026, 9, 24),
+        mode="rolling",
+        include_advertising=True,
+    )
+    dict((name, callback()) for name, callback in steps)
+
+    assert calls == [{
+        "date_from": date(2026, 9, 11),
+        "date_to": date(2026, 9, 24),
+    }]

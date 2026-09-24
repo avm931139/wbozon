@@ -11,6 +11,7 @@ from app.config import (
     OZON_PERFORMANCE_CLIENT_ID,
     OZON_PERFORMANCE_CLIENT_SECRET,
     WB_SYNC_HISTORY_START,
+    YANDEX_MARKET_AD_REFRESH_DAYS,
     YANDEX_MARKET_HISTORY_FROM,
 )
 from ozon.business_time import ozon_today
@@ -58,7 +59,8 @@ class HistoricalRefreshService:
         for name in selected:
             start = self._start(name, mode, finish, date_from)
             results[name] = self._run_marketplace(
-                name, start, finish, include_advertising=include_advertising
+                name, start, finish, mode=mode,
+                include_advertising=include_advertising,
             )
         status = "partial" if any(
             item["status"] != "completed" for item in results.values()
@@ -98,6 +100,7 @@ class HistoricalRefreshService:
         start: date,
         finish: date,
         *,
+        mode: str,
         include_advertising: bool,
     ) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -107,7 +110,8 @@ class HistoricalRefreshService:
         }
         errors: list[str] = []
         steps = self._raw_steps(
-            marketplace, start, finish, include_advertising=include_advertising
+            marketplace, start, finish, mode=mode,
+            include_advertising=include_advertising,
         )
         for name, callback in steps:
             try:
@@ -135,6 +139,7 @@ class HistoricalRefreshService:
         start: date,
         finish: date,
         *,
+        mode: str,
         include_advertising: bool,
     ) -> list[tuple[str, Callable[[], Any]]]:
         if marketplace == "wb":
@@ -175,8 +180,14 @@ class HistoricalRefreshService:
         ]
         if include_advertising:
             advertising = YandexMarketAdvertisingService()
+            advertising_start = start if mode == "full" else max(
+                start,
+                finish - timedelta(days=YANDEX_MARKET_AD_REFRESH_DAYS - 1),
+            )
             steps.append((
                 "advertising",
-                lambda: advertising.sync_history(date_from=start, date_to=finish),
+                lambda: advertising.sync_history(
+                    date_from=advertising_start, date_to=finish
+                ),
             ))
         return steps

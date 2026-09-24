@@ -18,6 +18,10 @@ default):
 python -m historical_refresh --mode rolling --marketplace all
 ```
 
+The rolling mode refreshes Yandex finance for the common lookback window, but
+limits Yandex advertising to `YANDEX_MARKET_AD_REFRESH_DAYS` (14 by default).
+The full mode still reloads the entire advertising window exposed by the plan.
+
 An explicit range is supported with `--date-from` and `--date-to`. Yandex
 Market advertising is additionally capped by `YANDEX_MARKET_AD_HISTORY_DAYS`,
 because the cabinet plan exposes only that rolling window. Ozon advertising is
