@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Iterable
 
-from sqlalchemy import delete
+from sqlalchemy import delete, func
 
 from app.config import OZON_CLIENT_ID
 from app.models import (
@@ -284,31 +284,38 @@ class ProductEconomicsBuilder:
         )
         preallocated: dict[tuple[str, date, str], int] = defaultdict(int)
         if self.marketplace == "wb":
-            daily_dates: dict[int, date] = {}
             daily_query = session.query(
-                WBAdvertDailyStat.id,
-                WBAdvertDailyStat.stat_date,
-                WBAdvertDailyStat.spend,
-            ).yield_per(1000)
-            for row_id, stat_date, spend in daily_query:
-                business_date = stat_date.date()
-                daily_dates[int(row_id)] = business_date
+                func.date(WBAdvertDailyStat.stat_date),
+                func.sum(WBAdvertDailyStat.spend),
+            ).group_by(func.date(WBAdvertDailyStat.stat_date)).yield_per(1000)
+            for stat_date, spend in daily_query:
+                business_date = (
+                    stat_date if isinstance(stat_date, date)
+                    else date.fromisoformat(str(stat_date))
+                )
                 totals[("", business_date)] += _kopecks(spend)
             product_query = session.query(
-                WBAdvertProductDailyStat.daily_stat_id,
+                func.date(WBAdvertDailyStat.stat_date),
                 WBAdvertProductDailyStat.nm_id,
-                WBAdvertProductDailyStat.views,
-                WBAdvertProductDailyStat.clicks,
-                WBAdvertProductDailyStat.orders,
-                WBAdvertProductDailyStat.spend,
-                WBAdvertProductDailyStat.order_sum,
+                func.sum(WBAdvertProductDailyStat.views),
+                func.sum(WBAdvertProductDailyStat.clicks),
+                func.sum(WBAdvertProductDailyStat.orders),
+                func.sum(WBAdvertProductDailyStat.spend),
+                func.sum(WBAdvertProductDailyStat.order_sum),
+            ).join(
+                WBAdvertDailyStat,
+                WBAdvertDailyStat.id == WBAdvertProductDailyStat.daily_stat_id,
+            ).group_by(
+                func.date(WBAdvertDailyStat.stat_date),
+                WBAdvertProductDailyStat.nm_id,
             ).yield_per(2000)
             for (
-                daily_stat_id, nm_id, views, clicks, orders, spend, order_sum
+                stat_date, nm_id, views, clicks, orders, spend, order_sum
             ) in product_query:
-                business_date = daily_dates.get(int(daily_stat_id))
-                if business_date is None:
-                    continue
+                business_date = (
+                    stat_date if isinstance(stat_date, date)
+                    else date.fromisoformat(str(stat_date))
+                )
                 link = links.get(("wb", "", str(nm_id)))
                 key = f"m:{link.master_product_id}" if link else "unallocated"
                 products[("", business_date, key)] += _kopecks(spend)
