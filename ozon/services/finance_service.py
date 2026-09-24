@@ -308,8 +308,19 @@ class OzonFinanceSyncService:
             "date_to": end.isoformat(),
             "types": self.sync_types(),
         }
-        daily, current = self.sync_daily(date_from=start, date_to=end)
+        daily = 0
+        chunks = 0
+        current: set[str] = set()
+        cursor = start
+        while cursor <= end:
+            chunk_end = min(cursor + timedelta(days=30), end)
+            saved, postings = self.sync_daily(date_from=cursor, date_to=chunk_end)
+            daily += saved
+            current.update(postings)
+            chunks += 1
+            cursor = chunk_end + timedelta(days=1)
         result["daily"] = daily
+        result["daily_chunks"] = chunks
         # Include already known postings as well. This is what makes late returns
         # and corrections for old orders visible in the analytical layer.
         current.update(self._postings_for_period(start, end))

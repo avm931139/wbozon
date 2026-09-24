@@ -193,6 +193,7 @@ def test_history_refresh_reloads_details_for_an_already_known_posting():
     )
 
     assert result["postings"]["requested"] == 1
+    assert result["daily_chunks"] == 1
     with sessions() as session:
         saved = session.query(OzonFinancePostingAccrual).one()
         assert saved.seller_price < 0

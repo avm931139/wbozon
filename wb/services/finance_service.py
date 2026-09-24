@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -161,14 +161,25 @@ class FinanceService:
         finish = date_to or date.today()
         if date_from > finish:
             raise ValueError("WB finance date_from must not exceed date_to")
-        return {
+        result: dict[str, int | str] = {
             "date_from": date_from.isoformat(),
             "date_to": finish.isoformat(),
-            "sales_reports": self.sync_sales_reports(date_from, finish),
-            "sales_details": self.sync_sales_details(date_from, finish),
-            "acquiring_reports": self.sync_acquiring_reports(date_from, finish),
-            "acquiring_details": self.sync_acquiring_details(date_from, finish),
+            "chunks": 0,
+            "sales_reports": 0,
+            "sales_details": 0,
+            "acquiring_reports": 0,
+            "acquiring_details": 0,
         }
+        cursor = date_from
+        while cursor <= finish:
+            chunk_end = min(cursor + timedelta(days=30), finish)
+            result["sales_reports"] += self.sync_sales_reports(cursor, chunk_end)
+            result["sales_details"] += self.sync_sales_details(cursor, chunk_end)
+            result["acquiring_reports"] += self.sync_acquiring_reports(cursor, chunk_end)
+            result["acquiring_details"] += self.sync_acquiring_details(cursor, chunk_end)
+            result["chunks"] += 1
+            cursor = chunk_end + timedelta(days=1)
+        return result
 
     @staticmethod
     def _map_sales_report(row: WBFinancialSalesReport, item: dict[str, Any]) -> None:

@@ -26,3 +26,7 @@ skipped, without failing finance, when Performance API credentials are absent.
 The Ozon historical mode deliberately reloads details for already stored
 postings. This is required to capture late returns and corrections that the
 ordinary three-day incremental overlap cannot see.
+
+WB finance and Ozon daily accruals are fetched in 31-day chunks. The chunking
+does not shorten history; it prevents a full-year API response from exhausting
+memory on a small VPS.
