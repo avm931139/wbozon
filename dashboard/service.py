@@ -570,11 +570,14 @@ class DashboardService:
                                 +coalesce(nullif(raw_data->>'paymentSchedule','')::numeric,0)
                             ),0) net_payout
                     FROM wb_financial_sales_rows WHERE rr_date>=:b AND rr_date<:u
+                ), advertising AS (
+                    SELECT coalesce(sum(amount),0) amount
+                    FROM wb_advert_expenses WHERE expense_time>=:b AND expense_time<:u
                 ) SELECT rows,finance_buyouts,finance_buyouts_amount,compensation,
                     finance_buyouts_amount+compensation revenue,
-                    finance_buyouts_amount+compensation-net_payout expenses,
+                    finance_buyouts_amount+compensation-net_payout+advertising.amount expenses,
                     coverage.finance_from,coverage.finance_through,coverage.covered
-                FROM ledger CROSS JOIN coverage""", b=begin, e=finish, u=until),
+                FROM ledger CROSS JOIN coverage CROSS JOIN advertising""", b=begin, e=finish, u=until),
             "ozon": one("""WITH ledger AS (
                     SELECT count(*) rows,coalesce(sum(amount),0) net_accrual,
                         coalesce(sum(amount) FILTER (WHERE accrual_type='NON_ITEM' AND amount>0),0) compensation,
@@ -928,6 +931,9 @@ class DashboardService:
             FROM wb_financial_sales_rows x
             JOIN wb_financial_sales_reports r ON r.id=x.report_id
             WHERE x.rr_date>=:b AND x.rr_date<:u""", b=begin, u=until)
+        wb_advertising = self._one(db, """SELECT coalesce(sum(amount),0) amount,
+            max(fetched_at) updated_at FROM wb_advert_expenses
+            WHERE expense_time>=:b AND expense_time<:u""", b=begin, u=until)
         wb_rows = [] if "error" in wb else [
             {"key": "commission", "label": "Комиссия Wildberries", "amount": wb.get("commission")},
             {"key": "logistics", "label": "Логистика и доставка", "amount": wb.get("logistics")},
@@ -937,6 +943,7 @@ class DashboardService:
             {"key": "penalties", "label": "Штрафы", "amount": wb.get("penalties")},
             {"key": "deductions", "label": "Удержания и прочие услуги", "amount": wb.get("deductions")},
             {"key": "payment_schedule", "label": "Изменение срока единовременной выплаты", "amount": wb.get("payment_schedule")},
+            {"key": "advertising", "label": "Реклама Wildberries", "amount": wb_advertising.get("amount")},
         ]
         ozon_rows = self._many(db, """WITH expense_rows AS (
             SELECT t.name key,
@@ -1370,6 +1377,7 @@ class DashboardService:
     def abc(self, start: str | None, end: str | None) -> dict[str, Any]:
         """Read the ABC matrix exclusively from normalized analytical facts."""
         begin, finish = self._closed_month_period(start, end)
+        pnl = self.pnl(begin.isoformat(), finish.isoformat())
         market_keys = ("wb", "ozon", "yandex_market")
         expected_days = (finish - begin).days + 1
         with self.session_factory() as db:
@@ -1525,11 +1533,46 @@ class DashboardService:
         for marketplace, control in controls.items():
             actual_revenue = sum(int((row.get(marketplace) or {}).get("revenue_kopecks") or 0) for row in result_rows)
             actual_profit = sum(int((row.get(marketplace) or {}).get("profit_kopecks") or 0) for row in result_rows)
+            actual_advertising = sum(int((row.get(marketplace) or {}).get("advertising_kopecks") or 0) for row in result_rows)
+            actual_logistics = sum(int((row.get(marketplace) or {}).get("logistics_kopecks") or 0) for row in result_rows)
             if control.get("available"):
                 control["revenue_actual_kopecks"] = actual_revenue
                 control["revenue_delta_kopecks"] = actual_revenue - int(control.get("revenue_kopecks") or 0)
                 control["profit_actual_kopecks"] = actual_profit
                 control["profit_delta_kopecks"] = actual_profit - int(control.get("profit_kopecks") or 0)
+            pnl_view = pnl["marketplaces"][marketplace]
+            if pnl_view.get("available"):
+                pnl_advertising = sum(
+                    _kopecks(line.get("amount")) for line in pnl_view.get("expense_lines", [])
+                    if line.get("category") == "advertising"
+                )
+                pnl_logistics = sum(
+                    _kopecks(line.get("amount")) for line in pnl_view.get("expense_lines", [])
+                    if line.get("category") in {"logistics", "returns"}
+                )
+                expected = {
+                    "revenue": _kopecks(pnl_view.get("revenue")),
+                    "profit": _kopecks(pnl_view.get("profit")),
+                    "advertising": pnl_advertising,
+                    "logistics": pnl_logistics,
+                }
+                actual = {
+                    "revenue": actual_revenue,
+                    "profit": actual_profit,
+                    "advertising": actual_advertising,
+                    "logistics": actual_logistics,
+                }
+                control["pnl_reconciliation"] = {
+                    key: {
+                        "expected_kopecks": expected[key],
+                        "actual_kopecks": actual[key],
+                        "delta_kopecks": actual[key] - expected[key],
+                    }
+                    for key in expected
+                }
+                control["pnl_reconciled"] = all(
+                    actual[key] == expected[key] for key in expected
+                )
         return {
             "period": {"from": begin.isoformat(), "to": finish.isoformat()},
             "rows": result_rows, "summary": summary, "controls": controls,

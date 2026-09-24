@@ -439,7 +439,8 @@ def test_dashboard_uses_wb_finance_rows_for_closed_period_metrics():
 
     source = inspect.getsource(DashboardService._period_metrics)
     assert "retail_price_with_discount*quantity" in source
-    assert "finance_buyouts_amount+compensation-net_payout expenses" in source
+    assert "finance_buyouts_amount+compensation-net_payout+advertising.amount expenses" in source
+    assert "wb_advert_expenses" in source
     assert "wb_finance_exact" in source
     assert "wb_sales_funnel_daily" in source
     assert 'wb["data_status"] = "preliminary"' in source

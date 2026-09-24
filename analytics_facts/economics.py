@@ -18,6 +18,7 @@ from app.models import (
     OzonFinanceAccrual,
     OzonFinanceAccrualType,
     OzonProduct,
+    WBAdvertExpense,
     WBAdvertDailyStat,
     WBAdvertProductDailyStat,
     WBFinancialSalesReport,
@@ -27,7 +28,7 @@ from app.models import (
 )
 
 
-CALCULATION_VERSION = "product-economics-v1"
+CALCULATION_VERSION = "product-economics-v2"
 WB_SALES = {"Продажа", "Бронирование товара через самовывоз"}
 WB_RETURNS = {"Возврат"}
 
@@ -111,6 +112,15 @@ def _is_logistics(label: str) -> bool:
     return any(pattern in value for pattern in (
         "логист", "достав", "delivery", "перевоз", "crossdock", "кросс-док",
         "возврат", "return", "обратн",
+    ))
+
+
+def _is_advertising(label: str) -> bool:
+    value = label.casefold()
+    return any(pattern in value for pattern in (
+        "advert", "promotion", "payperclick", "campaign",
+        "\u0440\u0435\u043a\u043b\u0430\u043c", "\u043f\u0440\u043e\u0434\u0432\u0438\u0436", "\u0431\u0443\u0441\u0442", "\u0440\u0430\u0441\u0441\u044b\u043b",
+        "\u043e\u0442\u0437\u044b\u0432\u044b \u0437\u0430 \u0431\u0430\u043b\u043b\u044b",
     ))
 
 
@@ -230,6 +240,13 @@ class ProductEconomicsBuilder:
                 target["revenue"] = _kopecks(values["revenue"])
                 target["expense"] = _kopecks(values["revenue"] - values["net"])
                 target["logistics"] = _kopecks(values["logistics"])
+            advertising: dict[date, Decimal] = defaultdict(Decimal)
+            for expense_time, amount in session.query(
+                WBAdvertExpense.expense_time, WBAdvertExpense.amount
+            ).filter(WBAdvertExpense.expense_time.isnot(None)).yield_per(1000):
+                advertising[expense_time.date()] += _decimal(amount)
+            for day, amount in advertising.items():
+                targets[("", day)]["expense"] += _kopecks(amount)
         elif self.marketplace == "ozon":
             account = str(OZON_CLIENT_ID or "")
             accruals = session.query(OzonFinanceAccrual).all()
@@ -257,7 +274,7 @@ class ProductEconomicsBuilder:
                 raw = raw_by_day[key]["revenue"]
                 target["revenue"] = raw + _kopecks(compensation[day])
                 target["expense"] = target["revenue"] - _kopecks(net[day])
-                target["logistics"] = max(-_kopecks(logistics[day]), 0)
+                target["logistics"] = -_kopecks(logistics[day])
         else:
             transactions = session.query(YandexMarketFinanceTransaction).all()
             by_account: dict[str, list[YandexMarketFinanceTransaction]] = defaultdict(list)
@@ -275,12 +292,17 @@ class ProductEconomicsBuilder:
                 is_product = row.transaction_type in {"Начисление", "Возврат"} and int(row.quantity or 0) > 0
                 if not is_product:
                     services[key] += _decimal(row.amount)
-                    if _is_logistics(f"{row.product_or_service or ''} {row.transaction_source or ''}"):
+                    if _is_logistics(
+                        f"{row.product_or_service or ''} {row.transaction_source or ''} "
+                        f"{row.transaction_type or ''}"
+                    ):
                         logistics[key] += _decimal(row.amount)
             for key, target in targets.items():
                 target["revenue"] = raw_by_day[key]["revenue"]
-                target["expense"] = max(-_kopecks(services[key]), 0)
-                target["logistics"] = max(-_kopecks(logistics[key]), 0)
+                # Keep signed daily corrections. Clipping every day separately loses
+                # positive corrections and makes a multi-day ABC period disagree with P&L.
+                target["expense"] = -_kopecks(services[key])
+                target["logistics"] = -_kopecks(logistics[key])
         for key, target in targets.items():
             target["cost"] = raw_by_day[key]["cost"]
         return targets
@@ -435,7 +457,40 @@ class ProductEconomicsBuilder:
                 allocated = allocate_kopecks(source_totals[(account, day, source)], weights)
                 for key, value in allocated.items():
                     preallocated[(account, day, key)] += value
-        return totals, products, details, preallocated
+        # Product reports provide attribution and SKU weights. The accounting total
+        # must come from the financial ledger so ABC and P&L use one recognition basis.
+        financial_totals: dict[tuple[str, date], int] = defaultdict(int)
+        if self.marketplace == "wb":
+            rows = session.query(
+                func.date(WBAdvertExpense.expense_time),
+                func.sum(WBAdvertExpense.amount),
+            ).filter(WBAdvertExpense.expense_time.isnot(None)).group_by(
+                func.date(WBAdvertExpense.expense_time)
+            )
+            for business_date, amount in rows:
+                day = business_date if isinstance(business_date, date) else date.fromisoformat(str(business_date))
+                financial_totals[("", day)] = _kopecks(amount)
+        elif self.marketplace == "ozon":
+            account = str(OZON_CLIENT_ID or "")
+            type_names = {
+                row.type_id: f"{row.name or ''} {row.description or ''}"
+                for row in session.query(OzonFinanceAccrualType).all()
+            }
+            for row in session.query(OzonFinanceAccrual).yield_per(1000):
+                for fee in _nested_fees(row.raw_data):
+                    if _is_advertising(type_names.get(int(fee.get("type_id") or 0), "")):
+                        financial_totals[(account, row.accrual_date)] += -_kopecks(
+                            (fee.get("accrued") or {}).get("amount")
+                        )
+        else:
+            for row in session.query(YandexMarketFinanceTransaction).yield_per(1000):
+                label = (
+                    f"{row.product_or_service or ''} {row.transaction_source or ''} "
+                    f"{row.transaction_type or ''}"
+                )
+                if _is_advertising(label):
+                    financial_totals[(str(row.business_id), row.transaction_at.date())] += -_kopecks(row.amount)
+        return financial_totals, products, details, preallocated
 
     def build(
         self,
@@ -506,6 +561,8 @@ class ProductEconomicsBuilder:
             compensation = allocate_kopecks(int(target["revenue"]) - raw_revenue, weights)
             expenses = allocate_kopecks(int(target["expense"]), weights)
             logistics = allocate_kopecks(int(target["logistics"]), weights)
+            raw_cost = sum(int(row["cost_kopecks"]) for row in day_rows.values())
+            cost_adjustments = allocate_kopecks(int(target["cost"]) - raw_cost, weights)
             if self.marketplace in {"ozon", "yandex_market"}:
                 advertising, ad_unallocated, ad_method = allocate_ozon_advertising(
                     ad_totals.get((account, business_date), 0),
@@ -564,11 +621,12 @@ class ProductEconomicsBuilder:
                     compensation["unallocated"] = int(target["revenue"])
                     expenses["unallocated"] = int(target["expense"])
                     logistics["unallocated"] = int(target["logistics"])
+                    cost_adjustments["unallocated"] = int(target["cost"])
                 advertising["unallocated"] = advertising.get("unallocated", 0) + ad_unallocated
             for key, row in day_rows.items():
                 revenue = int(row["sales_revenue_kopecks"]) + compensation.get(key, 0)
                 expense = expenses.get(key, 0)
-                cost = int(row["cost_kopecks"])
+                cost = int(row["cost_kopecks"]) + cost_adjustments.get(key, 0)
                 session.add(FactProductEconomicsDaily(
                     marketplace=self.marketplace, account_id=account,
                     business_date=business_date, product_key=key,
@@ -622,7 +680,10 @@ class ProductEconomicsBuilder:
                 for key, row in day_rows.items()
             )
             actual_expense = sum(expenses.get(key, 0) for key in day_rows)
-            actual_cost = sum(int(row["cost_kopecks"]) for row in day_rows.values())
+            actual_cost = sum(
+                int(row["cost_kopecks"]) + cost_adjustments.get(key, 0)
+                for key, row in day_rows.items()
+            )
             session.add(FactProductEconomicsControl(
                 marketplace=self.marketplace, account_id=account,
                 business_date=business_date, revenue_kopecks=actual_revenue,

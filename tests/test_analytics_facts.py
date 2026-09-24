@@ -236,17 +236,19 @@ def test_yandex_financial_components_become_one_sale_and_one_return_fact():
         assert economics.cost_kopecks == 4001
         assert economics.profit_kopecks == 3500
         assert economics.expense_allocation_method == "allocated_by_revenue"
-        assert economics.advertising_allocation_method == "direct_product_report"
+        assert economics.advertising_allocation_method == "direct_plus_revenue"
         advertising = session.scalar(select(FactAdvertisingDaily))
         assert advertising.master_product_id == economics.master_product_id
-        assert advertising.spend_kopecks == 1000
+        # Advertising attribution remains attached to the SKU, while accounting
+        # spend is zero because this fixture has no finance-ledger ad charge.
+        assert advertising.spend_kopecks == 0
         assert advertising.direct_spend_kopecks == 1000
-        assert advertising.allocated_spend_kopecks == 0
+        assert advertising.allocated_spend_kopecks == -1000
         assert advertising.views == 10
         assert advertising.clicks == 3
         assert advertising.orders == 1
         assert advertising.attributed_revenue_kopecks == 9000
-        assert advertising.allocation_method == "direct_product_report"
+        assert advertising.allocation_method == "direct_plus_revenue"
         assert control.revenue_kopecks == 7501
         assert control.profit_kopecks == 3500
 
