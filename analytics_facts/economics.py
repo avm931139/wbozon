@@ -284,23 +284,41 @@ class ProductEconomicsBuilder:
         )
         preallocated: dict[tuple[str, date, str], int] = defaultdict(int)
         if self.marketplace == "wb":
-            daily = {row.id: row for row in session.query(WBAdvertDailyStat).all()}
-            for row in daily.values():
-                totals[("", row.stat_date.date())] += _kopecks(row.spend)
-            for row in session.query(WBAdvertProductDailyStat).all():
-                parent = daily.get(row.daily_stat_id)
-                if not parent:
+            daily_dates: dict[int, date] = {}
+            daily_query = session.query(
+                WBAdvertDailyStat.id,
+                WBAdvertDailyStat.stat_date,
+                WBAdvertDailyStat.spend,
+            ).yield_per(1000)
+            for row_id, stat_date, spend in daily_query:
+                business_date = stat_date.date()
+                daily_dates[int(row_id)] = business_date
+                totals[("", business_date)] += _kopecks(spend)
+            product_query = session.query(
+                WBAdvertProductDailyStat.daily_stat_id,
+                WBAdvertProductDailyStat.nm_id,
+                WBAdvertProductDailyStat.views,
+                WBAdvertProductDailyStat.clicks,
+                WBAdvertProductDailyStat.orders,
+                WBAdvertProductDailyStat.spend,
+                WBAdvertProductDailyStat.order_sum,
+            ).yield_per(2000)
+            for (
+                daily_stat_id, nm_id, views, clicks, orders, spend, order_sum
+            ) in product_query:
+                business_date = daily_dates.get(int(daily_stat_id))
+                if business_date is None:
                     continue
-                link = links.get(("wb", "", str(row.nm_id)))
+                link = links.get(("wb", "", str(nm_id)))
                 key = f"m:{link.master_product_id}" if link else "unallocated"
-                products[("", parent.stat_date.date(), key)] += _kopecks(row.spend)
-                detail = details[("", parent.stat_date.date(), key)]
-                detail["views"] += int(row.views or 0)
-                detail["clicks"] += int(row.clicks or 0)
-                detail["orders"] += int(row.orders or 0)
-                detail["attributed_revenue_kopecks"] += _kopecks(row.order_sum)
+                products[("", business_date, key)] += _kopecks(spend)
+                detail = details[("", business_date, key)]
+                detail["views"] += int(views or 0)
+                detail["clicks"] += int(clicks or 0)
+                detail["orders"] += int(orders or 0)
+                detail["attributed_revenue_kopecks"] += _kopecks(order_sum)
                 detail["seller_sku"] = link.offer_id if link else None
-                detail["marketplace_sku"] = str(row.nm_id)
+                detail["marketplace_sku"] = str(nm_id)
         elif self.marketplace == "ozon":
             account = str(OZON_CLIENT_ID or "")
             sku_product = {str(row.sku): row for row in session.query(OzonProduct).filter(OzonProduct.sku.isnot(None))}
@@ -411,27 +429,36 @@ class ProductEconomicsBuilder:
         session.execute(delete(FactAdvertisingDaily).where(
             FactAdvertisingDaily.marketplace == self.marketplace
         ))
+        base_by_day: dict[tuple[str, date], dict[str, dict[str, Any]]] = defaultdict(dict)
+        for (account, day, key), row in base.items():
+            base_by_day[(account, day)][key] = row
+        direct_keys_by_day: dict[tuple[str, date], set[str]] = defaultdict(set)
+        for account, day, key in direct_ads:
+            direct_keys_by_day[(account, day)].add(key)
+        preallocated_keys_by_day: dict[tuple[str, date], set[str]] = defaultdict(set)
+        for account, day, key in preallocated_ads:
+            preallocated_keys_by_day[(account, day)].add(key)
         day_keys = set(targets) | set(ad_totals) | {(account, day) for account, day, _ in base}
         economics_count = 0
-        for account, business_date in sorted(day_keys):
+        for day_number, (account, business_date) in enumerate(sorted(day_keys), start=1):
             day_rows = {
-                key: dict(row) for (row_account, day, key), row in base.items()
-                if row_account == account and day == business_date
+                key: dict(row)
+                for key, row in base_by_day.get((account, business_date), {}).items()
             }
-            for row_account, day, key in direct_ads:
-                if row_account == account and day == business_date and key != "unallocated":
+            for key in direct_keys_by_day.get((account, business_date), set()):
+                if key != "unallocated":
                     day_rows.setdefault(key, {
-                        "account_id": account, "business_date": day,
+                        "account_id": account, "business_date": business_date,
                         "product_key": key,
                         "master_product_id": int(key[2:]) if key.startswith("m:") else None,
                         "seller_sku": None, "product_name": None, "quantity": 0,
                         "sales_revenue_kopecks": 0, "cost_kopecks": 0,
                         "missing_cost_rows": 0,
                     })
-            for row_account, day, key in preallocated_ads:
-                if row_account == account and day == business_date and key != "unallocated":
+            for key in preallocated_keys_by_day.get((account, business_date), set()):
+                if key != "unallocated":
                     day_rows.setdefault(key, {
-                        "account_id": account, "business_date": day,
+                        "account_id": account, "business_date": business_date,
                         "product_key": key,
                         "master_product_id": int(key[2:]) if key.startswith("m:") else None,
                         "seller_sku": None, "product_name": None, "quantity": 0,
@@ -582,4 +609,6 @@ class ProductEconomicsBuilder:
                 calculation_version=CALCULATION_VERSION,
                 normalized_at=normalized_at,
             ))
+            if day_number % 20 == 0:
+                session.flush()
         return economics_count, len(day_keys)
