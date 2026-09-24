@@ -711,9 +711,18 @@ class FinancialSalesFactService:
 
     def _create_run(self, run_id: str) -> None:
         with self.session_factory() as session:
+            now = datetime.now(timezone.utc)
+            stale_runs = session.query(AnalyticsFactSyncRun).filter_by(
+                marketplace=self.marketplace,
+                status="running",
+            )
+            for stale in stale_runs:
+                stale.status = "failed"
+                stale.finished_at = now
+                stale.error = "Interrupted before completion (process terminated)"
             session.add(AnalyticsFactSyncRun(
                 id=run_id, marketplace=self.marketplace,
-                started_at=datetime.now(timezone.utc), status="running",
+                started_at=now, status="running",
             ))
             session.commit()
 

@@ -11,6 +11,7 @@ from analytics_facts.service import (
 )
 from app.db import Base
 from app.models import (
+    AnalyticsFactSyncRun,
     FactSale,
     FactSaleSource,
     FactAdvertisingDaily,
@@ -45,6 +46,22 @@ def test_money_to_kopecks_uses_decimal_half_up():
     assert money_to_kopecks("1234.56") == 123456
     assert money_to_kopecks("10.005") == 1001
     assert money_to_kopecks("-10.005") == -1001
+
+
+def test_new_fact_run_closes_stale_running_attempts():
+    session_factory = _session_factory()
+    service = FinancialSalesFactService("wb", session_factory=session_factory)
+
+    service._create_run("stale")
+    service._create_run("current")
+
+    with session_factory() as session:
+        stale = session.get(AnalyticsFactSyncRun, "stale")
+        current = session.get(AnalyticsFactSyncRun, "current")
+        assert stale.status == "failed"
+        assert stale.finished_at is not None
+        assert "terminated" in stale.error
+        assert current.status == "running"
 
 
 def test_product_economics_allocation_never_loses_a_kopeck():
