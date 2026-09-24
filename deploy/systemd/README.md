@@ -308,6 +308,25 @@ systemctl list-timers 'wbozon-backup*' --all
 Не задавайте `BACKUP_REQUIRED=true` до первого успешного snapshot и restore-test:
 иначе healthcheck обоснованно сообщит об отсутствующей проверенной копии.
 
+## Исторические финансы и реклама
+
+После первого полного backfill установите ежедневное обновление закрытых
+периодов:
+
+```bash
+cd /home/wbozon/wbozon
+./.venv/bin/python -m historical_refresh --mode full --marketplace all
+sudo install -o root -g root -m 0644 deploy/systemd/wbozon-history-refresh.service /etc/systemd/system/
+sudo install -o root -g root -m 0644 deploy/systemd/wbozon-history-refresh.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wbozon-history-refresh.timer
+```
+
+Полный запуск начинается с `WB_SYNC_HISTORY_START`, `OZON_HISTORY_FROM` и
+`YANDEX_MARKET_HISTORY_FROM`. Ежедневный timer перечитывает последние
+`HISTORY_REFRESH_LOOKBACK_DAYS`, а затем пересобирает аналитический слой каждой
+площадки. Сбой одного API не блокирует обновление двух остальных площадок.
+
 ## Проверка
 
 ```bash

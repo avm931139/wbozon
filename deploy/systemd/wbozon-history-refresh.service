@@ -1,0 +1,16 @@
+[Unit]
+Description=wbozon closed-period history refresh and analytical rebuild
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wbozon
+Group=wbozon
+WorkingDirectory=/home/wbozon/wbozon
+EnvironmentFile=/home/wbozon/wbozon/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/wbozon/wbozon/.venv/bin/python -m historical_refresh --mode rolling --marketplace all
+TimeoutStartSec=6h
+UMask=0077
+NoNewPrivileges=yes

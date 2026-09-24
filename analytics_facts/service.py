@@ -500,12 +500,13 @@ class FinancialSalesFactService:
         for row in rows:
             grouped[(
                 row.business_id, row.order_id, row.offer_id,
-                row.transaction_at.date(), row.transaction_type,
+                row.transaction_type,
             )].append(row)
         facts: list[PendingFact] = []
-        for (business_id, order_id, offer_id, event_date, transaction_type), parts in grouped.items():
+        for (business_id, order_id, offer_id, transaction_type), parts in grouped.items():
             account_id = str(business_id)
             event_at = min(part.transaction_at for part in parts)
+            event_date = event_at.date()
             event_type = "return" if transaction_type == "Возврат" else "sale"
             raw_quantity = max(abs(int(part.quantity or 0)) for part in parts)
             if raw_quantity == 0:

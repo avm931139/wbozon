@@ -198,3 +198,42 @@ def test_finance_rejects_row_from_another_business_without_deleting_data():
 
     with factory() as session:
         assert session.query(YandexMarketFinanceTransaction).count() == 1
+
+
+def test_finance_history_chunks_and_replaces_the_explicit_full_period():
+    class API:
+        def __init__(self):
+            self.generated = []
+
+        def generate_payments(self, *, business_id, date_from, date_to):
+            self.generated.append((business_id, date_from, date_to))
+            return f"report-{len(self.generated)}"
+
+        def wait(self, report_id, **kwargs):
+            index = int(report_id.rsplit("-", 1)[1]) - 1
+            begin = self.generated[index][1]
+            return {"rows": [("finance.json", [{
+                "transactionDate": begin.strftime("%d.%m.%Y 12:00"),
+                "transactionType": "РќР°С‡РёСЃР»РµРЅРёРµ",
+                "transactionSum": 100,
+                "orderId": index + 1,
+                "shopSku": "SKU",
+                "count": 1,
+            }])]}
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    api = API()
+    service = YandexMarketFinanceService(
+        api=api, session_factory=factory, business_id=216673578
+    )
+
+    result = service.sync_range(date(2026, 1, 1), date(2026, 7, 1))
+
+    assert result["reports"] == 3
+    assert api.generated == [
+        (216673578, date(2026, 1, 1), date(2026, 3, 31)),
+        (216673578, date(2026, 4, 1), date(2026, 6, 29)),
+        (216673578, date(2026, 6, 30), date(2026, 7, 1)),
+    ]

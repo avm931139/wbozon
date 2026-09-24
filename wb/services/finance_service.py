@@ -156,6 +156,20 @@ class FinanceService:
             session.commit()
         return len(rows)
 
+    def sync_history(self, date_from: date, date_to: date | None = None) -> dict[str, int | str]:
+        """Reload the complete WB financial evidence for an explicit period."""
+        finish = date_to or date.today()
+        if date_from > finish:
+            raise ValueError("WB finance date_from must not exceed date_to")
+        return {
+            "date_from": date_from.isoformat(),
+            "date_to": finish.isoformat(),
+            "sales_reports": self.sync_sales_reports(date_from, finish),
+            "sales_details": self.sync_sales_details(date_from, finish),
+            "acquiring_reports": self.sync_acquiring_reports(date_from, finish),
+            "acquiring_details": self.sync_acquiring_details(date_from, finish),
+        }
+
     @staticmethod
     def _map_sales_report(row: WBFinancialSalesReport, item: dict[str, Any]) -> None:
         row.seller_finance_name = item.get("sellerFinanceName"); row.date_from = _dt(item.get("dateFrom")); row.date_to = _dt(item.get("dateTo")); row.create_date = _dt(item.get("createDate"))

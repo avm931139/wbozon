@@ -259,6 +259,20 @@ python -m telegram_bot --once stock-files
 
 ## Дополнительная документация
 
+Исторические финансовые и рекламные данные обновляются отдельным worker-ом,
+после чего автоматически пересобираются нормализованные продажи, возвраты и
+товарная экономика аналитического слоя:
+
+```bash
+python -m historical_refresh --mode full --marketplace all
+python -m historical_refresh --mode rolling --marketplace all
+```
+
+Полный режим предназначен для первоначальной загрузки и ручной сверки. В
+production ежедневно запускается rolling-режим с окном
+`HISTORY_REFRESH_LOOKBACK_DAYS`; подробности — в
+[`historical_refresh/README.md`](historical_refresh/README.md).
+
 Полный индекс находится в [docs/README.md](docs/README.md). Подробное описание проекта доступно в [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md), инструкция по production и двум VPS — в [docs/VPS_RUNBOOK.md](docs/VPS_RUNBOOK.md), общей инфраструктуры — в [app/README.md](app/README.md), интеграции WB — в [wb/README.md](wb/README.md), документов WB — в [wb/DOCUMENTS.md](wb/DOCUMENTS.md), Ozon — в [ozon/README.md](ozon/README.md), документов Ozon — в [ozon/ACCOUNTING.md](ozon/ACCOUNTING.md), сверки FBO-поставок — в [ozon/SUPPLY_RECONCILIATION.md](ozon/SUPPLY_RECONCILIATION.md), остатков — в [inventory_sync/README.md](inventory_sync/README.md), истории цен — в [price_sync/README.md](price_sync/README.md), единого справочника товаров — в [product_master/README.md](product_master/README.md), карточек и локального медиа — в [product_catalog/README.md](product_catalog/README.md), групповых отчётов — в [telegram_bot/README.md](telegram_bot/README.md), личного журнала — в [operations_bot/README.md](operations_bot/README.md), мониторинга — в [healthcheck/README.md](healthcheck/README.md), systemd-задач — в [deploy/systemd/README.md](deploy/systemd/README.md).
 
 Проверка работающих сервисов, свежести данных, полноты дневных срезов и доставки Telegram:

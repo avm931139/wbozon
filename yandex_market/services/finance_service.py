@@ -56,10 +56,36 @@ class YandexMarketFinanceService:
         business_id = self._business_id()
         today = datetime.now(ZoneInfo(YANDEX_MARKET_TIMEZONE)).date()
         begin = self._begin(today, business_id)
+        return self.sync_range(begin, today, business_id=business_id)
+
+    def sync_history(
+        self,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> dict[str, Any]:
+        today = datetime.now(ZoneInfo(YANDEX_MARKET_TIMEZONE)).date()
+        begin = max(
+            date.fromisoformat(YANDEX_MARKET_HISTORY_FROM),
+            date_from or date.fromisoformat(YANDEX_MARKET_HISTORY_FROM),
+        )
+        finish = min(date_to or today, today)
+        return self.sync_range(begin, finish)
+
+    def sync_range(
+        self,
+        begin: date,
+        finish: date,
+        *,
+        business_id: int | None = None,
+    ) -> dict[str, Any]:
+        business_id = business_id or self._business_id()
+        if begin > finish:
+            raise ValueError("Yandex Market finance date_from must not exceed date_to")
         generated = rows_received = rows_saved = 0
         cursor = begin
-        while cursor <= today:
-            chunk_end = min(cursor + timedelta(days=self.CHUNK_DAYS - 1), today)
+        while cursor <= finish:
+            chunk_end = min(cursor + timedelta(days=self.CHUNK_DAYS - 1), finish)
             report_id = self.api.generate_payments(
                 business_id=business_id, date_from=cursor, date_to=chunk_end
             )
@@ -75,7 +101,7 @@ class YandexMarketFinanceService:
             cursor = chunk_end + timedelta(days=1)
         return {
             "date_from": begin.isoformat(),
-            "date_to": today.isoformat(),
+            "date_to": finish.isoformat(),
             "reports": generated,
             "rows_received": rows_received,
             "rows_saved": rows_saved,

@@ -219,6 +219,12 @@ YANDEX_MARKET_AD_REFRESH_DAYS = int(os.getenv("YANDEX_MARKET_AD_REFRESH_DAYS", "
 YANDEX_MARKET_ANALYTICS_HISTORY_DAYS = int(
     os.getenv("YANDEX_MARKET_ANALYTICS_HISTORY_DAYS", "40")
 )
+
+# Closed periods are re-read because returns, advertising attribution and
+# marketplace corrections can arrive after their original business date.
+HISTORY_REFRESH_LOOKBACK_DAYS = int(
+    os.getenv("HISTORY_REFRESH_LOOKBACK_DAYS", "120")
+)
 YANDEX_MARKET_ANALYTICS_MAX_AGE_SECONDS = int(
     os.getenv("YANDEX_MARKET_ANALYTICS_MAX_AGE_SECONDS", "129600")
 )

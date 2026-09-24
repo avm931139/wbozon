@@ -154,3 +154,45 @@ def test_finance_sync_retries_rate_limit_and_ignores_non_posting_unit_numbers():
     assert result["postings"]["requested"] == 1
     assert api.posting_calls == 1
     assert sleeps == [5]
+
+
+def test_history_refresh_reloads_details_for_an_already_known_posting():
+    class MutableAPI(FinanceAPI):
+        def __init__(self):
+            self.price = "500"
+
+        def accruals_by_postings(self, posting_numbers):
+            return [{
+                "posting_number": "123-1-1",
+                "accruals": [{
+                    "accrual_date": "2026-09-01",
+                    "type_id": 10,
+                    "sku": 9001,
+                    "quantity": 1,
+                    "seller_price": {"amount": self.price, "currency": "RUB"},
+                    "accrued": {"amount": "-50", "currency": "RUB"},
+                }],
+            }]
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, future=True)
+    api = MutableAPI()
+    service = OzonFinanceSyncService(
+        api=api,
+        session_factory=sessions,
+        history_from=date(2026, 9, 1),
+        today=lambda: date(2026, 9, 2),
+        request_pause_seconds=0,
+    )
+
+    service.sync_history(date_from=date(2026, 9, 1), date_to=date(2026, 9, 1))
+    api.price = "-500"
+    result = service.sync_history(
+        date_from=date(2026, 9, 1), date_to=date(2026, 9, 1)
+    )
+
+    assert result["postings"]["requested"] == 1
+    with sessions() as session:
+        saved = session.query(OzonFinancePostingAccrual).one()
+        assert saved.seller_price < 0

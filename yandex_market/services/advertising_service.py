@@ -81,6 +81,38 @@ class YandexMarketAdvertisingService:
             raise RuntimeError("; ".join(errors))
         return {"date": stat_date.isoformat(), "sources": results}
 
+    def sync_history(
+        self,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> dict[str, Any]:
+        """Reload every advertising day still exposed by the cabinet plan."""
+        today = datetime.now(ZoneInfo(YANDEX_MARKET_TIMEZONE)).date()
+        available_from = max(
+            date.fromisoformat(YANDEX_MARKET_HISTORY_FROM),
+            today - timedelta(days=YANDEX_MARKET_AD_HISTORY_DAYS - 1),
+        )
+        begin = max(available_from, date_from or available_from)
+        finish = min(date_to or today, today)
+        if begin > finish:
+            raise ValueError("Yandex Market advertising date_from must not exceed date_to")
+        days = reports = rows = 0
+        current = begin
+        while current <= finish:
+            result = self.sync(stat_date=current)
+            days += 1
+            reports += len(result["sources"])
+            rows += sum(int(item.get("saved") or 0) for item in result["sources"].values())
+            current += timedelta(days=1)
+        return {
+            "date_from": begin.isoformat(),
+            "date_to": finish.isoformat(),
+            "days": days,
+            "reports": reports,
+            "rows_saved": rows,
+        }
+
     def _sources_for_date(
         self, stat_date: date, *, business_id: int | None = None
     ) -> tuple[str, ...]:

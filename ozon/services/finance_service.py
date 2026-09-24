@@ -132,11 +132,24 @@ class OzonFinanceSyncService:
             session.commit()
         return len(rows)
 
-    def sync_daily(self) -> tuple[int, set[str]]:
-        with self.session_factory() as session:
-            latest = session.query(func.max(OzonFinanceAccrual.accrual_date)).scalar()
-        start = max(self.history_from, latest - timedelta(days=OZON_SYNC_OVERLAP_DAYS)) if latest else self.history_from
-        end = self.today()
+    def sync_daily(
+        self,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> tuple[int, set[str]]:
+        if date_from is None:
+            with self.session_factory() as session:
+                latest = session.query(func.max(OzonFinanceAccrual.accrual_date)).scalar()
+            start = (
+                max(self.history_from, latest - timedelta(days=OZON_SYNC_OVERLAP_DAYS))
+                if latest else self.history_from
+            )
+        else:
+            start = max(self.history_from, date_from)
+        end = min(date_to or self.today(), self.today())
+        if start > end:
+            return 0, set()
         rows = self._rate_limited(lambda: self.api.accruals_by_day(start, end))
         now = datetime.now(timezone.utc)
         posting_numbers: set[str] = set()
@@ -188,13 +201,35 @@ class OzonFinanceSyncService:
             if row[0] and _POSTING_NUMBER.fullmatch(str(row[0]))
         ][:limit]
 
-    def sync_postings(self, current: set[str]) -> dict[str, int]:
-        capacity = self.posting_batch_limit * 200
-        candidates = list(sorted(current))[:capacity]
-        if len(candidates) < capacity:
+    def _postings_for_period(self, date_from: date, date_to: date) -> set[str]:
+        with self.session_factory() as session:
+            rows = session.query(OzonFinanceAccrual.posting_number).filter(
+                OzonFinanceAccrual.accrual_date.between(date_from, date_to),
+                OzonFinanceAccrual.posting_number.is_not(None),
+            ).distinct().all()
+        return {
+            str(value) for value, in rows
+            if value and _POSTING_NUMBER.fullmatch(str(value))
+        }
+
+    def sync_postings(
+        self,
+        current: set[str],
+        *,
+        max_batches: int | None = None,
+        include_missing: bool = True,
+    ) -> dict[str, int]:
+        max_batches = self.posting_batch_limit if max_batches is None else max_batches
+        capacity = max_batches * 200 if max_batches >= 0 else None
+        candidates = list(sorted(current))
+        if capacity is not None:
+            candidates = candidates[:capacity]
+        if include_missing and (capacity is None or len(candidates) < capacity):
             seen = set(candidates)
             candidates.extend(
-                value for value in self._missing_postings(capacity - len(candidates))
+                value for value in self._missing_postings(
+                    (capacity - len(candidates)) if capacity is not None else 2_147_483_647
+                )
                 if value not in seen
             )
         batches = [candidates[index:index + 200] for index in range(0, len(candidates), 200)]
@@ -256,6 +291,32 @@ class OzonFinanceSyncService:
                         saved += 1
                 session.commit()
         return {"requested": len(candidates), "returned": returned_postings, "rows": saved, "batches": len(batches)}
+
+    def sync_history(
+        self,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> dict[str, Any]:
+        """Refresh every available financial day and every posting in the period."""
+        start = max(self.history_from, date_from or self.history_from)
+        end = min(date_to or self.today(), self.today())
+        if start > end:
+            raise ValueError("Ozon finance history date_from must not exceed date_to")
+        result: dict[str, Any] = {
+            "date_from": start.isoformat(),
+            "date_to": end.isoformat(),
+            "types": self.sync_types(),
+        }
+        daily, current = self.sync_daily(date_from=start, date_to=end)
+        result["daily"] = daily
+        # Include already known postings as well. This is what makes late returns
+        # and corrections for old orders visible in the analytical layer.
+        current.update(self._postings_for_period(start, end))
+        result["postings"] = self.sync_postings(
+            current, max_batches=-1, include_missing=False
+        )
+        return result
 
     def sync_all(self) -> dict[str, Any]:
         result: dict[str, Any] = {}

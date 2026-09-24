@@ -181,10 +181,12 @@ def test_yandex_financial_components_become_one_sale_and_one_return_fact():
             ("r1", "Возврат", "Возврат платежа покупателя", 1, "-60.00"),
             ("r2", "Возврат", "Возврат баллов за скидку Маркета", 1, "-15.00"),
         ]
-        for source_hash, transaction_type, source, quantity, amount in rows:
+        for minute, (source_hash, transaction_type, source, quantity, amount) in enumerate(rows):
             session.add(YandexMarketFinanceTransaction(
                 source_hash=source_hash, business_id=216, partner_id=10,
-                transaction_at=now, transaction_id=source_hash,
+                # Cabinet components belonging to one order commonly arrive at
+                # different minutes and still represent one sale/return event.
+                transaction_at=now.replace(minute=minute), transaction_id=source_hash,
                 transaction_type=transaction_type, transaction_source=source,
                 order_id=7001, offer_id="SKU-1", product_or_service="Test product",
                 quantity=quantity, amount=Decimal(amount),

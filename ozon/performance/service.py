@@ -37,12 +37,20 @@ class OzonPerformanceService:
             session.commit()
         return items
 
-    def sync_daily_stats(self) -> int:
+    def sync_daily_stats(
+        self,
+        *,
+        history_from: date | None = None,
+        date_to: date | None = None,
+    ) -> int:
         with SessionLocal() as session:
             latest = session.query(OzonAdDailyStat.stat_date).order_by(OzonAdDailyStat.stat_date.desc()).first()
-        history_from = date.fromisoformat(OZON_HISTORY_FROM)
-        start = max(history_from, latest[0] - timedelta(days=OZON_SYNC_OVERLAP_DAYS)) if latest else history_from
-        end = self.today() - timedelta(days=1)
+        configured_start = date.fromisoformat(OZON_HISTORY_FROM)
+        start = max(configured_start, history_from) if history_from else (
+            max(configured_start, latest[0] - timedelta(days=OZON_SYNC_OVERLAP_DAYS))
+            if latest else configured_start
+        )
+        end = min(date_to or (self.today() - timedelta(days=1)), self.today() - timedelta(days=1))
         if start > end: return 0
         rows: list[dict[str, Any]] = []; cursor = start
         while cursor <= end:
@@ -60,9 +68,14 @@ class OzonPerformanceService:
             session.commit()
         return len(rows)
 
-    def sync_product_stats(self, *, history_from: date | None = None) -> int:
+    def sync_product_stats(
+        self,
+        *,
+        history_from: date | None = None,
+        date_to: date | None = None,
+    ) -> int:
         history_floor = date.fromisoformat(OZON_HISTORY_FROM)
-        end = self.today() - timedelta(days=1)
+        end = min(date_to or (self.today() - timedelta(days=1)), self.today() - timedelta(days=1))
         with SessionLocal() as session:
             latest = session.query(OzonAdDailyStat.stat_date).filter(
                 OzonAdDailyStat.sku != 0
@@ -164,6 +177,27 @@ class OzonPerformanceService:
             "campaigns": campaigns,
             "daily_stats": daily_stats,
             "product_stats": self.sync_product_stats(),
+        }
+
+    def sync_history(
+        self,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> dict[str, int | str]:
+        start = max(
+            date.fromisoformat(OZON_HISTORY_FROM),
+            date_from or date.fromisoformat(OZON_HISTORY_FROM),
+        )
+        finish = min(date_to or self.today(), self.today())
+        if start > finish:
+            raise ValueError("Ozon advertising date_from must not exceed date_to")
+        return {
+            "date_from": start.isoformat(),
+            "date_to": finish.isoformat(),
+            "campaigns": len(self.sync_campaigns()),
+            "daily_stats": self.sync_daily_stats(history_from=start, date_to=finish),
+            "product_stats": self.sync_product_stats(history_from=start, date_to=finish),
         }
 
     @staticmethod
