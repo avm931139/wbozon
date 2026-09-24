@@ -178,6 +178,10 @@ class FinancialSalesFactService:
                     ))
                     lineage_rows += 1
             barcode_rows = self._sync_barcodes(session, links, now)
+            session.flush()
+            # The economics phase can scan long advertising history. Detach the
+            # financial ORM rows first so both layers do not peak in RAM together.
+            session.expunge_all()
             economics_rows, economics_control_days = ProductEconomicsBuilder(
                 self.marketplace
             ).build(session, [item.values for item in facts], links, now)

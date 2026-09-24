@@ -170,39 +170,61 @@ class ProductEconomicsBuilder:
             lambda: {"revenue": 0, "expense": 0, "logistics": 0, "cost": 0}
         )
         if self.marketplace == "wb":
-            reports = session.query(WBFinancialSalesReport).filter(
+            reports = session.query(
+                WBFinancialSalesReport.date_from,
+                WBFinancialSalesReport.date_to,
+            ).filter(
                 WBFinancialSalesReport.details_synced_at.isnot(None)
-            ).all()
-            for report in reports:
-                for day in _dates(report.date_from.date(), report.date_to.date()):
+            ).yield_per(200)
+            for date_from, date_to in reports:
+                for day in _dates(date_from.date(), date_to.date()):
                     targets[("", day)]
             aggregates: dict[date, dict[str, Decimal]] = defaultdict(
                 lambda: {"revenue": Decimal("0"), "net": Decimal("0"), "logistics": Decimal("0")}
             )
-            for row in session.query(WBFinancialSalesRow).filter(WBFinancialSalesRow.rr_date.isnot(None)):
-                day = row.rr_date.date()
+            finance_rows = session.query(
+                WBFinancialSalesRow.rr_date,
+                WBFinancialSalesRow.quantity,
+                WBFinancialSalesRow.retail_price_with_discount,
+                WBFinancialSalesRow.for_pay,
+                WBFinancialSalesRow.additional_payment,
+                WBFinancialSalesRow.seller_operation_name,
+                WBFinancialSalesRow.delivery_service,
+                WBFinancialSalesRow.penalty,
+                WBFinancialSalesRow.paid_storage,
+                WBFinancialSalesRow.paid_acceptance,
+                WBFinancialSalesRow.deduction,
+                WBFinancialSalesRow.raw_data,
+            ).filter(
+                WBFinancialSalesRow.rr_date.isnot(None)
+            ).yield_per(1000)
+            for (
+                rr_date, quantity, retail_price_with_discount, for_pay,
+                additional_payment, operation, delivery_service, penalty,
+                paid_storage, paid_acceptance, deduction, raw_data,
+            ) in finance_rows:
+                day = rr_date.date()
                 values = aggregates[day]
-                quantity = _decimal(row.quantity)
-                retail = _decimal(row.retail_price_with_discount) * quantity
-                for_pay = _decimal(row.for_pay)
-                additional = _decimal(row.additional_payment)
-                operation = row.seller_operation_name
+                quantity_value = _decimal(quantity)
+                retail = _decimal(retail_price_with_discount) * quantity_value
+                for_pay_value = _decimal(for_pay)
+                additional = _decimal(additional_payment)
                 if operation in WB_SALES:
                     values["revenue"] += retail
-                    values["net"] += for_pay
+                    values["net"] += for_pay_value
                 elif operation in WB_RETURNS:
                     values["revenue"] -= retail
-                    values["net"] -= for_pay
+                    values["net"] -= for_pay_value
                 else:
-                    values["revenue"] += for_pay
-                    values["net"] += for_pay
+                    values["revenue"] += for_pay_value
+                    values["net"] += for_pay_value
                 values["revenue"] += additional
                 values["net"] += additional - sum((_decimal(item) for item in (
-                    row.delivery_service, row.penalty, row.paid_storage,
-                    row.paid_acceptance, row.deduction,
-                    (row.raw_data or {}).get("paymentSchedule"),
+                    delivery_service, penalty, paid_storage,
+                    paid_acceptance, deduction,
+                    (raw_data or {}).get("paymentSchedule"),
                 )), Decimal("0"))
-                values["logistics"] += _decimal(row.delivery_service)
+                values["logistics"] += _decimal(delivery_service)
             for day, values in aggregates.items():
                 target = targets[("", day)]
                 target["revenue"] = _kopecks(values["revenue"])
