@@ -244,16 +244,40 @@ def _yandex_market_task_checks(session, current: datetime) -> list[Check]:
         if latest is None:
             checks.append(Check(False, f"Yandex Market {task} sync", "no runs recorded"))
             continue
+        max_age = timedelta(seconds=YANDEX_MARKET_TASK_MAX_AGES.get(task, 86400))
         timestamp = latest.finished_at or latest.started_at
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
         age = current - timestamp.astimezone(current.tzinfo)
-        max_age = timedelta(seconds=YANDEX_MARKET_TASK_MAX_AGES.get(task, 86400))
         detail = f"{latest.status}, age {age}, started {latest.started_at}"
         if latest.error:
             detail += f", error={latest.error[:300]}"
+        ok = latest.status in {"completed", "running"} and age <= max_age
+        if (
+            not ok
+            and latest.status == "failed"
+            and latest.error
+            and "RateLimit" in latest.error
+        ):
+            completed = (
+                session.query(YandexMarketSyncRun)
+                .filter_by(task=task, status="completed")
+                .order_by(YandexMarketSyncRun.started_at.desc())
+                .first()
+            )
+            if completed is not None:
+                completed_at = completed.finished_at or completed.started_at
+                if completed_at.tzinfo is None:
+                    completed_at = completed_at.replace(tzinfo=ZoneInfo("UTC"))
+                completed_age = current - completed_at.astimezone(current.tzinfo)
+                if completed_age <= max_age:
+                    ok = True
+                    detail = (
+                        f"latest attempt rate-limited; last completed age "
+                        f"{completed_age}, started {completed.started_at}"
+                    )
         checks.append(Check(
-            latest.status in {"completed", "running"} and age <= max_age,
+            ok,
             f"Yandex Market {task} sync",
             detail,
         ))

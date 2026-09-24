@@ -15,6 +15,7 @@ from app.models import (
 from healthcheck.__main__ import (
     Check,
     OZON_TASK_MAX_AGES,
+    YANDEX_MARKET_TASK_MAX_AGES,
     _backup_status_check,
     _error_message,
     _failure_signature,
@@ -161,6 +162,73 @@ def test_yandex_market_task_health_uses_independent_journal(monkeypatch):
 
     assert checks[0].ok is True
     assert checks[1] == Check(False, "Yandex Market catalog sync", "no runs recorded")
+
+
+def test_yandex_market_rate_limit_uses_fresh_completed_run(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    now = datetime(2026, 9, 24, 23, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    with session_factory() as session:
+        session.add_all([
+            YandexMarketSyncRun(
+                id="completed",
+                task="analytics",
+                started_at=datetime(2026, 9, 24, 9, 5, tzinfo=ZoneInfo("UTC")),
+                finished_at=datetime(2026, 9, 24, 9, 6, tzinfo=ZoneInfo("UTC")),
+                status="completed",
+            ),
+            YandexMarketSyncRun(
+                id="limited",
+                task="analytics",
+                started_at=datetime(2026, 9, 24, 15, 5, tzinfo=ZoneInfo("UTC")),
+                finished_at=datetime(2026, 9, 24, 15, 6, tzinfo=ZoneInfo("UTC")),
+                status="failed",
+                error="YandexMarketRateLimitError: limit exceeded",
+            ),
+        ])
+        session.commit()
+        monkeypatch.setattr(
+            "healthcheck.__main__.YANDEX_MARKET_REQUIRED_TASKS", ("analytics",)
+        )
+        monkeypatch.setitem(YANDEX_MARKET_TASK_MAX_AGES, "analytics", 43200)
+        checks = _yandex_market_task_checks(session, now)
+
+    assert checks[0].ok is True
+    assert "latest attempt rate-limited" in checks[0].detail
+
+
+def test_yandex_market_rate_limit_fails_when_completed_run_is_stale(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    now = datetime(2026, 9, 24, 23, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    with session_factory() as session:
+        session.add_all([
+            YandexMarketSyncRun(
+                id="completed",
+                task="analytics",
+                started_at=datetime(2026, 9, 23, 6, 5, tzinfo=ZoneInfo("UTC")),
+                finished_at=datetime(2026, 9, 23, 6, 6, tzinfo=ZoneInfo("UTC")),
+                status="completed",
+            ),
+            YandexMarketSyncRun(
+                id="limited",
+                task="analytics",
+                started_at=datetime(2026, 9, 24, 15, 5, tzinfo=ZoneInfo("UTC")),
+                finished_at=datetime(2026, 9, 24, 15, 6, tzinfo=ZoneInfo("UTC")),
+                status="failed",
+                error="YandexMarketRateLimitError: limit exceeded",
+            ),
+        ])
+        session.commit()
+        monkeypatch.setattr(
+            "healthcheck.__main__.YANDEX_MARKET_REQUIRED_TASKS", ("analytics",)
+        )
+        monkeypatch.setitem(YANDEX_MARKET_TASK_MAX_AGES, "analytics", 43200)
+        checks = _yandex_market_task_checks(session, now)
+
+    assert checks[0].ok is False
 
 
 def test_collect_checks_targets_independent_workers_instead_of_cron(monkeypatch):
