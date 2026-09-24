@@ -281,7 +281,10 @@ def test_abc_dashboard_uses_only_normalized_product_economics_layer():
     assert "Реклама" in ABC_HTML
     assert "Логистика" in ABC_HTML
     assert "последний" not in ABC_HTML.lower()
-    assert "new Date(now.getFullYear(),now.getMonth(),0)" in ABC_HTML
+    assert "function defaultFinancialPeriod(now)" in ABC_HTML
+    assert "daysAfterSunday=last.getDay()||7" in ABC_HTML
+    assert "defaultPeriod=defaultFinancialPeriod(now)" in ABC_HTML
+    assert "new Date(now.getFullYear(),now.getMonth(),0)" not in ABC_HTML
 
 
 def test_abc_categories_use_80_15_5_and_separate_losses():
