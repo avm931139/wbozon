@@ -9,6 +9,8 @@ import requests
 from app.config import (
     YANDEX_MARKET_API_KEY,
     YANDEX_MARKET_BASE_URL,
+    YANDEX_MARKET_RATE_LIMIT_BACKOFF_SECONDS,
+    YANDEX_MARKET_RATE_LIMIT_RETRIES,
     YANDEX_MARKET_TIMEOUT_SECONDS,
 )
 from yandex_market.exceptions import (
@@ -53,7 +55,7 @@ class YandexMarketClient:
         *,
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
-        retries: int = 3,
+        retries: int = YANDEX_MARKET_RATE_LIMIT_RETRIES,
     ) -> dict[str, Any]:
         return self._request(
             "post",
@@ -68,7 +70,7 @@ class YandexMarketClient:
         path: str,
         *,
         params: dict[str, Any] | None = None,
-        retries: int = 3,
+        retries: int = YANDEX_MARKET_RATE_LIMIT_RETRIES,
     ) -> dict[str, Any]:
         return self._request("get", path, params=params, retries=retries)
 
@@ -79,7 +81,7 @@ class YandexMarketClient:
         *,
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
-        retries: int = 3,
+        retries: int = YANDEX_MARKET_RATE_LIMIT_RETRIES,
     ) -> dict[str, Any]:
         if not self.api_key:
             raise YandexMarketAuthError("YANDEX_MARKET_API_KEY must be configured")
@@ -140,10 +142,11 @@ class YandexMarketClient:
     @staticmethod
     def _retry_delay(response: Any, attempt: int) -> float:
         value = response.headers.get("Retry-After") if hasattr(response, "headers") else None
+        fallback = YANDEX_MARKET_RATE_LIMIT_BACKOFF_SECONDS * (2**attempt)
         try:
-            return max(float(value), 0.0) if value is not None else float(2**attempt)
+            return max(float(value), fallback) if value is not None else fallback
         except (TypeError, ValueError):
-            return float(2**attempt)
+            return fallback
 
     @staticmethod
     def _error_summary(payload: dict[str, Any]) -> str:

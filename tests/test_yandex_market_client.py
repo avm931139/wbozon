@@ -97,6 +97,28 @@ def test_client_retries_network_errors():
     assert attempts == 3
 
 
+def test_client_uses_long_exponential_backoff_for_rate_limits(monkeypatch):
+    monkeypatch.setattr("yandex_market.client.YANDEX_MARKET_RATE_LIMIT_BACKOFF_SECONDS", 15)
+    responses = iter([
+        StubResponse(status_code=429, headers={"Retry-After": "1"}),
+        StubResponse(status_code=429, headers={"Retry-After": "20"}),
+        StubResponse(payload={"status": "OK"}),
+    ])
+    session = type(
+        "Session",
+        (),
+        {"post": lambda self, *args, **kwargs: next(responses)},
+    )()
+    sleeps = []
+
+    result = YandexMarketClient(
+        "secret", session=session, sleeper=sleeps.append
+    ).post("/test", retries=3)
+
+    assert result == {"status": "OK"}
+    assert sleeps == [15, 30]
+
+
 def test_client_rejects_invalid_json_and_error_payload():
     invalid = type(
         "Session",

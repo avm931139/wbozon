@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import PurePosixPath
@@ -16,6 +17,7 @@ from app.config import (
     YANDEX_MARKET_AD_REFRESH_DAYS,
     YANDEX_MARKET_BUSINESS_ID,
     YANDEX_MARKET_HISTORY_FROM,
+    YANDEX_MARKET_HISTORY_REQUEST_PAUSE_SECONDS,
     YANDEX_MARKET_TIMEZONE,
 )
 from app.db import SessionLocal
@@ -39,10 +41,16 @@ class YandexMarketAdvertisingService:
         *,
         session_factory: Callable[..., Any] = SessionLocal,
         business_id: int | None = YANDEX_MARKET_BUSINESS_ID,
+        sleeper: Callable[[float], None] = time.sleep,
+        history_request_pause_seconds: float = YANDEX_MARKET_HISTORY_REQUEST_PAUSE_SECONDS,
     ) -> None:
+        if history_request_pause_seconds < 0:
+            raise ValueError("history_request_pause_seconds must not be negative")
         self.api = api or YandexMarketAdvertisingAPI()
         self.session_factory = session_factory
         self.business_id = business_id
+        self.sleeper = sleeper
+        self.history_request_pause_seconds = history_request_pause_seconds
 
     def sync(self, *, stat_date: date | None = None) -> dict[str, Any]:
         business_id = self._business_id()
@@ -100,6 +108,8 @@ class YandexMarketAdvertisingService:
         days = reports = rows = 0
         current = begin
         while current <= finish:
+            if days and self.history_request_pause_seconds:
+                self.sleeper(self.history_request_pause_seconds)
             result = self.sync(stat_date=current)
             days += 1
             reports += len(result["sources"])

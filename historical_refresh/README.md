@@ -22,6 +22,8 @@ An explicit range is supported with `--date-from` and `--date-to`. Yandex
 Market advertising is additionally capped by `YANDEX_MARKET_AD_HISTORY_DAYS`,
 because the cabinet plan exposes only that rolling window. Ozon advertising is
 skipped, without failing finance, when Performance API credentials are absent.
+Yandex historical requests use `YANDEX_MARKET_HISTORY_REQUEST_PAUSE_SECONDS`
+and exponential 429 backoff configured by `YANDEX_MARKET_RATE_LIMIT_*`.
 
 The Ozon historical mode deliberately reloads details for already stored
 postings. This is required to capture late returns and corrections that the

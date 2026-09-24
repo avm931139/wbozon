@@ -226,7 +226,8 @@ def test_finance_history_chunks_and_replaces_the_explicit_full_period():
     factory = sessionmaker(bind=engine, future=True)
     api = API()
     service = YandexMarketFinanceService(
-        api=api, session_factory=factory, business_id=216673578
+        api=api, session_factory=factory, business_id=216673578,
+        sleeper=lambda value: None,
     )
 
     result = service.sync_range(date(2026, 1, 1), date(2026, 7, 1))

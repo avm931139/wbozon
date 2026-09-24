@@ -187,6 +187,15 @@ YANDEX_MARKET_BASE_URL = os.getenv(
     "https://api.partner.market.yandex.ru",
 )
 YANDEX_MARKET_TIMEOUT_SECONDS = int(os.getenv("YANDEX_MARKET_TIMEOUT_SECONDS", "10"))
+YANDEX_MARKET_RATE_LIMIT_RETRIES = int(
+    os.getenv("YANDEX_MARKET_RATE_LIMIT_RETRIES", "6")
+)
+YANDEX_MARKET_RATE_LIMIT_BACKOFF_SECONDS = float(
+    os.getenv("YANDEX_MARKET_RATE_LIMIT_BACKOFF_SECONDS", "15")
+)
+YANDEX_MARKET_HISTORY_REQUEST_PAUSE_SECONDS = float(
+    os.getenv("YANDEX_MARKET_HISTORY_REQUEST_PAUSE_SECONDS", "5")
+)
 YANDEX_MARKET_CAMPAIGN_IDS = tuple(
     int(value.strip())
     for value in os.getenv("YANDEX_MARKET_CAMPAIGN_IDS", "").split(",")
