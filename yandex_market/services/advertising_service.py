@@ -8,7 +8,7 @@ from pathlib import PurePosixPath
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import distinct, func
+from sqlalchemy import func
 
 from app.config import (
     YANDEX_MARKET_AD_POLL_ATTEMPTS,
@@ -162,21 +162,32 @@ class YandexMarketAdvertisingService:
             today - timedelta(days=YANDEX_MARKET_AD_HISTORY_DAYS - 1),
         )
         with self.session_factory() as session:
-            complete = {
-                day
-                for day, count in (
-                    session.query(
-                        YandexMarketAdDailyStat.stat_date,
-                        func.count(distinct(YandexMarketAdDailyStat.source)),
-                    )
-                    .filter(
-                        YandexMarketAdDailyStat.business_id == business_id,
-                        YandexMarketAdDailyStat.stat_date.between(history_from, today),
-                    )
-                    .group_by(YandexMarketAdDailyStat.stat_date)
-                    .all()
+            stored = (
+                session.query(
+                    YandexMarketAdDailyStat.stat_date,
+                    YandexMarketAdDailyStat.source,
+                    YandexMarketAdDailyStat.raw_data,
                 )
-                if count == len(self.SOURCES)
+                .filter(
+                    YandexMarketAdDailyStat.business_id == business_id,
+                    YandexMarketAdDailyStat.stat_date.between(history_from, today),
+                )
+                .all()
+            )
+            sources_by_day: dict[date, set[str]] = defaultdict(set)
+            current_shows_days: set[date] = set()
+            for stat_date, source, raw_data in stored:
+                sources_by_day[stat_date].add(source)
+                if (
+                    source == "shows_boost"
+                    and isinstance(raw_data, dict)
+                    and raw_data.get("parser_version") == "offers-v1"
+                ):
+                    current_shows_days.add(stat_date)
+            complete = {
+                stat_date
+                for stat_date, sources in sources_by_day.items()
+                if sources >= set(self.SOURCES) and stat_date in current_shows_days
             }
             # Newest-first makes the operational dashboard useful while older
             # history is being filled in the background.

@@ -11,7 +11,6 @@ from app.config import (
     OZON_PERFORMANCE_CLIENT_ID,
     OZON_PERFORMANCE_CLIENT_SECRET,
     WB_SYNC_HISTORY_START,
-    YANDEX_MARKET_AD_REFRESH_DAYS,
     YANDEX_MARKET_HISTORY_FROM,
 )
 from ozon.business_time import ozon_today
@@ -180,14 +179,16 @@ class HistoricalRefreshService:
         ]
         if include_advertising:
             advertising = YandexMarketAdvertisingService()
-            advertising_start = start if mode == "full" else max(
-                start,
-                finish - timedelta(days=YANDEX_MARKET_AD_REFRESH_DAYS - 1),
-            )
-            steps.append((
-                "advertising",
-                lambda: advertising.sync_history(
-                    date_from=advertising_start, date_to=finish
-                ),
-            ))
+            if mode == "full":
+                steps.append((
+                    "advertising",
+                    lambda: advertising.sync_history(
+                        date_from=start, date_to=finish
+                    ),
+                ))
+            else:
+                # Report generation has a strict cabinet quota. Process one
+                # day per run; `_target_date` prioritizes missing/legacy days,
+                # then rotates through the mutable attribution window.
+                steps.append(("advertising", advertising.sync))
         return steps

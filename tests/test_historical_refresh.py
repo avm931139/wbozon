@@ -67,7 +67,7 @@ def test_history_refresh_keeps_marketplaces_independent(monkeypatch):
     assert "rate limited" in result["marketplaces"]["ozon"]["finance_error"]
 
 
-def test_yandex_rolling_advertising_uses_attribution_window(monkeypatch):
+def test_yandex_rolling_advertising_processes_one_rate_limited_day(monkeypatch):
     calls = []
 
     class Finance:
@@ -75,9 +75,9 @@ def test_yandex_rolling_advertising_uses_attribution_window(monkeypatch):
             return kwargs
 
     class Advertising:
-        def sync_history(self, **kwargs):
-            calls.append(kwargs)
-            return kwargs
+        def sync(self):
+            calls.append("sync")
+            return {"date": "2026-09-24"}
 
     monkeypatch.setattr(
         "historical_refresh.service.YandexMarketFinanceService", Finance
@@ -85,10 +85,6 @@ def test_yandex_rolling_advertising_uses_attribution_window(monkeypatch):
     monkeypatch.setattr(
         "historical_refresh.service.YandexMarketAdvertisingService", Advertising
     )
-    monkeypatch.setattr(
-        "historical_refresh.service.YANDEX_MARKET_AD_REFRESH_DAYS", 14
-    )
-
     steps = HistoricalRefreshService._raw_steps(
         "yandex_market",
         date(2026, 5, 1),
@@ -98,7 +94,4 @@ def test_yandex_rolling_advertising_uses_attribution_window(monkeypatch):
     )
     dict((name, callback()) for name, callback in steps)
 
-    assert calls == [{
-        "date_from": date(2026, 9, 11),
-        "date_to": date(2026, 9, 24),
-    }]
+    assert calls == ["sync"]

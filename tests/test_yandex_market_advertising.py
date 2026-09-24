@@ -305,6 +305,41 @@ def test_legacy_shows_boost_day_is_refetched_for_offer_sheet():
     assert service._sources_for_date(date(2026, 9, 5)) == ("shows_boost",)
 
 
+def test_automatic_sync_prioritizes_legacy_shows_boost_day(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    with factory() as session:
+        for day in (date(2026, 9, 5), date(2026, 9, 6)):
+            for source in YandexMarketAdvertisingService.SOURCES:
+                session.add(YandexMarketAdDailyStat(
+                    stat_date=day,
+                    source=source,
+                    business_id=777,
+                    campaign_id=0,
+                    raw_data=(
+                        {"parser_version": "offers-v1"}
+                        if source == "shows_boost" and day == date(2026, 9, 6)
+                        else {}
+                    ),
+                    fetched_at=datetime(2026, 9, 6, tzinfo=timezone.utc),
+                ))
+        session.commit()
+
+    monkeypatch.setattr(
+        "yandex_market.services.advertising_service.YANDEX_MARKET_HISTORY_FROM",
+        "2026-09-01",
+    )
+    monkeypatch.setattr(
+        "yandex_market.services.advertising_service.YANDEX_MARKET_AD_HISTORY_DAYS", 90
+    )
+    service = YandexMarketAdvertisingService(
+        api=object(), session_factory=factory, business_id=777
+    )
+
+    assert service._target_date(date(2026, 9, 6)) == date(2026, 9, 5)
+
+
 def test_advertising_coverage_and_replacement_are_scoped_by_business():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

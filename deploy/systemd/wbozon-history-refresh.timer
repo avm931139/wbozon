@@ -4,7 +4,6 @@ Description=Refresh mutable marketplace history daily
 [Timer]
 OnCalendar=*-*-* 02:20:00 Europe/Moscow
 RandomizedDelaySec=10m
-Persistent=true
 Unit=wbozon-history-refresh.service
 
 [Install]
