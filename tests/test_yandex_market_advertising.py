@@ -113,7 +113,13 @@ def test_advertising_service_persists_four_sources(monkeypatch):
                 }],
                 "banners": [],
             }
-            return {"status": "DONE", "rows": [(names[report_id], rows[report_id])]}
+            files = [(names[report_id], rows[report_id])]
+            if report_id == "shows_boost":
+                files.append(("business_shows_boost_consolidated_offers.json", [{
+                    "offerId": "SKU-1", "shows": 30, "clicks": 5,
+                    "orderedCount": 3, "cost": 180, "orderedAmount": 2000,
+                }]))
+            return {"status": "DONE", "rows": files}
 
     service = YandexMarketAdvertisingService(
         api=API(), session_factory=factory, business_id=777
@@ -123,12 +129,15 @@ def test_advertising_service_persists_four_sources(monkeypatch):
     assert set(result["sources"]) == {"sales_boost", "shows_boost", "shelves", "banners"}
     with factory() as session:
         rows = session.query(YandexMarketAdDailyStat).all()
-        assert len(rows) == 4
-        assert sum(row.views for row in rows) == 45
-        assert sum(row.clicks for row in rows) == 10
-        assert sum(row.orders for row in rows) == 6
+        assert len(rows) == 5
+        assert sum(row.views for row in rows) == 75
+        assert sum(row.clicks for row in rows) == 15
+        assert sum(row.orders for row in rows) == 9
         assert sum(row.spend for row in rows) == 350
-        assert sum(row.attributed_revenue for row in rows) == 3400
+        assert sum(row.attributed_revenue for row in rows) == 5400
+        offer = next(row for row in rows if row.offer_id == "SKU-1")
+        assert offer.spend == 0
+        assert offer.raw_data["rows"][0]["cost"] == 180
 
 
 def test_no_data_report_is_saved_as_zero_day():
@@ -199,6 +208,9 @@ def test_automatic_advertising_sync_backfills_newest_missing_day(monkeypatch):
                 source=source,
                 business_id=777,
                 campaign_id="total",
+                raw_data={
+                    "parser_version": "offers-v1"
+                } if source == "shows_boost" else {},
                 fetched_at=datetime(2026, 9, 6, tzinfo=timezone.utc),
             ))
         session.commit()
@@ -226,6 +238,9 @@ def test_advertising_backfill_requests_only_missing_sources():
             session.add(YandexMarketAdDailyStat(
                 stat_date=date(2026, 9, 5), source=source, business_id=777,
                 campaign_id=0, fetched_at=datetime(2026, 9, 6, tzinfo=timezone.utc),
+                raw_data={
+                    "parser_version": "offers-v1"
+                } if source == "shows_boost" else {},
             ))
         session.commit()
 
@@ -235,6 +250,26 @@ def test_advertising_backfill_requests_only_missing_sources():
 
     assert service._sources_for_date(date(2026, 9, 5)) == ("shelves",)
     assert service._sources_for_date(date(2026, 9, 4)) == service.SOURCES
+
+
+def test_legacy_shows_boost_day_is_refetched_for_offer_sheet():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+    with factory() as session:
+        for source in YandexMarketAdvertisingService.SOURCES:
+            session.add(YandexMarketAdDailyStat(
+                stat_date=date(2026, 9, 5), source=source, business_id=777,
+                campaign_id=0, raw_data={},
+                fetched_at=datetime(2026, 9, 6, tzinfo=timezone.utc),
+            ))
+        session.commit()
+
+    service = YandexMarketAdvertisingService(
+        api=object(), session_factory=factory, business_id=777
+    )
+
+    assert service._sources_for_date(date(2026, 9, 5)) == ("shows_boost",)
 
 
 def test_advertising_coverage_and_replacement_are_scoped_by_business():
@@ -251,6 +286,9 @@ def test_advertising_coverage_and_replacement_are_scoped_by_business():
                     business_id=business_id,
                     campaign_id=0,
                     spend=business_id,
+                    raw_data={
+                        "parser_version": "offers-v1"
+                    } if source == "shows_boost" else {},
                     fetched_at=datetime(2026, 9, 6, tzinfo=timezone.utc),
                 ))
         session.query(YandexMarketAdDailyStat).filter_by(

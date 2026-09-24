@@ -85,6 +85,18 @@ def test_unmatched_direct_advertising_is_not_allocated_to_other_products():
     assert method == "direct_plus_revenue"
 
 
+def test_product_weight_allocation_is_kept_separate_from_direct_spend():
+    advertising, unallocated, method = allocate_ozon_advertising(
+        5000,
+        {"sku-a": 10000, "sku-b": 5000},
+        {"sku-a": 1000},
+        {"sku-a": 2000, "sku-b": 1000},
+    )
+    assert sum(advertising.values()) == 5000
+    assert unallocated == 0
+    assert method == "product_weight_plus_revenue"
+
+
 def test_kopeck_reconciliation_preserves_group_control_total():
     rows = [
         PendingFact({

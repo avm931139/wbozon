@@ -83,14 +83,22 @@ class YandexMarketAdvertisingService:
         """Backfill only missing reports; refresh all sources on a complete day."""
         business_id = business_id or self._business_id()
         with self.session_factory() as session:
-            present = {
-                source for source, in session.query(
-                    distinct(YandexMarketAdDailyStat.source)
-                ).filter(
-                    YandexMarketAdDailyStat.business_id == business_id,
-                    YandexMarketAdDailyStat.stat_date == stat_date,
-                ).all()
-            }
+            stored = session.query(
+                YandexMarketAdDailyStat.source,
+                YandexMarketAdDailyStat.raw_data,
+            ).filter(
+                YandexMarketAdDailyStat.business_id == business_id,
+                YandexMarketAdDailyStat.stat_date == stat_date,
+            ).all()
+            present = {source for source, _ in stored}
+            shows_is_current = any(
+                source == "shows_boost"
+                and isinstance(raw_data, dict)
+                and raw_data.get("parser_version") == "offers-v1"
+                for source, raw_data in stored
+            )
+            if "shows_boost" in present and not shows_is_current:
+                present.remove("shows_boost")
         missing = tuple(source for source in self.SOURCES if source not in present)
         return missing or self.SOURCES
 
@@ -169,9 +177,25 @@ class YandexMarketAdvertisingService:
     def _select_rows(
         source: str, files: list[tuple[str, list[dict[str, Any]]]]
     ) -> list[dict[str, Any]]:
+        if source == "shows_boost":
+            selected: list[dict[str, Any]] = []
+            expected_sections = {
+                "business_shows_boost_consolidated_campaigns": "campaigns",
+                "business_shows_boost_consolidated_offers": "offers",
+            }
+            for filename, rows in files:
+                stem = PurePosixPath(filename).stem.lower()
+                for expected, section in expected_sections.items():
+                    if stem == expected or expected in stem:
+                        selected.extend({**row, "_report_section": section} for row in rows)
+                        break
+            if selected:
+                return selected
+            raise ValueError(
+                "Yandex Market shows_boost report has no campaign or offer sheet"
+            )
         expected = {
             "sales_boost": "business_boost_consolidated",
-            "shows_boost": "business_shows_boost_consolidated_campaigns",
             "shelves": "shelfs_statistics_summary",
             "banners": "banners_statistics_report_consolidated",
         }[source]
@@ -210,10 +234,17 @@ class YandexMarketAdvertisingService:
                     f"Yandex Market advertising row belongs to business "
                     f"{row_business_id}, expected {business_id}"
                 )
-            campaign_id = 0 if source == "sales_boost" else int(
+            is_shows_offer = (
+                source == "shows_boost" and row.get("_report_section") == "offers"
+            )
+            campaign_id = 0 if source == "sales_boost" or is_shows_offer else int(
                 row.get("saleCampaignId") or row.get("campaignId") or 0
             )
-            offer_id = str(row.get("shopSku") or "") if source == "sales_boost" else ""
+            offer_id = (
+                str(row.get("shopSku") or "")
+                if source == "sales_boost"
+                else str(row.get("offerId") or "") if is_shows_offer else ""
+            )
             item = grouped[(campaign_id, offer_id)]
             item["campaign_name"] = (
                 row.get("saleCampaignName") or row.get("campaignName") or item["campaign_name"]
@@ -224,6 +255,14 @@ class YandexMarketAdvertisingService:
                 item["orders"] += int(row.get("orderItemsDeliveredWithFee") or 0)
                 item["spend"] += _decimal(row.get("billedAmount"))
                 item["attributed_revenue"] += _decimal(row.get("ordersGvmDeliveredWithFee"))
+            elif is_shows_offer:
+                item["views"] += int(row.get("shows") or 0)
+                item["clicks"] += int(row.get("clicks") or 0)
+                item["orders"] += int(row.get("orderedCount") or 0)
+                # The offers sheet contains calculated COST, while actual REAL_COST
+                # exists only in the campaign sheet. Keep COST as an allocation
+                # weight in raw_data and do not count it twice as actual spend.
+                item["attributed_revenue"] += _decimal(row.get("orderedAmount"))
             else:
                 item["views"] += int(row.get("shows") or 0)
                 item["clicks"] += int(row.get("clicks") or 0)
@@ -254,7 +293,14 @@ class YandexMarketAdvertisingService:
                     orders=item["orders"],
                     spend=item["spend"],
                     attributed_revenue=item["attributed_revenue"],
-                    raw_data={"rows": item["rows"]},
+                    raw_data={
+                        "rows": item["rows"],
+                        **(
+                            {"parser_version": "offers-v1"}
+                            if source == "shows_boost"
+                            else {}
+                        ),
+                    },
                     fetched_at=now,
                 ))
             session.commit()
