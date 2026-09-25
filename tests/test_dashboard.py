@@ -213,7 +213,7 @@ def test_pnl_explicit_advertising_takes_priority_over_discount_wording():
 
 
 def test_stock_dashboard_has_three_market_images_and_refresh_dates():
-    assert "/api/stocks?date=" in STOCKS_HTML
+    assert "fetch('/api/stocks?'+stockQuery())" in STOCKS_HTML
     assert "Фото WB" in STOCKS_HTML
     assert "Фото Ozon" in STOCKS_HTML
     assert "Фото Яндекс" in STOCKS_HTML
@@ -234,7 +234,7 @@ def test_all_dashboard_pages_export_the_selected_filter_to_excel():
     assert "Выгрузить в Excel" in PNL_HTML
     assert "report:'pnl',from:from.value,to:to.value" in PNL_HTML
     assert "Выгрузить в Excel" in STOCKS_HTML
-    assert "report:'stocks',date:dateInput.value" in STOCKS_HTML
+    assert "query.set('report','stocks')" in STOCKS_HTML
     assert "Выгрузить в Excel" in ABC_HTML
     assert "report:'abc',from:from.value,to:to.value" in ABC_HTML
 
@@ -386,6 +386,21 @@ def test_stock_details_uses_current_rows_and_historical_snapshots():
     assert "yandex_market_stock_snapshots" in source
     assert "snapshot_date<=:d" in source
     assert "marketplace_product_media" in source
+    assert "ozon_warehouse_stocks" in source
+    assert "ozon_warehouse_stock_snapshots" in source
+    assert ":wbw" in source
+    assert ":ozw" in source
+    assert ":ymw" in source
+
+
+def test_stock_page_has_independent_marketplace_warehouse_filters():
+    assert 'id="wb-warehouse"' in STOCKS_HTML
+    assert 'id="ozon-warehouse"' in STOCKS_HTML
+    assert 'id="yandex-warehouse"' in STOCKS_HTML
+    assert "wb_warehouse:wbWarehouse.value" in STOCKS_HTML
+    assert "ozon_warehouse:ozonWarehouse.value" in STOCKS_HTML
+    assert "yandex_warehouse:yandexWarehouse.value" in STOCKS_HTML
+    assert "warehouse_filters" in STOCKS_HTML
 
 
 def test_wb_dashboard_stock_total_excludes_seller_fbs_stock():

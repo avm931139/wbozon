@@ -68,7 +68,12 @@ class Handler(BaseHTTPRequestHandler):
                 query = parse_qs(parsed.query); payload = self.service.pnl((query.get("from") or [None])[0], (query.get("to") or [None])[0])
                 self._send(200, json.dumps(payload, ensure_ascii=False, default=str).encode(), "application/json")
             elif parsed.path == "/api/stocks":
-                query = parse_qs(parsed.query); payload = self.service.stock_details((query.get("date") or [None])[0])
+                query = parse_qs(parsed.query); payload = self.service.stock_details(
+                    (query.get("date") or [None])[0],
+                    (query.get("wb_warehouse") or [None])[0],
+                    (query.get("ozon_warehouse") or [None])[0],
+                    (query.get("yandex_warehouse") or [None])[0],
+                )
                 self._send(200, json.dumps(payload, ensure_ascii=False, default=str).encode(), "application/json")
             elif parsed.path == "/api/abc":
                 query = parse_qs(parsed.query); payload = self.service.abc((query.get("from") or [None])[0], (query.get("to") or [None])[0])
@@ -86,7 +91,12 @@ class Handler(BaseHTTPRequestHandler):
                     payload = self.service.pnl((query.get("from") or [None])[0], (query.get("to") or [None])[0])
                     content = pnl_excel(payload); filename = f"pnl_{payload['period']['from']}_{payload['period']['to']}.xlsx"
                 elif report == "stocks":
-                    payload = self.service.stock_details((query.get("date") or [None])[0])
+                    payload = self.service.stock_details(
+                        (query.get("date") or [None])[0],
+                        (query.get("wb_warehouse") or [None])[0],
+                        (query.get("ozon_warehouse") or [None])[0],
+                        (query.get("yandex_warehouse") or [None])[0],
+                    )
                     content = stocks_excel(payload); filename = f"stocks_{payload['requested_date']}.xlsx"
                 elif report == "abc":
                     payload = self.service.abc((query.get("from") or [None])[0], (query.get("to") or [None])[0])

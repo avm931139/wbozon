@@ -47,11 +47,25 @@ class DashboardService:
         previous_finish = begin - timedelta(days=1)
         return previous_finish - timedelta(days=days - 1), previous_finish
 
-    def stock_details(self, value: str | None) -> dict[str, Any]:
+    def stock_details(
+        self,
+        value: str | None,
+        wb_warehouse: str | None = None,
+        ozon_warehouse: str | None = None,
+        yandex_warehouse: str | None = None,
+    ) -> dict[str, Any]:
         """Return one product row with WB, Ozon and Yandex stock as of a date."""
         requested = date.fromisoformat(value) if value else date.today()
         if requested > date.today():
             raise ValueError("stock date cannot be in the future")
+        wb_warehouse = str(wb_warehouse or "").strip() or None
+        if wb_warehouse and len(wb_warehouse) > 200:
+            raise ValueError("invalid WB warehouse")
+        try:
+            ozon_warehouse_id = int(ozon_warehouse) if ozon_warehouse else None
+            yandex_warehouse_id = int(yandex_warehouse) if yandex_warehouse else None
+        except (TypeError, ValueError):
+            raise ValueError("invalid warehouse ID")
         current = requested == date.today()
         if current:
             sources = {
@@ -64,11 +78,19 @@ class DashboardService:
                         SELECT nm_id,vendor_code,title FROM wb_products
                         WHERE vendor_code=x.vendor_code ORDER BY id LIMIT 1
                     ) p ON TRUE
-                    WHERE x.warehouse_name='Всего находится на складах'""",
-                "ozon": """SELECT x.product_id::text external_id,p.offer_id source_article,
+                    WHERE x.warehouse_name=coalesce(:wbw,'Всего находится на складах')""",
+                "ozon": ("""SELECT x.product_id::text external_id,p.offer_id source_article,
                         p.name source_name,x.present units,x.fetched_at refreshed_at,
                         CAST(:d AS date) data_date
-                    FROM ozon_stocks x LEFT JOIN ozon_products p ON p.product_id=x.product_id""",
+                    FROM ozon_stocks x LEFT JOIN ozon_products p ON p.product_id=x.product_id"""
+                    if ozon_warehouse_id is None else
+                    """SELECT x.product_id::text external_id,p.offer_id source_article,
+                        p.name source_name,x.present units,x.fetched_at refreshed_at,
+                        CAST(:d AS date) data_date
+                    FROM ozon_warehouse_stocks x
+                    JOIN ozon_warehouses w ON w.id=x.warehouse_id
+                    LEFT JOIN ozon_products p ON p.product_id=x.product_id
+                    WHERE w.ozon_warehouse_id=:ozw"""),
                 "yandex_market": """SELECT x.offer_id external_id,x.offer_id source_article,
                         o.name source_name,x.count units,x.fetched_at refreshed_at,
                         CAST(:d AS date) data_date
@@ -76,7 +98,8 @@ class DashboardService:
                     LEFT JOIN yandex_market_campaigns c ON c.campaign_id=x.campaign_id
                     LEFT JOIN yandex_market_offers o ON o.offer_id=x.offer_id
                         AND o.business_id=c.business_id
-                    WHERE x.stock_type='AVAILABLE'""",
+                    WHERE x.stock_type='AVAILABLE'
+                      AND (:ymw IS NULL OR x.warehouse_id=:ymw)""",
             }
         else:
             sources = {
@@ -89,14 +112,24 @@ class DashboardService:
                         SELECT nm_id,vendor_code,title FROM wb_products
                         WHERE vendor_code=x.vendor_code ORDER BY id LIMIT 1
                     ) p ON TRUE
-                    WHERE x.warehouse_name='Всего находится на складах'
+                    WHERE x.warehouse_name=coalesce(:wbw,'Всего находится на складах')
                       AND x.snapshot_date=(SELECT max(snapshot_date)
                           FROM wb_warehouse_remain_snapshots WHERE snapshot_date<=:d)""",
-                "ozon": """SELECT x.product_id::text external_id,p.offer_id source_article,
+                "ozon": ("""SELECT x.product_id::text external_id,p.offer_id source_article,
                         p.name source_name,x.present units,x.captured_at refreshed_at,
                         x.snapshot_date data_date
                     FROM ozon_stock_snapshots x LEFT JOIN ozon_products p ON p.product_id=x.product_id
-                    WHERE x.snapshot_date=(SELECT max(snapshot_date) FROM ozon_stock_snapshots WHERE snapshot_date<=:d)""",
+                    WHERE x.snapshot_date=(SELECT max(snapshot_date) FROM ozon_stock_snapshots WHERE snapshot_date<=:d)"""
+                    if ozon_warehouse_id is None else
+                    """SELECT x.product_id::text external_id,p.offer_id source_article,
+                        p.name source_name,x.present units,x.captured_at refreshed_at,
+                        x.snapshot_date data_date
+                    FROM ozon_warehouse_stock_snapshots x
+                    JOIN ozon_warehouses w ON w.id=x.warehouse_id
+                    LEFT JOIN ozon_products p ON p.product_id=x.product_id
+                    WHERE w.ozon_warehouse_id=:ozw
+                      AND x.snapshot_date=(SELECT max(snapshot_date)
+                          FROM ozon_warehouse_stock_snapshots WHERE snapshot_date<=:d)"""),
                 "yandex_market": """SELECT x.offer_id external_id,x.offer_id source_article,
                         o.name source_name,x.count units,x.captured_at refreshed_at,
                         x.snapshot_date data_date
@@ -105,6 +138,7 @@ class DashboardService:
                     LEFT JOIN yandex_market_offers o ON o.offer_id=x.offer_id
                         AND o.business_id=c.business_id
                     WHERE x.stock_type='AVAILABLE'
+                      AND (:ymw IS NULL OR x.warehouse_id=:ymw)
                       AND x.snapshot_date=(SELECT max(snapshot_date) FROM yandex_market_stock_snapshots WHERE snapshot_date<=:d)""",
             }
         grouped = []
@@ -172,8 +206,13 @@ class DashboardService:
                 AND yandex_image.marketplace='yandex_market'
             ORDER BY coalesce(mp.article,wb.source_article,ozon.source_article,
                               yandex_market.source_article),k.row_key"""
+        params = {
+            "d": requested, "wbw": wb_warehouse,
+            "ozw": ozon_warehouse_id, "ymw": yandex_warehouse_id,
+        }
         with self.session_factory() as db:
-            records = [dict(row) for row in db.execute(text(sql), {"d": requested}).mappings().all()]
+            records = [dict(row) for row in db.execute(text(sql), params).mappings().all()]
+            warehouse_options = self._stock_warehouse_options(db, requested, current)
         rows = []
         for record in records:
             row = {"key": record["row_key"],
@@ -202,7 +241,68 @@ class DashboardService:
             }
             for marketplace in ("wb", "ozon", "yandex_market")
         }
-        return {"requested_date": requested, "current": current, "totals": totals, "rows": rows}
+        return {
+            "requested_date": requested, "current": current,
+            "totals": totals, "rows": rows,
+            "warehouse_filters": {
+                "options": warehouse_options,
+                "selected": {
+                    "wb": wb_warehouse,
+                    "ozon": str(ozon_warehouse_id) if ozon_warehouse_id is not None else None,
+                    "yandex_market": (
+                        str(yandex_warehouse_id) if yandex_warehouse_id is not None else None
+                    ),
+                },
+            },
+        }
+
+    @staticmethod
+    def _stock_warehouse_options(
+        db: Any, requested: date, current: bool
+    ) -> dict[str, list[dict[str, Any]]]:
+        if current:
+            wb_table = "wb_warehouse_remains"
+            ozon_table = "ozon_warehouse_stocks"
+            yandex_table = "yandex_market_stocks"
+            date_filters = {"wb": "", "ozon": "", "yandex": ""}
+        else:
+            wb_table = "wb_warehouse_remain_snapshots"
+            ozon_table = "ozon_warehouse_stock_snapshots"
+            yandex_table = "yandex_market_stock_snapshots"
+            date_filters = {
+                "wb": "AND snapshot_date=(SELECT max(snapshot_date) FROM wb_warehouse_remain_snapshots WHERE snapshot_date<=:d)",
+                "ozon": "AND s.snapshot_date=(SELECT max(snapshot_date) FROM ozon_warehouse_stock_snapshots WHERE snapshot_date<=:d)",
+                "yandex": "AND s.snapshot_date=(SELECT max(snapshot_date) FROM yandex_market_stock_snapshots WHERE snapshot_date<=:d)",
+            }
+        wb_rows = db.execute(text(f"""SELECT warehouse_name value,warehouse_name label,
+                coalesce(sum(quantity),0)::bigint units
+            FROM {wb_table} WHERE warehouse_name<>'Всего находится на складах'
+              AND warehouse_name NOT LIKE 'В пути%' {date_filters['wb']}
+            GROUP BY warehouse_name HAVING sum(quantity)>0
+            ORDER BY warehouse_name"""), {"d": requested}).mappings().all()
+        ozon_rows = db.execute(text(f"""SELECT w.ozon_warehouse_id::text value,
+                concat_ws(' · ',w.name,w.cluster_name) label,
+                coalesce(sum(s.present),0)::bigint units
+            FROM {ozon_table} s JOIN ozon_warehouses w ON w.id=s.warehouse_id
+            WHERE TRUE {date_filters['ozon']}
+            GROUP BY w.ozon_warehouse_id,w.name,w.cluster_name
+            HAVING sum(s.present)>0 ORDER BY w.name,w.ozon_warehouse_id"""), {"d": requested}).mappings().all()
+        yandex_rows = db.execute(text(f"""SELECT s.warehouse_id::text value,
+                concat_ws(' · ',coalesce(max(w.name),'ID '||s.warehouse_id::text),
+                    max(w.warehouse_type)) label,
+                coalesce(sum(s.count),0)::bigint units
+            FROM {yandex_table} s
+            LEFT JOIN yandex_market_campaigns c ON c.campaign_id=s.campaign_id
+            LEFT JOIN yandex_market_warehouses w ON w.business_id=c.business_id
+                AND w.warehouse_id=s.warehouse_id
+            WHERE s.stock_type='AVAILABLE' {date_filters['yandex']}
+            GROUP BY s.warehouse_id HAVING sum(s.count)>0
+            ORDER BY label,s.warehouse_id"""), {"d": requested}).mappings().all()
+        return {
+            "wb": [dict(row) for row in wb_rows],
+            "ozon": [dict(row) for row in ozon_rows],
+            "yandex_market": [dict(row) for row in yandex_rows],
+        }
 
     def update_product_cost(self, master_product_id: int, value: Any) -> dict[str, Any]:
         if isinstance(master_product_id, bool) or master_product_id <= 0:
