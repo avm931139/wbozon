@@ -869,7 +869,11 @@ class DashboardService:
             return "commission", "Комиссия и вознаграждение площадки"
         if "приём платежа" in normalized or "прием платежа" in normalized:
             return "acquiring", "Эквайринг и платежи"
-        if "возврат списания" in normalized or "скидка за лояльность" in normalized:
+        if (
+            "возврат списания" in normalized
+            or "скидк" in normalized
+            or "совместных акц" in normalized
+        ):
             return "discounts", "Скидки и корректировки акций"
         categories = (
             ("advertising", "Реклама и продвижение", ("реклам", "продвиж", "буст", "рассыл", "отзывы за баллы", "promotion", "payperclick", "campaign")),
@@ -971,7 +975,7 @@ class DashboardService:
             {"key": "acceptance", "label": "Платная приёмка", "amount": wb.get("acceptance")},
             {"key": "acquiring", "label": "Эквайринг", "amount": wb.get("acquiring")},
             {"key": "penalties", "label": "Штрафы", "amount": wb.get("penalties")},
-            {"key": "deductions", "label": "Удержания и прочие услуги без рекламы", "amount": (
+            {"key": "deductions", "label": "Прочие удержания", "amount": (
                 _number(wb.get("deductions")) - _number(wb_advertising.get("amount"))
             )},
             {"key": "payment_schedule", "label": "Изменение срока единовременной выплаты", "amount": wb.get("payment_schedule")},

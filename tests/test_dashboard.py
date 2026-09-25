@@ -196,6 +196,14 @@ def test_pnl_yandex_contra_expense_is_preserved_without_reconciliation_residual(
     assert all(line["key"] != "reconciliation_adjustment" for line in lines)
 
 
+def test_pnl_yandex_promotion_discount_is_not_logistics():
+    category, _ = DashboardService._expense_category(
+        "Доставка (средняя миля) · Скидка за участие в совместных акциях"
+    )
+
+    assert category == "discounts"
+
+
 def test_stock_dashboard_has_three_market_images_and_refresh_dates():
     assert "/api/stocks?date=" in STOCKS_HTML
     assert "Фото WB" in STOCKS_HTML
