@@ -269,6 +269,7 @@ def test_dashboard_excel_exports_are_valid_workbooks():
     finance_book = load_workbook(BytesIO(finance), read_only=True)
     assert finance_book.sheetnames == ["P&L", "Расходы", "Нераспределено ABC"]
     assert finance_book["P&L"]["B2"].value == "2026-09-01"
+    assert finance_book["P&L"].max_column == 10
 
     aware_time = datetime(2026, 9, 1, 1, tzinfo=timezone.utc)
     stock_row = {"article": "SKU-1", "name": "Товар", "unit_cost": 30,
@@ -291,6 +292,10 @@ def test_abc_dashboard_uses_only_normalized_product_economics_layer():
     assert "wb_financial_sales_rows" not in source
     assert "ozon_finance_accruals" not in source
     assert "yandex_market_finance_transactions" not in source
+    assert '"rows": product_rows' in source
+    assert '"product_profit_kopecks"' in source
+    assert '"unallocated_profit_kopecks"' in source
+    assert 'summary["profit_reconciled"]' in source
     assert "ABC по товарам" in ABC_HTML
     assert "Выручка" in ABC_HTML
     assert "Прибыль" in ABC_HTML

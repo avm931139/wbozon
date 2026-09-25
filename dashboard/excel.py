@@ -68,8 +68,7 @@ def pnl_excel(data: dict[str, Any]) -> bytes:
     summary = workbook.active
     summary.title = "P&L"
     summary.append(["Площадка", "Период с", "Период по", "Продажи, ₽", "Компенсации, ₽", "Выручка, ₽",
-                    "Расходы МП, ₽", "К выплате, ₽", "Себестоимость, ₽", "Прибыль, ₽",
-                    "Нераспределённый результат ABC, ₽"])
+                    "Расходы МП, ₽", "К выплате, ₽", "Себестоимость, ₽", "Прибыль, ₽"])
     total = data["total"]
     period = data.get("period", {})
     summary.append(["ИТОГО", period.get("from"), period.get("to"), total.get("sales_revenue"), total.get("compensation"),
@@ -81,8 +80,7 @@ def pnl_excel(data: dict[str, Any]) -> bytes:
             continue
         summary.append([MARKET_NAMES[key], period.get("from"), period.get("to"), values.get("sales_revenue"), values.get("compensation"),
                         values.get("revenue"), values.get("expenses"), values.get("net_payout"),
-                        values.get("cost_of_goods"), values.get("profit"),
-                        (values.get("unallocated") or {}).get("profit")])
+                        values.get("cost_of_goods"), values.get("profit")])
     expenses = workbook.create_sheet("Расходы")
     expenses.append(["Площадка", "Статья", "Категория", "Сумма, ₽", "% выручки", "Источник"])
     for key, values in data["marketplaces"].items():

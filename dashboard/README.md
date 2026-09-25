@@ -112,11 +112,12 @@ sources; the card footer identifies the API/report, PostgreSQL table, coverage
 dates and last database refresh. Operational orders and advertising attribution
 are never used as a P&L fallback.
 
-Each marketplace card also shows a compact unallocated ABC result and its
-components. These are finance-ledger operations without a trustworthy SKU;
-they remain a separate analytical row instead of changing the profitability
-of unrelated products. The P&L Excel export includes the same breakdown on the
-`Нераспределено ABC` sheet.
+Each marketplace card also shows a compact breakdown of finance-ledger
+operations without a trustworthy SKU. They are already included exactly once
+in the headline P&L profit, but are not rendered as a pseudo-product and do not
+change the profitability of unrelated SKUs in ABC. The P&L Excel export keeps
+the audit breakdown on the separate `Нераспределено ABC` sheet; the main P&L
+sheet contains only the authoritative headline profit.
 
 The stocks page shows the latest unit cost beside every normalized product.
 Saving a changed value appends a dated `product_cost_records` row through
@@ -134,6 +135,9 @@ calculation sheet, marketplace reconciliation controls, and methodology. The
 daily analytical layer keeps commissions, services and logistics on the SKU
 identified by the source financial row. Any ledger residual without a reliable
 product identity is stored as `unallocated`; it is never spread by revenue.
+The ABC headline profit is calculated as the sum of all real-SKU profits plus
+the unallocated financial result. That calculated total is reconciled to P&L
+to kopeck precision; unallocated operations are not displayed as a product row.
 WB advertising is linked from its product report. Ozon historical Performance
 reports provide direct SKU spend, and Yandex Sales Boost is linked directly by
 `shopSku`; advertising without a product dimension remains unallocated. The

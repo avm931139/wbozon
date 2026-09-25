@@ -1725,6 +1725,19 @@ class DashboardService:
                 for kind in ("revenue", "profit")
             },
         })
+        product_rows = [row for row in result_rows if not row["is_unallocated"]]
+        unallocated_rows = [row for row in result_rows if row["is_unallocated"]]
+        summary.update({
+            "product_profit_kopecks": sum(
+                int(row["total"].get("profit_kopecks") or 0) for row in product_rows
+            ),
+            "unallocated_profit_kopecks": sum(
+                int(row["total"].get("profit_kopecks") or 0) for row in unallocated_rows
+            ),
+            "unallocated_expense_kopecks": sum(
+                int(row["total"].get("expense_kopecks") or 0) for row in unallocated_rows
+            ),
+        })
         for marketplace, control in controls.items():
             actual_revenue = sum(int((row.get(marketplace) or {}).get("revenue_kopecks") or 0) for row in result_rows)
             actual_profit = sum(int((row.get(marketplace) or {}).get("profit_kopecks") or 0) for row in result_rows)
@@ -1771,13 +1784,25 @@ class DashboardService:
                 control["pnl_reconciled"] = all(
                     abs(actual[key] - expected[key]) <= 2 for key in expected
                 )
+        pnl_profit_kopecks = sum(
+            _kopecks(view.get("profit"))
+            for view in pnl["marketplaces"].values()
+            if view.get("available")
+        )
+        summary["pnl_profit_kopecks"] = pnl_profit_kopecks
+        summary["profit_delta_kopecks"] = summary["profit_kopecks"] - pnl_profit_kopecks
+        summary["profit_reconciled"] = abs(summary["profit_delta_kopecks"]) <= 2
         return {
             "period": {"from": begin.isoformat(), "to": finish.isoformat()},
-            "rows": result_rows, "summary": summary, "controls": controls,
+            # Unallocated ledger operations participate in the headline totals
+            # and reconciliation with P&L, but they are not a product.  Do not
+            # expose them as a pseudo-SKU or distort any real SKU profitability.
+            "rows": product_rows,
+            "summary": summary, "controls": controls,
             "methodology": {
                 "source": "fact_product_economics_daily + fact_product_economics_controls",
                 "abc": "A=first 80%, B=next 15%, C=last 5%; ties stay together",
-                "profit": "financial revenue - allocated marketplace expenses - product cost",
-                "logistics": "financial logistics and return logistics allocated by daily net revenue",
+                "profit": "headline = sum of SKU profit + unallocated financial result; P&L is the reconciliation control",
+                "logistics": "financial logistics and return logistics stay on source SKU; unlinked operations affect headline only",
             },
         }
