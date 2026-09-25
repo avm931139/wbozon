@@ -869,6 +869,11 @@ class DashboardService:
             return "commission", "Комиссия и вознаграждение площадки"
         if "приём платежа" in normalized or "прием платежа" in normalized:
             return "acquiring", "Эквайринг и платежи"
+        if any(pattern in normalized for pattern in (
+            "реклам", "продвиж", "буст", "рассыл", "отзывы за баллы",
+            "promotion", "payperclick", "campaign",
+        )):
+            return "advertising", "Реклама и продвижение"
         if (
             "возврат списания" in normalized
             or "скидк" in normalized

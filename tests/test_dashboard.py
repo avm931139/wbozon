@@ -204,6 +204,14 @@ def test_pnl_yandex_promotion_discount_is_not_logistics():
     assert category == "discounts"
 
 
+def test_pnl_explicit_advertising_takes_priority_over_discount_wording():
+    category, _ = DashboardService._expense_category(
+        "Буст продаж · рекламное продвижение · скидка"
+    )
+
+    assert category == "advertising"
+
+
 def test_stock_dashboard_has_three_market_images_and_refresh_dates():
     assert "/api/stocks?date=" in STOCKS_HTML
     assert "Фото WB" in STOCKS_HTML
