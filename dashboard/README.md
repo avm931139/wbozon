@@ -57,7 +57,10 @@ The UI is deliberately split into two pages:
 - `/stocks` is the product stock view. It shows local main images in the fixed
   WB → Ozon → Yandex order, quantity and database refresh time. Today uses the
   current stock tables; a past date uses the latest daily snapshot on or before
-  that date and clearly displays the actual snapshot date.
+  that date and clearly displays the actual snapshot date. Independent WB,
+  Ozon and Yandex warehouse selectors recalculate the corresponding column,
+  marketplace total and Excel export; `All warehouses` keeps the authoritative
+  marketplace-wide total.
 - `/abc` is the financial SKU matrix. It reads only
   `fact_product_economics_daily` and `fact_product_economics_controls`, never
   the raw marketplace API tables. Revenue and profit receive independent
@@ -72,7 +75,9 @@ on Wildberries warehouses from `/api/v1/warehouse_remains` (`Всего нахо
 The API endpoints are `/health`,
 `/api/summary?from=YYYY-MM-DD&to=YYYY-MM-DD` for operations,
 `/api/pnl?from=YYYY-MM-DD&to=YYYY-MM-DD` for finance, and
-`/api/stocks?date=YYYY-MM-DD` for product stocks. Images are served only from
+`/api/stocks?date=YYYY-MM-DD` for product stocks. Optional `wb_warehouse`,
+`ozon_warehouse` and `yandex_warehouse` parameters apply the same physical
+warehouse filters used by the page and its Excel export. Images are served only from
 verified local media records through `/api/product-image?id=...`. The maximum
 selectable period is 730 days.
 
