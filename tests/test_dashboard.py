@@ -442,8 +442,8 @@ def test_dashboard_uses_wb_finance_rows_for_closed_period_metrics():
 
     source = inspect.getsource(DashboardService._period_metrics)
     assert "retail_price_with_discount*quantity" in source
-    assert "finance_buyouts_amount+compensation-net_payout+advertising.amount expenses" in source
-    assert "wb_advert_expenses" in source
+    assert "finance_buyouts_amount+compensation-net_payout expenses" in source
+    assert "net_payout+advertising.amount" not in source
     assert "wb_finance_exact" in source
     assert "wb_sales_funnel_daily" in source
     assert 'wb["data_status"] = "preliminary"' in source
@@ -451,6 +451,16 @@ def test_dashboard_uses_wb_finance_rows_for_closed_period_metrics():
     net_payout_sql = source.split("net_payout", 1)[0].rsplit("coalesce(sum(", 1)[-1]
     assert "deduction" in net_payout_sql
     assert "rebill_logistic_cost" not in net_payout_sql
+
+
+def test_pnl_costs_follow_the_cost_effective_on_each_business_date():
+    import inspect
+
+    source = inspect.getsource(DashboardService._period_metrics)
+    assert "LEFT JOIN LATERAL" in source
+    assert "cost.effective_at::date<=s.rr_date::date" in source
+    assert "cost.effective_at::date<=s.accrual_date" in source
+    assert "cost.effective_at::date<=s.transaction_date" in source
 
 
 def test_wb_pnl_expands_commission_and_does_not_duplicate_rebill_logistics():

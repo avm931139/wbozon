@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
 import json
@@ -139,7 +139,7 @@ class FinancialSalesFactService:
         now = datetime.now(timezone.utc)
         with self.session_factory() as session:
             links = self._links(session)
-            costs = self._latest_costs(session)
+            costs = self._cost_history(session)
             if self.marketplace == "wb":
                 facts, source_rows = self._wb_facts(session, links, costs, now)
             elif self.marketplace == "ozon":
@@ -206,16 +206,30 @@ class FinancialSalesFactService:
         }
 
     @staticmethod
-    def _latest_costs(session: Any) -> dict[int, ProductCostRecord]:
-        costs: dict[int, ProductCostRecord] = {}
+    def _cost_history(session: Any) -> dict[int, list[ProductCostRecord]]:
+        costs: dict[int, list[ProductCostRecord]] = defaultdict(list)
         rows = session.query(ProductCostRecord).order_by(
             ProductCostRecord.master_product_id,
-            ProductCostRecord.effective_at.desc(),
-            ProductCostRecord.id.desc(),
+            ProductCostRecord.effective_at.asc(),
+            ProductCostRecord.id.asc(),
         )
         for row in rows:
-            costs.setdefault(row.master_product_id, row)
-        return costs
+            costs[row.master_product_id].append(row)
+        return dict(costs)
+
+    @staticmethod
+    def _cost_for_date(
+        history: list[ProductCostRecord], business_date: date
+    ) -> ProductCostRecord | None:
+        if not history:
+            return None
+        applicable = [
+            row for row in history
+            if row.effective_at is not None and row.effective_at.date() <= business_date
+        ]
+        # The first imported cost is the baseline for older history. Later edits
+        # take effect only from their effective date and never rewrite the past.
+        return applicable[-1] if applicable else history[0]
 
     @staticmethod
     def _link_values(link: MarketplaceProductLink | None) -> dict[str, Any]:
@@ -227,10 +241,13 @@ class FinancialSalesFactService:
     @staticmethod
     def _apply_cost(
         values: dict[str, Any],
-        costs: dict[int, ProductCostRecord],
+        costs: dict[int, list[ProductCostRecord]],
     ) -> None:
         master_product_id = values.get("master_product_id")
-        cost = costs.get(master_product_id) if master_product_id is not None else None
+        history = costs.get(master_product_id, []) if master_product_id is not None else []
+        cost = FinancialSalesFactService._cost_for_date(
+            history, values["business_date"]
+        )
         if cost is None:
             values.update({
                 "unit_cost_exact": None,
@@ -310,7 +327,7 @@ class FinancialSalesFactService:
         self,
         session: Any,
         links: dict[tuple[str, str, str], MarketplaceProductLink],
-        costs: dict[int, ProductCostRecord],
+        costs: dict[int, list[ProductCostRecord]],
         now: datetime,
     ) -> tuple[list[PendingFact], int]:
         reports = {
@@ -375,7 +392,7 @@ class FinancialSalesFactService:
         self,
         session: Any,
         links: dict[tuple[str, str, str], MarketplaceProductLink],
-        costs: dict[int, ProductCostRecord],
+        costs: dict[int, list[ProductCostRecord]],
         now: datetime,
     ) -> tuple[list[PendingFact], int]:
         account_id = str(OZON_CLIENT_ID or "")
@@ -485,7 +502,7 @@ class FinancialSalesFactService:
         self,
         session: Any,
         links: dict[tuple[str, str, str], MarketplaceProductLink],
-        costs: dict[int, ProductCostRecord],
+        costs: dict[int, list[ProductCostRecord]],
         now: datetime,
     ) -> tuple[list[PendingFact], int]:
         rows = session.query(YandexMarketFinanceTransaction).filter(
@@ -498,15 +515,17 @@ class FinancialSalesFactService:
         }
         grouped: dict[tuple[Any, ...], list[YandexMarketFinanceTransaction]] = defaultdict(list)
         for row in rows:
+            event_date = row.transaction_at.date()
             grouped[(
                 row.business_id, row.order_id, row.offer_id,
-                row.transaction_type,
+                event_date, row.transaction_type,
             )].append(row)
         facts: list[PendingFact] = []
-        for (business_id, order_id, offer_id, transaction_type), parts in grouped.items():
+        for (
+            business_id, order_id, offer_id, event_date, transaction_type
+        ), parts in grouped.items():
             account_id = str(business_id)
             event_at = min(part.transaction_at for part in parts)
-            event_date = event_at.date()
             event_type = "return" if transaction_type == "Возврат" else "sale"
             raw_quantity = max(abs(int(part.quantity or 0)) for part in parts)
             if raw_quantity == 0:

@@ -570,14 +570,11 @@ class DashboardService:
                                 +coalesce(nullif(raw_data->>'paymentSchedule','')::numeric,0)
                             ),0) net_payout
                     FROM wb_financial_sales_rows WHERE rr_date>=:b AND rr_date<:u
-                ), advertising AS (
-                    SELECT coalesce(sum(amount),0) amount
-                    FROM wb_advert_expenses WHERE expense_time>=:b AND expense_time<:u
                 ) SELECT rows,finance_buyouts,finance_buyouts_amount,compensation,
                     finance_buyouts_amount+compensation revenue,
-                    finance_buyouts_amount+compensation-net_payout+advertising.amount expenses,
+                    finance_buyouts_amount+compensation-net_payout expenses,
                     coverage.finance_from,coverage.finance_through,coverage.covered
-                FROM ledger CROSS JOIN coverage CROSS JOIN advertising""", b=begin, e=finish, u=until),
+                FROM ledger CROSS JOIN coverage""", b=begin, e=finish, u=until),
             "ozon": one("""WITH ledger AS (
                     SELECT count(*) rows,coalesce(sum(amount),0) net_accrual,
                         coalesce(sum(amount) FILTER (WHERE accrual_type='NON_ITEM' AND amount>0),0) compensation,
@@ -619,14 +616,27 @@ class DashboardService:
                 SELECT totals.*,units.finance_buyouts FROM totals CROSS JOIN units""", b=begin, u=until),
         }
         costs = {
-            "wb": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC),
-                operational AS (SELECT coalesce(sum(coalesce(c.unit_cost,0)),0) cost_of_goods,count(*) FILTER (WHERE c.unit_cost IS NOT NULL) costed_units
+            "wb": one("""WITH operational AS (SELECT coalesce(sum(coalesce(c.unit_cost,0)),0) cost_of_goods,count(*) FILTER (WHERE c.unit_cost IS NOT NULL) costed_units
                     FROM wb_operational_sales s LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=s.nm_id::text
-                    LEFT JOIN c ON c.master_product_id=l.master_product_id WHERE s.operation_type='sale' AND s.event_date>=:b AND s.event_date<:u),
+                    LEFT JOIN LATERAL (
+                        SELECT cost.unit_cost FROM product_cost_records cost
+                        WHERE cost.master_product_id=l.master_product_id
+                        ORDER BY CASE WHEN cost.effective_at::date<=s.event_date::date THEN 0 ELSE 1 END,
+                            CASE WHEN cost.effective_at::date<=s.event_date::date THEN cost.effective_at END DESC,
+                            CASE WHEN cost.effective_at::date>s.event_date::date THEN cost.effective_at END ASC,cost.id DESC
+                        LIMIT 1
+                    ) c ON TRUE WHERE s.operation_type='sale' AND s.event_date>=:b AND s.event_date<:u),
                 financial AS (SELECT coalesce(sum((CASE WHEN s.seller_operation_name='Возврат' THEN -s.quantity ELSE s.quantity END)*coalesce(c.unit_cost,0)) FILTER (WHERE s.seller_operation_name IN ('Продажа','Возврат','Бронирование товара через самовывоз')),0) cost_of_goods,
                     coalesce(sum((CASE WHEN s.seller_operation_name='Возврат' THEN -s.quantity ELSE s.quantity END)) FILTER (WHERE s.seller_operation_name IN ('Продажа','Возврат','Бронирование товара через самовывоз') AND c.unit_cost IS NOT NULL),0) costed_units
                     FROM wb_financial_sales_rows s LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=s.nm_id::text
-                    LEFT JOIN c ON c.master_product_id=l.master_product_id WHERE s.rr_date>=:b AND s.rr_date<:u)
+                    LEFT JOIN LATERAL (
+                        SELECT cost.unit_cost FROM product_cost_records cost
+                        WHERE cost.master_product_id=l.master_product_id
+                        ORDER BY CASE WHEN cost.effective_at::date<=s.rr_date::date THEN 0 ELSE 1 END,
+                            CASE WHEN cost.effective_at::date<=s.rr_date::date THEN cost.effective_at END DESC,
+                            CASE WHEN cost.effective_at::date>s.rr_date::date THEN cost.effective_at END ASC,cost.id DESC
+                        LIMIT 1
+                    ) c ON TRUE WHERE s.rr_date>=:b AND s.rr_date<:u)
                 SELECT operational.cost_of_goods,operational.costed_units,
                     financial.cost_of_goods finance_cost_of_goods,financial.costed_units finance_costed_units,
                     funnel.cost_of_goods funnel_cost_of_goods,funnel.costed_units funnel_costed_units
@@ -635,35 +645,55 @@ class DashboardService:
                         coalesce(sum(f.buyout_count) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
                     FROM wb_sales_funnel_daily f
                     LEFT JOIN marketplace_product_links l ON l.marketplace='wb' AND l.active AND l.external_product_id=f.nm_id::text
-                    LEFT JOIN c ON c.master_product_id=l.master_product_id
+                    LEFT JOIN LATERAL (
+                        SELECT cost.unit_cost FROM product_cost_records cost
+                        WHERE cost.master_product_id=l.master_product_id
+                        ORDER BY CASE WHEN cost.effective_at::date<=f.stat_date THEN 0 ELSE 1 END,
+                            CASE WHEN cost.effective_at::date<=f.stat_date THEN cost.effective_at END DESC,
+                            CASE WHEN cost.effective_at::date>f.stat_date THEN cost.effective_at END ASC,cost.id DESC
+                        LIMIT 1
+                    ) c ON TRUE
                     WHERE f.stat_date>=:b AND f.stat_date<=:e
                 ) funnel""", b=begin, e=finish, u=until),
-            "ozon": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC),
-                sku_master AS (SELECT DISTINCT ON (p.sku) p.sku,l.master_product_id
+            "ozon": one("""WITH sku_master AS (SELECT DISTINCT ON (p.sku) p.sku,l.master_product_id
                     FROM ozon_products p JOIN marketplace_product_links l ON l.marketplace='ozon' AND l.active AND l.external_product_id=p.product_id::text
                     WHERE p.sku IS NOT NULL ORDER BY p.sku,l.id),
-                sold AS (SELECT p.sku,CASE WHEN p.seller_price<0 THEN -coalesce(p.quantity,0) ELSE coalesce(p.quantity,0) END quantity
+                sold AS (SELECT p.sku,p.accrual_date,CASE WHEN p.seller_price<0 THEN -coalesce(p.quantity,0) ELSE coalesce(p.quantity,0) END quantity
                     FROM ozon_finance_posting_accruals p JOIN ozon_finance_accrual_types t ON t.type_id=p.type_id
                     WHERE t.name='SaleCommission' AND p.accrual_date>=:b AND p.accrual_date<=:e)
                 SELECT coalesce(sum(s.quantity*coalesce(c.unit_cost,0)),0) cost_of_goods,
                     coalesce(sum(s.quantity) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
-                FROM sold s LEFT JOIN sku_master m ON m.sku=s.sku LEFT JOIN c ON c.master_product_id=m.master_product_id""", b=begin, e=finish),
-            "yandex_market": one("""WITH c AS (SELECT DISTINCT ON (master_product_id) master_product_id,unit_cost FROM product_cost_records ORDER BY master_product_id,effective_at DESC,id DESC),
-                events AS (SELECT business_id,order_id,offer_id,transaction_at::date transaction_date,transaction_type,
+                FROM sold s LEFT JOIN sku_master m ON m.sku=s.sku
+                LEFT JOIN LATERAL (
+                    SELECT cost.unit_cost FROM product_cost_records cost
+                    WHERE cost.master_product_id=m.master_product_id
+                    ORDER BY CASE WHEN cost.effective_at::date<=s.accrual_date THEN 0 ELSE 1 END,
+                        CASE WHEN cost.effective_at::date<=s.accrual_date THEN cost.effective_at END DESC,
+                        CASE WHEN cost.effective_at::date>s.accrual_date THEN cost.effective_at END ASC,cost.id DESC
+                    LIMIT 1
+                ) c ON TRUE""", b=begin, e=finish),
+            "yandex_market": one("""WITH events AS (SELECT business_id,order_id,offer_id,transaction_at::date transaction_date,transaction_type,
                         max(quantity) quantity
                     FROM yandex_market_finance_transactions
                     WHERE transaction_at>=:b AND transaction_at<:u AND offer_id IS NOT NULL
                         AND transaction_type IN ('Начисление','Возврат') AND quantity>0
                     GROUP BY business_id,order_id,offer_id,transaction_at::date,transaction_type),
-                sold AS (SELECT business_id,offer_id,
+                sold AS (SELECT business_id,offer_id,transaction_date,
                     sum(CASE WHEN transaction_type='Начисление' THEN quantity
                         WHEN transaction_type='Возврат' THEN -quantity ELSE 0 END) quantity
-                    FROM events GROUP BY business_id,offer_id)
+                    FROM events GROUP BY business_id,offer_id,transaction_date)
                 SELECT coalesce(sum(s.quantity*coalesce(c.unit_cost,0)),0) cost_of_goods,
                     coalesce(sum(s.quantity) FILTER (WHERE c.unit_cost IS NOT NULL),0) costed_units
                 FROM sold s LEFT JOIN marketplace_product_links l ON l.marketplace='yandex_market' AND l.active
                     AND l.account_id=s.business_id::text AND l.external_product_id=s.offer_id
-                LEFT JOIN c ON c.master_product_id=l.master_product_id""", b=begin, u=until),
+                LEFT JOIN LATERAL (
+                    SELECT cost.unit_cost FROM product_cost_records cost
+                    WHERE cost.master_product_id=l.master_product_id
+                    ORDER BY CASE WHEN cost.effective_at::date<=s.transaction_date THEN 0 ELSE 1 END,
+                        CASE WHEN cost.effective_at::date<=s.transaction_date THEN cost.effective_at END DESC,
+                        CASE WHEN cost.effective_at::date>s.transaction_date THEN cost.effective_at END ASC,cost.id DESC
+                    LIMIT 1
+                ) c ON TRUE""", b=begin, u=until),
         }
         ads = self._advertising_metrics(db, begin, finish)
         markets = {"wb": wb, "ozon": ozon, "yandex_market": yandex}
@@ -941,7 +971,9 @@ class DashboardService:
             {"key": "acceptance", "label": "Платная приёмка", "amount": wb.get("acceptance")},
             {"key": "acquiring", "label": "Эквайринг", "amount": wb.get("acquiring")},
             {"key": "penalties", "label": "Штрафы", "amount": wb.get("penalties")},
-            {"key": "deductions", "label": "Удержания и прочие услуги", "amount": wb.get("deductions")},
+            {"key": "deductions", "label": "Удержания и прочие услуги без рекламы", "amount": (
+                _number(wb.get("deductions")) - _number(wb_advertising.get("amount"))
+            )},
             {"key": "payment_schedule", "label": "Изменение срока единовременной выплаты", "amount": wb.get("payment_schedule")},
             {"key": "advertising", "label": "Реклама Wildberries", "amount": wb_advertising.get("amount")},
         ]
@@ -1570,8 +1602,11 @@ class DashboardService:
                     }
                     for key in expected
                 }
+                # Product allocation rounds at daily/SKU boundaries. A two-
+                # kopeck tolerance prevents misleading "0 ₽" mismatch warnings
+                # without hiding a material accounting difference.
                 control["pnl_reconciled"] = all(
-                    actual[key] == expected[key] for key in expected
+                    abs(actual[key] - expected[key]) <= 2 for key in expected
                 )
         return {
             "period": {"from": begin.isoformat(), "to": finish.isoformat()},

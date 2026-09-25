@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import create_engine, func, select
@@ -33,7 +33,11 @@ from app.models import (
     YandexMarketOffer,
 )
 from analytics_facts import service as fact_service
-from analytics_facts.economics import allocate_kopecks, allocate_ozon_advertising
+from analytics_facts.economics import (
+    _is_logistics,
+    allocate_kopecks,
+    allocate_ozon_advertising,
+)
 
 
 def _session_factory():
@@ -46,6 +50,30 @@ def test_money_to_kopecks_uses_decimal_half_up():
     assert money_to_kopecks("1234.56") == 123456
     assert money_to_kopecks("10.005") == 1001
     assert money_to_kopecks("-10.005") == -1001
+
+
+def test_cost_history_does_not_rewrite_older_periods():
+    old = ProductCostRecord(
+        id=1, unit_cost=Decimal("100"), currency="RUB",
+        effective_at=datetime(2026, 9, 6, tzinfo=timezone.utc),
+    )
+    changed = ProductCostRecord(
+        id=2, unit_cost=Decimal("150"), currency="RUB",
+        effective_at=datetime(2026, 9, 24, tzinfo=timezone.utc),
+    )
+    history = [old, changed]
+
+    # The first import is the baseline for dates before initial onboarding.
+    assert FinancialSalesFactService._cost_for_date(history, date(2026, 8, 1)) is old
+    assert FinancialSalesFactService._cost_for_date(history, date(2026, 9, 20)) is old
+    assert FinancialSalesFactService._cost_for_date(history, date(2026, 9, 24)) is changed
+
+
+def test_discount_refund_is_not_classified_as_return_logistics():
+    assert not _is_logistics(
+        "Скидка за лояльность Возврат скидки за участие в совместных акциях Возврат списания"
+    )
+    assert _is_logistics("Обратная логистика возврата товара")
 
 
 def test_new_fact_run_closes_stale_running_attempts():

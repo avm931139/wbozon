@@ -109,6 +109,13 @@ def _dates(first: date, last: date) -> Iterable[date]:
 
 def _is_logistics(label: str) -> bool:
     value = label.casefold()
+    # Refunds of discounts/loyalty promotions are financial discounts, not
+    # physical return logistics. Check them before the broad "return" match.
+    if any(pattern in value for pattern in (
+        "\u0441\u043a\u0438\u0434\u043a", "\u043b\u043e\u044f\u043b\u044c\u043d", "\u0441\u043e\u0432\u043c\u0435\u0441\u0442\u043d\u044b\u0445 \u0430\u043a\u0446",
+        "discount", "loyalty",
+    )):
+        return False
     return any(pattern in value for pattern in (
         "логист", "достав", "delivery", "перевоз", "crossdock", "кросс-док",
         "возврат", "return", "обратн",
@@ -240,13 +247,9 @@ class ProductEconomicsBuilder:
                 target["revenue"] = _kopecks(values["revenue"])
                 target["expense"] = _kopecks(values["revenue"] - values["net"])
                 target["logistics"] = _kopecks(values["logistics"])
-            advertising: dict[date, Decimal] = defaultdict(Decimal)
-            for expense_time, amount in session.query(
-                WBAdvertExpense.expense_time, WBAdvertExpense.amount
-            ).filter(WBAdvertExpense.expense_time.isnot(None)).yield_per(1000):
-                advertising[expense_time.date()] += _decimal(amount)
-            for day, amount in advertising.items():
-                targets[("", day)]["expense"] += _kopecks(amount)
+            # Advertising remains a separate analytical breakdown in
+            # ``_advertising``. WB has already included it in deduction/net
+            # payout, so it must not be added to the total expense target here.
         elif self.marketplace == "ozon":
             account = str(OZON_CLIENT_ID or "")
             accruals = session.query(OzonFinanceAccrual).all()
