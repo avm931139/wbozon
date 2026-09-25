@@ -99,7 +99,8 @@ class DashboardService:
                     LEFT JOIN yandex_market_offers o ON o.offer_id=x.offer_id
                         AND o.business_id=c.business_id
                     WHERE x.stock_type='AVAILABLE'
-                      AND (:ymw IS NULL OR x.warehouse_id=:ymw)""",
+                      AND (CAST(:ymw AS bigint) IS NULL
+                           OR x.warehouse_id=CAST(:ymw AS bigint))""",
             }
         else:
             sources = {
@@ -138,7 +139,8 @@ class DashboardService:
                     LEFT JOIN yandex_market_offers o ON o.offer_id=x.offer_id
                         AND o.business_id=c.business_id
                     WHERE x.stock_type='AVAILABLE'
-                      AND (:ymw IS NULL OR x.warehouse_id=:ymw)
+                      AND (CAST(:ymw AS bigint) IS NULL
+                           OR x.warehouse_id=CAST(:ymw AS bigint))
                       AND x.snapshot_date=(SELECT max(snapshot_date) FROM yandex_market_stock_snapshots WHERE snapshot_date<=:d)""",
             }
         grouped = []
