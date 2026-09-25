@@ -1246,6 +1246,50 @@ class DashboardService:
             "expense_lines": expense_lines,
         }
 
+    @staticmethod
+    def _combined_unallocated(
+        views: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Combine SKU-less finance operations without double-counting ads."""
+        components: dict[str, dict[str, Any]] = {}
+        revenue_kopecks = 0
+        expense_kopecks = 0
+        cost_kopecks = 0
+        profit_kopecks = 0
+        available = False
+        for view in views.values():
+            item = view.get("unallocated") or {}
+            if not item.get("available"):
+                continue
+            available = True
+            revenue_kopecks += _kopecks(item.get("revenue"))
+            expense_kopecks += _kopecks(item.get("expenses"))
+            cost_kopecks += _kopecks(item.get("cost"))
+            profit_kopecks += _kopecks(item.get("profit"))
+            for component in item.get("components", []):
+                key = str(component.get("key") or "other")
+                # Advertising here is an attribution metric and is already
+                # included in finance expenses. Showing it again would make
+                # the visible article breakdown larger than the total cost.
+                if key == "advertising":
+                    continue
+                target = components.setdefault(key, {
+                    "key": key,
+                    "label": component.get("label") or key,
+                    "amount_kopecks": 0,
+                })
+                target["amount_kopecks"] += _kopecks(component.get("amount"))
+        return {
+            "available": available,
+            "revenue_kopecks": revenue_kopecks,
+            "expense_kopecks": expense_kopecks + cost_kopecks,
+            "profit_kopecks": profit_kopecks,
+            "components": [
+                component for component in components.values()
+                if component["amount_kopecks"]
+            ],
+        }
+
     def pnl(self, start: str | None, end: str | None) -> dict[str, Any]:
         begin, finish = self.period(start, end)
         previous_begin, previous_finish = self.previous_period(begin, finish)
@@ -1799,6 +1843,7 @@ class DashboardService:
             # expose them as a pseudo-SKU or distort any real SKU profitability.
             "rows": product_rows,
             "summary": summary, "controls": controls,
+            "unallocated": self._combined_unallocated(pnl["marketplaces"]),
             "methodology": {
                 "source": "fact_product_economics_daily + fact_product_economics_controls",
                 "abc": "A=first 80%, B=next 15%, C=last 5%; ties stay together",

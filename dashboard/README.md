@@ -112,12 +112,12 @@ sources; the card footer identifies the API/report, PostgreSQL table, coverage
 dates and last database refresh. Operational orders and advertising attribution
 are never used as a P&L fallback.
 
-Each marketplace card also shows a compact breakdown of finance-ledger
-operations without a trustworthy SKU. They are already included exactly once
-in the headline P&L profit, but are not rendered as a pseudo-product and do not
-change the profitability of unrelated SKUs in ABC. The P&L Excel export keeps
-the audit breakdown on the separate `Нераспределено ABC` sheet; the main P&L
-sheet contains only the authoritative headline profit.
+The ABC headline profit includes finance-ledger operations without a
+trustworthy SKU and therefore reconciles to P&L. A single compact breakdown
+under that headline shows the combined unallocated costs and their categories
+for all marketplaces. The operations are not rendered as a pseudo-product and
+do not change the profitability of unrelated SKUs. The P&L page does not repeat
+this ABC-specific explanation.
 
 The stocks page shows the latest unit cost beside every normalized product.
 Saving a changed value appends a dated `product_cost_records` row through

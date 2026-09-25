@@ -296,6 +296,7 @@ def test_abc_dashboard_uses_only_normalized_product_economics_layer():
     assert '"product_profit_kopecks"' in source
     assert '"unallocated_profit_kopecks"' in source
     assert 'summary["profit_reconciled"]' in source
+    assert '"unallocated": self._combined_unallocated' in source
     assert "ABC по товарам" in ABC_HTML
     assert "Выручка" in ABC_HTML
     assert "Прибыль" in ABC_HTML
@@ -306,6 +307,45 @@ def test_abc_dashboard_uses_only_normalized_product_economics_layer():
     assert "daysAfterSunday=last.getDay()||7" in ABC_HTML
     assert "defaultPeriod=defaultFinancialPeriod(now)" in ABC_HTML
     assert "new Date(now.getFullYear(),now.getMonth(),0)" not in ABC_HTML
+    assert "Нераспределённые затраты" in ABC_HTML
+    assert "В прибыли учтены операции без привязки к SKU" not in PNL_HTML
+
+
+def test_abc_combines_unallocated_costs_across_marketplaces_once():
+    views = {
+        "wb": {"unallocated": {
+            "available": True, "revenue": 0.29, "expenses": 100.00,
+            "cost": 0, "profit": -99.71,
+            "components": [
+                {"key": "revenue", "label": "Корректировки выручки", "amount": 0.29},
+                {"key": "other_expenses", "label": "Прочие удержания", "amount": 70},
+                {"key": "logistics", "label": "Логистика", "amount": 30},
+                {"key": "advertising", "label": "Реклама", "amount": 15},
+            ],
+        }},
+        "ozon": {"unallocated": {
+            "available": True, "revenue": 0, "expenses": 50,
+            "cost": 10, "profit": -60,
+            "components": [
+                {"key": "other_expenses", "label": "Прочие удержания", "amount": 50},
+                {"key": "cost", "label": "Корректировка себестоимости", "amount": 10},
+            ],
+        }},
+        "yandex_market": {"unallocated": {"available": False}},
+    }
+
+    result = DashboardService._combined_unallocated(views)
+
+    assert result["expense_kopecks"] == 16000
+    assert result["revenue_kopecks"] == 29
+    assert result["profit_kopecks"] == -15971
+    assert [item["key"] for item in result["components"]] == [
+        "revenue", "other_expenses", "logistics", "cost",
+    ]
+    assert sum(
+        item["amount_kopecks"] for item in result["components"]
+        if item["key"] != "revenue"
+    ) == result["expense_kopecks"]
 
 
 def test_abc_categories_use_80_15_5_and_separate_losses():
