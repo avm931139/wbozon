@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from app.db import SessionLocal
 from app.models import OzonSyncRun
+from analytics_facts.service import FinancialSalesFactService
 from ozon.services.sync_service import OzonSyncService
 
 
@@ -25,9 +26,15 @@ class OzonTaskRunner:
         service: OzonSyncService | None = None,
         *,
         session_factory: Callable[..., Any] = SessionLocal,
+        analytics_refresh: Callable[[], Any] | None = None,
     ) -> None:
         self.service = service or OzonSyncService()
         self.session_factory = session_factory
+        self.analytics_refresh = analytics_refresh or (
+            (lambda: FinancialSalesFactService(
+                "ozon", session_factory=self.session_factory
+            ).run()) if service is None else None
+        )
 
     def run(self, task: str) -> dict[str, Any]:
         if task not in self.service.task_names():
@@ -48,6 +55,18 @@ class OzonTaskRunner:
                     status = "partial"
                 else:
                     status = "completed"
+                if (
+                    status == "completed"
+                    and task in {"finances", "ads"}
+                    and self.analytics_refresh is not None
+                ):
+                    try:
+                        analytics = self.analytics_refresh()
+                        if isinstance(normalized, dict):
+                            normalized["analytics"] = self._result_summary(analytics)
+                    except Exception as exc:
+                        status = "partial"
+                        partial_error = f"analytics: {type(exc).__name__}: {exc}"
                 self._finish_run(run_id, status, result=normalized, error=partial_error)
                 return {"task": task, "status": status, "result": normalized}
             except Exception as exc:

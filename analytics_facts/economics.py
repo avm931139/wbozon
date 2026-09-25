@@ -17,6 +17,8 @@ from app.models import (
     OzonAdDailyStat,
     OzonFinanceAccrual,
     OzonFinanceAccrualType,
+    OzonFinancePostingAccrual,
+    OzonPosting,
     OzonProduct,
     WBAdvertExpense,
     WBAdvertDailyStat,
@@ -28,7 +30,7 @@ from app.models import (
 )
 
 
-CALCULATION_VERSION = "product-economics-v2"
+CALCULATION_VERSION = "product-economics-v3-direct-finance"
 WB_SALES = {"Продажа", "Бронирование товара через самовывоз"}
 WB_RETURNS = {"Возврат"}
 
@@ -310,6 +312,152 @@ class ProductEconomicsBuilder:
             target["cost"] = raw_by_day[key]["cost"]
         return targets
 
+    def _direct_financial_allocations(
+        self,
+        session: Any,
+        links: dict[tuple[str, str, str], MarketplaceProductLink],
+    ) -> dict[tuple[str, date, str], dict[str, int]]:
+        """Return SKU-attributed ledger values without inventing attribution.
+
+        Financial ledgers often contain both product rows and account-level rows.
+        Product rows stay attached to their real SKU. Rows without a trustworthy
+        product identity use the explicit ``unallocated`` key and are never spread
+        over unrelated products by revenue.
+        """
+        direct: dict[tuple[str, date, str], dict[str, int]] = defaultdict(
+            lambda: {"revenue": 0, "expense": 0, "logistics": 0}
+        )
+
+        if self.marketplace == "wb":
+            rows = session.query(WBFinancialSalesRow).filter(
+                WBFinancialSalesRow.rr_date.isnot(None)
+            ).yield_per(1000)
+            for row in rows:
+                link = links.get(("wb", "", str(row.nm_id or "")))
+                product_key = f"m:{link.master_product_id}" if link else "unallocated"
+                quantity = _decimal(row.quantity)
+                retail = _decimal(row.retail_price_with_discount) * quantity
+                for_pay = _decimal(row.for_pay)
+                additional = _decimal(row.additional_payment)
+                if row.seller_operation_name in WB_SALES:
+                    ledger_revenue = retail + additional
+                    base_revenue = retail
+                    ledger_net = for_pay + additional
+                elif row.seller_operation_name in WB_RETURNS:
+                    ledger_revenue = -retail + additional
+                    base_revenue = -retail
+                    ledger_net = -for_pay + additional
+                else:
+                    ledger_revenue = for_pay + additional
+                    base_revenue = Decimal("0")
+                    ledger_net = for_pay + additional
+                charges = sum((_decimal(item) for item in (
+                    row.delivery_service, row.penalty, row.paid_storage,
+                    row.paid_acceptance, row.deduction,
+                    (row.raw_data or {}).get("paymentSchedule"),
+                )), Decimal("0"))
+                ledger_net -= charges
+                values = direct[("", row.rr_date.date(), product_key)]
+                values["revenue"] += _kopecks(ledger_revenue - base_revenue)
+                values["expense"] += _kopecks(ledger_revenue - ledger_net)
+                values["logistics"] += _kopecks(row.delivery_service)
+            return direct
+
+        if self.marketplace == "ozon":
+            account = str(OZON_CLIENT_ID or "")
+            products = {
+                int(row.sku): row
+                for row in session.query(OzonProduct).filter(OzonProduct.sku.isnot(None))
+            }
+            type_names = {
+                row.type_id: f"{row.name or ''} {row.description or ''}"
+                for row in session.query(OzonFinanceAccrualType).all()
+            }
+            links_by_offer: dict[str, MarketplaceProductLink | None] = {}
+            for candidate in links.values():
+                if candidate.marketplace != "ozon" or candidate.account_id != account:
+                    continue
+                previous = links_by_offer.get(candidate.offer_id)
+                if previous is None and candidate.offer_id not in links_by_offer:
+                    links_by_offer[candidate.offer_id] = candidate
+                elif previous is not None and previous.master_product_id != candidate.master_product_id:
+                    links_by_offer[candidate.offer_id] = None
+            posting_offers: dict[tuple[str, str], str | None] = {}
+            for posting in session.query(OzonPosting).yield_per(500):
+                for item in posting.products or []:
+                    if not isinstance(item, dict):
+                        continue
+                    sku = str(item.get("sku") or "")
+                    offer_id = str(item.get("offer_id") or item.get("offerId") or "")
+                    if not sku or not offer_id:
+                        continue
+                    key = (posting.posting_number, sku)
+                    previous = posting_offers.get(key)
+                    if previous is None and key not in posting_offers:
+                        posting_offers[key] = offer_id
+                    elif previous != offer_id:
+                        posting_offers[key] = None
+
+            def product_key(sku: Any, posting_number: str | None = None) -> str:
+                product = products.get(int(sku)) if sku not in (None, "") else None
+                link = links.get(
+                    ("ozon", account, str(product.product_id))
+                ) if product else None
+                if link is None and posting_number:
+                    offer_id = posting_offers.get((posting_number, str(sku or "")))
+                    link = links_by_offer.get(offer_id or "")
+                return f"m:{link.master_product_id}" if link else "unallocated"
+
+            for row in session.query(OzonFinancePostingAccrual).yield_per(1000):
+                key = product_key(row.sku, row.posting_number)
+                values = direct[(account, row.accrual_date, key)]
+                charge = -_kopecks(row.accrued)
+                values["expense"] += charge
+                if _is_logistics(type_names.get(int(row.type_id or 0), "")):
+                    values["logistics"] += charge
+            # Item-level fees (for example acquiring) are stored inside the
+            # by-day ledger and are not duplicated by posting accrual rows.
+            for accrual in session.query(OzonFinanceAccrual).yield_per(1000):
+                item_fees = (accrual.raw_data or {}).get("item_fees") or {}
+                for item in item_fees.get("fees") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    key = product_key(item.get("sku"))
+                    values = direct[(account, accrual.accrual_date, key)]
+                    for fee in item.get("fees") or []:
+                        if not isinstance(fee, dict):
+                            continue
+                        type_id = int(fee.get("type_id") or 0)
+                        accrued = fee.get("accrued") or {}
+                        charge = -_kopecks(
+                            accrued.get("amount") if isinstance(accrued, dict) else accrued
+                        )
+                        values["expense"] += charge
+                        if _is_logistics(type_names.get(type_id, "")):
+                            values["logistics"] += charge
+            return direct
+
+        for row in session.query(YandexMarketFinanceTransaction).yield_per(1000):
+            # Sale/return components have a positive item quantity. Service
+            # transactions use zero quantity even when the ledger carries an
+            # offer identifier for attribution.
+            is_product = int(row.quantity or 0) > 0
+            if is_product:
+                continue
+            account = str(row.business_id)
+            link = links.get(("yandex_market", account, str(row.offer_id or "")))
+            product_key = f"m:{link.master_product_id}" if link else "unallocated"
+            values = direct[(account, row.transaction_at.date(), product_key)]
+            charge = -_kopecks(row.amount)
+            values["expense"] += charge
+            label = (
+                f"{row.product_or_service or ''} {row.transaction_source or ''} "
+                f"{row.transaction_type or ''}"
+            )
+            if _is_logistics(label):
+                values["logistics"] += charge
+        return direct
+
     def _advertising(
         self,
         session: Any,
@@ -504,6 +652,7 @@ class ProductEconomicsBuilder:
     ) -> tuple[int, int]:
         base = self._base_rows(pending_values)
         targets = self._targets(session, base)
+        direct_financial = self._direct_financial_allocations(session, links)
         ad_totals, direct_ads, ad_details, preallocated_ads = self._advertising(
             session, links
         )
@@ -525,6 +674,9 @@ class ProductEconomicsBuilder:
         preallocated_keys_by_day: dict[tuple[str, date], set[str]] = defaultdict(set)
         for account, day, key in preallocated_ads:
             preallocated_keys_by_day[(account, day)].add(key)
+        financial_keys_by_day: dict[tuple[str, date], set[str]] = defaultdict(set)
+        for account, day, key in direct_financial:
+            financial_keys_by_day[(account, day)].add(key)
         day_keys = set(targets) | set(ad_totals) | {(account, day) for account, day, _ in base}
         economics_count = 0
         for day_number, (account, business_date) in enumerate(sorted(day_keys), start=1):
@@ -552,6 +704,17 @@ class ProductEconomicsBuilder:
                         "sales_revenue_kopecks": 0, "cost_kopecks": 0,
                         "missing_cost_rows": 0,
                     })
+            target_is_financial = (account, business_date) in targets
+            if target_is_financial:
+                for key in financial_keys_by_day.get((account, business_date), set()):
+                    day_rows.setdefault(key, {
+                        "account_id": account, "business_date": business_date,
+                        "product_key": key,
+                        "master_product_id": int(key[2:]) if key.startswith("m:") else None,
+                        "seller_sku": None, "product_name": None, "quantity": 0,
+                        "sales_revenue_kopecks": 0, "cost_kopecks": 0,
+                        "missing_cost_rows": 0,
+                    })
             target = targets.get((account, business_date), {
                 "revenue": sum(row["sales_revenue_kopecks"] for row in day_rows.values()),
                 "expense": 0, "logistics": 0,
@@ -561,11 +724,31 @@ class ProductEconomicsBuilder:
             if not sum(weights.values()):
                 weights = {key: abs(int(row["sales_revenue_kopecks"])) for key, row in day_rows.items()}
             raw_revenue = sum(int(row["sales_revenue_kopecks"]) for row in day_rows.values())
-            compensation = allocate_kopecks(int(target["revenue"]) - raw_revenue, weights)
-            expenses = allocate_kopecks(int(target["expense"]), weights)
-            logistics = allocate_kopecks(int(target["logistics"]), weights)
+            direct_for_day = {
+                key: direct_financial.get(
+                    (account, business_date, key),
+                    {"revenue": 0, "expense": 0, "logistics": 0},
+                )
+                for key in day_rows
+            } if target_is_financial else {}
+            compensation = {
+                key: int(direct_for_day.get(key, {}).get("revenue", 0))
+                for key in day_rows
+            }
+            expenses = {
+                key: int(direct_for_day.get(key, {}).get("expense", 0))
+                for key in day_rows
+            }
+            logistics = {
+                key: int(direct_for_day.get(key, {}).get("logistics", 0))
+                for key in day_rows
+            }
+            revenue_residual = int(target["revenue"]) - raw_revenue - sum(compensation.values())
+            expense_residual = int(target["expense"]) - sum(expenses.values())
+            logistics_residual = int(target["logistics"]) - sum(logistics.values())
             raw_cost = sum(int(row["cost_kopecks"]) for row in day_rows.values())
-            cost_adjustments = allocate_kopecks(int(target["cost"]) - raw_cost, weights)
+            cost_residual = int(target["cost"]) - raw_cost
+            cost_adjustments = {key: 0 for key in day_rows}
             if self.marketplace in {"ozon", "yandex_market"}:
                 advertising, ad_unallocated, ad_method = allocate_ozon_advertising(
                     ad_totals.get((account, business_date), 0),
@@ -608,10 +791,13 @@ class ProductEconomicsBuilder:
                         advertising[key] += corrections.get(key, 0)
                     ad_unallocated = direct_unallocated + corrections.get("unallocated", 0)
                     ad_method = "direct_reconciled"
-            needs_unallocated = not day_rows and any((
+            needs_unallocated = any((
+                revenue_residual, expense_residual, logistics_residual,
+                cost_residual, ad_unallocated,
+            )) or (not day_rows and any((
                 target["revenue"], target["expense"], target["logistics"],
                 ad_totals.get((account, business_date), 0),
-            ))
+            )))
             if needs_unallocated or ad_unallocated:
                 day_rows.setdefault("unallocated", {
                     "account_id": account, "business_date": business_date,
@@ -620,11 +806,10 @@ class ProductEconomicsBuilder:
                     "quantity": 0, "sales_revenue_kopecks": 0, "cost_kopecks": 0,
                     "missing_cost_rows": 0,
                 })
-                if not weights:
-                    compensation["unallocated"] = int(target["revenue"])
-                    expenses["unallocated"] = int(target["expense"])
-                    logistics["unallocated"] = int(target["logistics"])
-                    cost_adjustments["unallocated"] = int(target["cost"])
+                compensation["unallocated"] = compensation.get("unallocated", 0) + revenue_residual
+                expenses["unallocated"] = expenses.get("unallocated", 0) + expense_residual
+                logistics["unallocated"] = logistics.get("unallocated", 0) + logistics_residual
+                cost_adjustments["unallocated"] = cost_adjustments.get("unallocated", 0) + cost_residual
                 advertising["unallocated"] = advertising.get("unallocated", 0) + ad_unallocated
             for key, row in day_rows.items():
                 revenue = int(row["sales_revenue_kopecks"]) + compensation.get(key, 0)
@@ -644,7 +829,13 @@ class ProductEconomicsBuilder:
                     advertising_kopecks=advertising.get(key, 0),
                     cost_kopecks=cost, profit_kopecks=revenue - expense - cost,
                     missing_cost_rows=row["missing_cost_rows"],
-                    expense_allocation_method="allocated_by_revenue",
+                    expense_allocation_method=(
+                        "unallocated_financial_residual" if key == "unallocated"
+                        else "direct_financial_row" if any(
+                            int(direct_for_day.get(key, {}).get(field, 0))
+                            for field in ("revenue", "expense", "logistics")
+                        ) else "none"
+                    ),
                     advertising_allocation_method=ad_method,
                     calculation_version=CALCULATION_VERSION,
                     normalized_at=normalized_at,

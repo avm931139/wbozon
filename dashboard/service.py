@@ -1171,6 +1171,52 @@ class DashboardService:
             }
         return result
 
+    def _pnl_unallocated(
+        self,
+        db: Any,
+        begin: date,
+        finish: date,
+    ) -> dict[str, dict[str, Any]]:
+        rows = self._many(db, """SELECT marketplace,
+            coalesce(sum(revenue_kopecks),0) revenue_kopecks,
+            coalesce(sum(marketplace_expense_kopecks),0) expense_kopecks,
+            coalesce(sum(logistics_kopecks),0) logistics_kopecks,
+            coalesce(sum(advertising_kopecks),0) advertising_kopecks,
+            coalesce(sum(cost_kopecks),0) cost_kopecks,
+            coalesce(sum(profit_kopecks),0) profit_kopecks
+            FROM fact_product_economics_daily
+            WHERE is_unallocated IS TRUE
+              AND business_date BETWEEN :b AND :e
+            GROUP BY marketplace""", b=begin, e=finish)
+        by_marketplace = {str(row["marketplace"]): row for row in rows if not row.get("error")}
+        result: dict[str, dict[str, Any]] = {}
+        for marketplace in ("wb", "ozon", "yandex_market"):
+            row = by_marketplace.get(marketplace, {})
+            revenue = int(row.get("revenue_kopecks") or 0) / 100
+            expenses = int(row.get("expense_kopecks") or 0) / 100
+            logistics = int(row.get("logistics_kopecks") or 0) / 100
+            advertising = int(row.get("advertising_kopecks") or 0) / 100
+            cost = int(row.get("cost_kopecks") or 0) / 100
+            profit = int(row.get("profit_kopecks") or 0) / 100
+            components = [
+                {"key": "revenue", "label": "Корректировки выручки", "amount": revenue},
+                {"key": "other_expenses", "label": "Комиссии, услуги и прочие удержания", "amount": expenses - logistics},
+                {"key": "logistics", "label": "Логистика", "amount": logistics},
+                {"key": "cost", "label": "Корректировка себестоимости", "amount": cost},
+                {"key": "advertising", "label": "Реклама без надёжной привязки к SKU", "amount": advertising},
+            ]
+            result[marketplace] = {
+                "profit": profit,
+                "revenue": revenue,
+                "expenses": expenses,
+                "logistics": logistics,
+                "advertising": advertising,
+                "cost": cost,
+                "components": [item for item in components if abs(item["amount"]) >= 0.01],
+                "available": bool(row),
+            }
+        return result
+
     @staticmethod
     def _total_pnl(views: dict[str, dict[str, Any]]) -> dict[str, Any]:
         available = [value for value in views.values() if value.get("available")]
@@ -1212,11 +1258,17 @@ class DashboardService:
             previous_breakdowns = self._pnl_expense_breakdowns(
                 db, previous_begin, previous_finish, previous
             )
+            current_unallocated = self._pnl_unallocated(db, begin, finish)
+            previous_unallocated = self._pnl_unallocated(
+                db, previous_begin, previous_finish
+            )
         for key in current:
             current[key].update(current_breakdowns[key])
             current[key]["expense_lines"] = current[key].pop("lines")
+            current[key]["unallocated"] = current_unallocated[key]
             previous[key].update(previous_breakdowns[key])
             previous[key]["expense_lines"] = previous[key].pop("lines")
+            previous[key]["unallocated"] = previous_unallocated[key]
         return {
             "period": {"from": begin.isoformat(), "to": finish.isoformat()},
             "previous_period": {"from": previous_begin.isoformat(), "to": previous_finish.isoformat()},

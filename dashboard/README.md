@@ -112,6 +112,12 @@ sources; the card footer identifies the API/report, PostgreSQL table, coverage
 dates and last database refresh. Operational orders and advertising attribution
 are never used as a P&L fallback.
 
+Each marketplace card also shows a compact unallocated ABC result and its
+components. These are finance-ledger operations without a trustworthy SKU;
+they remain a separate analytical row instead of changing the profitability
+of unrelated products. The P&L Excel export includes the same breakdown on the
+`Нераспределено ABC` sheet.
+
 The stocks page shows the latest unit cost beside every normalized product.
 Saving a changed value appends a dated `product_cost_records` row through
 `POST /api/product-cost`; previous values are retained for audit and are not
@@ -125,12 +131,13 @@ does not trigger marketplace API requests.
 
 The ABC workbook contains the visible matrix, a kopeck-precision SKU
 calculation sheet, marketplace reconciliation controls, and methodology. The
-daily analytical layer allocates shared financial expenses and logistics by
-positive net revenue without losing kopecks. WB advertising is linked from its
-product report. Ozon historical Performance reports provide direct SKU spend;
-campaign formats without SKU are allocated by daily revenue. Yandex Sales Boost
-is linked directly by `shopSku`, while formats without a product dimension are
-allocated by revenue. The normalized result is also persisted independently in
+daily analytical layer keeps commissions, services and logistics on the SKU
+identified by the source financial row. Any ledger residual without a reliable
+product identity is stored as `unallocated`; it is never spread by revenue.
+WB advertising is linked from its product report. Ozon historical Performance
+reports provide direct SKU spend, and Yandex Sales Boost is linked directly by
+`shopSku`; advertising without a product dimension remains unallocated. The
+normalized result is also persisted independently in
 `fact_advertising_daily` with its allocation method.
 
 The operational page is ordered for daily sales management:

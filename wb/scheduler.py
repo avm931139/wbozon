@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from sqlalchemy import func
 
+from analytics_facts.service import FinancialSalesFactService
 from app.config import (
     WB_SYNC_FBS_ORDER_OVERLAP_DAYS,
     WB_SYNC_FINANCE_OVERLAP_DAYS,
@@ -39,6 +40,7 @@ class SyncSettings:
     promotion_lookback_days: int = WB_SYNC_PROMOTION_LOOKBACK_DAYS
     fbs_order_overlap_days: int = WB_SYNC_FBS_ORDER_OVERLAP_DAYS
     finance_overlap_days: int = WB_SYNC_FINANCE_OVERLAP_DAYS
+    analytics_interval_seconds: int = 3600
 
     def __post_init__(self) -> None:
         if self.interval_seconds < 1:
@@ -49,6 +51,8 @@ class SyncSettings:
             raise ValueError("fbs_order_overlap_days must not be negative")
         if self.finance_overlap_days < 0:
             raise ValueError("finance_overlap_days must not be negative")
+        if self.analytics_interval_seconds < 1:
+            raise ValueError("analytics_interval_seconds must be positive")
 
 
 class WBPeriodicSync:
@@ -60,11 +64,18 @@ class WBPeriodicSync:
         settings: SyncSettings | None = None,
         stop_event: Event | None = None,
         session_factory: Callable[..., Any] = SessionLocal,
+        analytics_refresh: Callable[[], Any] | None = None,
     ) -> None:
         self.service = service or WBSyncService()
         self.settings = settings or SyncSettings()
         self.stop_event = stop_event or Event()
         self.session_factory = session_factory
+        self.analytics_refresh = analytics_refresh or (
+            (lambda: FinancialSalesFactService(
+                "wb", session_factory=self.session_factory
+            ).run()) if service is None else None
+        )
+        self._last_analytics_refresh = 0.0
         self._running = False
 
     def stop(self) -> None:
@@ -106,6 +117,37 @@ class WBPeriodicSync:
                             "duration_seconds": round(time.monotonic() - task_started, 3),
                         }
                         logger.exception("WB sync task failed")
+            finance_ready = results.get("financial_sales_details", {}).get("status") == "ok"
+            refresh_due = (
+                time.monotonic() - self._last_analytics_refresh
+                >= self.settings.analytics_interval_seconds
+            )
+            if self.analytics_refresh is not None and finance_ready and refresh_due:
+                task_started = time.monotonic()
+                with sync_context(cycle_id, "analytics_facts"):
+                    try:
+                        value = self.analytics_refresh()
+                        results["analytics_facts"] = {
+                            "status": "ok",
+                            "result": summarize_result(value),
+                            "duration_seconds": round(
+                                time.monotonic() - task_started, 3
+                            ),
+                        }
+                        self._last_analytics_refresh = time.monotonic()
+                    except Exception as exc:
+                        event = report_exception(
+                            exc, phase="analytics", details={"task": "analytics_facts"}
+                        )
+                        results["analytics_facts"] = {
+                            "status": "error",
+                            "error": f"{type(exc).__name__}: {exc}",
+                            "error_file": event["file"],
+                            "error_line": event["line"],
+                            "duration_seconds": round(
+                                time.monotonic() - task_started, 3
+                            ),
+                        }
         finally:
             self._running = False
             errors = sum(item["status"] == "error" for item in results.values())

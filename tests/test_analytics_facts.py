@@ -265,7 +265,7 @@ def test_yandex_financial_components_become_one_sale_and_one_return_fact():
         assert economics.revenue_kopecks == 7501
         assert economics.cost_kopecks == 4001
         assert economics.profit_kopecks == 3500
-        assert economics.expense_allocation_method == "allocated_by_revenue"
+        assert economics.expense_allocation_method == "none"
         assert economics.advertising_allocation_method == "direct_plus_revenue"
         advertising = session.scalar(select(FactAdvertisingDaily))
         assert advertising.master_product_id == economics.master_product_id
@@ -332,6 +332,79 @@ def test_wb_financial_sale_and_return_use_signed_values():
         assert sale.sales_amount_kopecks == 19999
         assert returned.return_amount_kopecks == -19999
         assert sum(row.net_revenue_kopecks for row in facts) == 0
+
+
+def test_wb_product_expenses_stay_on_source_sku_and_residual_is_unallocated():
+    session_factory = _session_factory()
+    now = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
+    sale_operation = next(iter(fact_service.WB_SALE_OPERATIONS))
+    with session_factory() as session:
+        products = []
+        for index, (article, nm_id) in enumerate((("WB-A", 101), ("WB-B", 202)), start=1):
+            master = MasterProduct(
+                article=article, name=article, active=True,
+                created_at=now, updated_at=now,
+            )
+            session.add(master)
+            session.flush()
+            session.add(MarketplaceProductLink(
+                master_product_id=master.id, marketplace="wb", account_id="",
+                external_product_id=str(nm_id), offer_id=article,
+                source_article=article, normalized_article=article,
+                match_method="exact", is_test_variant=False,
+                active=True, matched_at=now,
+            ))
+            products.append((article, nm_id))
+        report = WBFinancialSalesReport(
+            report_wb_id=501, date_from=now, date_to=now, create_date=now,
+            currency="RUB", report_type=1, raw_data={}, details_synced_at=now,
+        )
+        session.add(report)
+        session.flush()
+        session.add_all([
+            WBFinancialSalesRow(
+                report_id=report.id, rrd_id=11, nm_id=101, vendor_code="WB-A",
+                seller_operation_name=sale_operation, sale_date=now, rr_date=now,
+                quantity=1, retail_price_with_discount=Decimal("100"),
+                for_pay=Decimal("60"), delivery_service=Decimal("10"),
+                penalty=Decimal("5"), currency="RUB", raw_data={},
+            ),
+            WBFinancialSalesRow(
+                report_id=report.id, rrd_id=12, nm_id=202, vendor_code="WB-B",
+                seller_operation_name=sale_operation, sale_date=now, rr_date=now,
+                quantity=1, retail_price_with_discount=Decimal("200"),
+                for_pay=Decimal("150"), delivery_service=Decimal("20"),
+                currency="RUB", raw_data={},
+            ),
+            WBFinancialSalesRow(
+                report_id=report.id, rrd_id=13, seller_operation_name="adjustment",
+                sale_date=now, rr_date=now, quantity=0,
+                for_pay=Decimal("-30"), deduction=Decimal("10"),
+                currency="RUB", raw_data={},
+            ),
+        ])
+        session.commit()
+
+    FinancialSalesFactService("wb", session_factory=session_factory).run()
+    with session_factory() as session:
+        rows = session.scalars(
+            select(FactProductEconomicsDaily).order_by(
+                FactProductEconomicsDaily.product_key
+            )
+        ).all()
+        by_key = {row.seller_sku or "unallocated": row for row in rows}
+        assert by_key["WB-A"].marketplace_expense_kopecks == 5500
+        assert by_key["WB-A"].logistics_kopecks == 1000
+        assert by_key["WB-A"].expense_allocation_method == "direct_financial_row"
+        assert by_key["WB-B"].marketplace_expense_kopecks == 7000
+        residual = next(row for row in rows if row.is_unallocated)
+        assert residual.revenue_kopecks == -3000
+        assert residual.marketplace_expense_kopecks == 1000
+        assert residual.expense_allocation_method == "unallocated_financial_residual"
+        control = session.scalar(select(FactProductEconomicsControl))
+        assert control.revenue_kopecks == 27000
+        assert control.marketplace_expense_kopecks == 13500
+        assert control.profit_kopecks == 13500
 
 
 def test_ozon_posting_finance_uses_product_link_and_all_catalog_barcodes(monkeypatch):

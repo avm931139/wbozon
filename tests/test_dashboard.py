@@ -267,7 +267,7 @@ def test_dashboard_excel_exports_are_valid_workbooks():
                          "total": available,
                          "marketplaces": {key: available for key in markets}})
     finance_book = load_workbook(BytesIO(finance), read_only=True)
-    assert finance_book.sheetnames == ["P&L", "Расходы"]
+    assert finance_book.sheetnames == ["P&L", "Расходы", "Нераспределено ABC"]
     assert finance_book["P&L"]["B2"].value == "2026-09-01"
 
     aware_time = datetime(2026, 9, 1, 1, tzinfo=timezone.utc)

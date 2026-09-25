@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from app.db import SessionLocal
 from app.models import YandexMarketSyncRun
+from analytics_facts.service import FinancialSalesFactService
 from yandex_market.services.sync_service import YandexMarketSyncService
 
 
@@ -25,9 +26,15 @@ class YandexMarketTaskRunner:
         service: YandexMarketSyncService | None = None,
         *,
         session_factory: Callable[..., Any] = SessionLocal,
+        analytics_refresh: Callable[[], Any] | None = None,
     ) -> None:
         self.service = service or YandexMarketSyncService()
         self.session_factory = session_factory
+        self.analytics_refresh = analytics_refresh or (
+            (lambda: FinancialSalesFactService(
+                "yandex_market", session_factory=self.session_factory
+            ).run()) if service is None else None
+        )
 
     def run(self, task: str) -> dict[str, Any]:
         if task not in self.service.task_names():
@@ -40,8 +47,20 @@ class YandexMarketTaskRunner:
                 self._create_run(run_id, task)
                 result = self.service.run_task(task)
                 normalized = json.loads(json.dumps(result, ensure_ascii=False, default=str))
-                self._finish_run(run_id, "completed", result=normalized)
-                return {"task": task, "status": "completed", "result": normalized}
+                status = "completed"
+                error = None
+                if task in {"finances", "advertising"} and self.analytics_refresh is not None:
+                    try:
+                        analytics = self.analytics_refresh()
+                        if isinstance(normalized, dict):
+                            normalized["analytics"] = json.loads(json.dumps(
+                                analytics, ensure_ascii=False, default=str
+                            ))
+                    except Exception as exc:
+                        status = "partial"
+                        error = f"analytics: {type(exc).__name__}: {exc}"
+                self._finish_run(run_id, status, result=normalized, error=error)
+                return {"task": task, "status": status, "result": normalized}
             except Exception as exc:
                 self._finish_run(run_id, "failed", error=f"{type(exc).__name__}: {exc}")
                 raise
