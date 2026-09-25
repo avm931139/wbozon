@@ -34,6 +34,7 @@ from app.models import (
 )
 from analytics_facts import service as fact_service
 from analytics_facts.economics import (
+    CALCULATION_VERSION,
     _is_logistics,
     allocate_kopecks,
     allocate_ozon_advertising,
@@ -44,6 +45,10 @@ def _session_factory():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+
+def test_product_economics_calculation_version_fits_database_columns():
+    assert len(CALCULATION_VERSION) <= 30
 
 
 def test_money_to_kopecks_uses_decimal_half_up():

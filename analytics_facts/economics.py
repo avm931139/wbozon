@@ -30,7 +30,9 @@ from app.models import (
 )
 
 
-CALCULATION_VERSION = "product-economics-v3-direct-finance"
+# Persisted in several ``varchar(30)`` analytical columns. Keep this identifier
+# compact so a version label cannot roll back a complete marketplace rebuild.
+CALCULATION_VERSION = "economics-v3-direct-finance"
 WB_SALES = {"Продажа", "Бронирование товара через самовывоз"}
 WB_RETURNS = {"Возврат"}
 
